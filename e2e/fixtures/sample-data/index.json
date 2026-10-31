@@ -1,0 +1,535 @@
+{
+	"sample": true,
+	"nodes": [
+		{
+			"id": "Berg:syb1",
+			"label": "syb1",
+			"basin": "Berg",
+			"quat": "Z30A",
+			"river": "Sample North",
+			"comment": "",
+			"lon": 19,
+			"lat": -33.5,
+			"approx": false,
+			"pes": "C",
+			"rec": "C",
+			"tec": "",
+			"tecInc": "",
+			"tecCum": "",
+			"iua": "",
+			"ewrClass": "",
+			"ru": "",
+			"ewrBasis": "",
+			"ewrNote": "",
+			"gazPct": null,
+			"sites": [],
+			"ecSource": {
+				"tec": "Invented for the tests",
+				"pes": "Invented for the tests",
+				"rec": "Invented for the tests"
+			},
+			"files": [
+				{
+					"name": "SYB1C.tab",
+					"kind": "tab",
+					"ec": "C",
+					"basis": "",
+					"variant": false
+				}
+			],
+			"ecsAvailable": [
+				"C"
+			],
+			"hasTab": true,
+			"hasRevised": false
+		},
+		{
+			"id": "Berg:syx1",
+			"label": "syx1",
+			"basin": "Berg",
+			"quat": "",
+			"river": "Sample North",
+			"comment": "",
+			"lon": null,
+			"lat": null,
+			"approx": false,
+			"pes": "",
+			"rec": "",
+			"tec": "",
+			"tecInc": "",
+			"tecCum": "",
+			"iua": "",
+			"ewrClass": "",
+			"ru": "",
+			"ewrBasis": "",
+			"ewrNote": "Invented note: this node has no run.",
+			"gazPct": null,
+			"sites": [],
+			"ecSource": {
+				"tec": "Invented for the tests",
+				"pes": "Invented for the tests",
+				"rec": "Invented for the tests"
+			},
+			"files": [],
+			"ecsAvailable": [],
+			"hasTab": false,
+			"hasRevised": false
+		},
+		{
+			"id": "Breede:syq1",
+			"label": "syq1",
+			"basin": "Breede",
+			"quat": "Z20C",
+			"river": "Sample East",
+			"comment": "",
+			"lon": 19.8,
+			"lat": -34,
+			"approx": true,
+			"pes": "B",
+			"rec": "B",
+			"tec": "B",
+			"tecInc": "",
+			"tecCum": "",
+			"iua": "",
+			"ewrClass": "",
+			"ru": "",
+			"ewrBasis": "",
+			"ewrNote": "",
+			"gazPct": null,
+			"sites": [],
+			"ecSource": {
+				"tec": "Invented for the tests",
+				"pes": "Invented for the tests",
+				"rec": "Invented for the tests"
+			},
+			"files": [
+				{
+					"name": "SYQ1B.tab",
+					"kind": "tab",
+					"ec": "B",
+					"basis": "",
+					"variant": false
+				}
+			],
+			"ecsAvailable": [
+				"B"
+			],
+			"hasTab": true,
+			"hasRevised": false
+		},
+		{
+			"id": "Gouritz:syf1",
+			"label": "syf1",
+			"basin": "Gouritz",
+			"quat": "Z80A",
+			"river": "Sample South",
+			"comment": "",
+			"lon": 22,
+			"lat": -33.8,
+			"approx": false,
+			"pes": "C",
+			"rec": "C",
+			"tec": "C",
+			"tecInc": "",
+			"tecCum": "",
+			"iua": "",
+			"ewrClass": "",
+			"ru": "",
+			"ewrBasis": "",
+			"ewrNote": "",
+			"gazPct": null,
+			"sites": [],
+			"ecSource": {
+				"tec": "Invented for the tests",
+				"pes": "Invented for the tests",
+				"rec": "Invented for the tests"
+			},
+			"files": [
+				{
+					"name": "SYF1.mrv",
+					"kind": "mrv",
+					"ec": "",
+					"basis": "",
+					"variant": false
+				},
+				{
+					"name": "SYF1.nat",
+					"kind": "hydro",
+					"ec": "",
+					"basis": "",
+					"variant": false
+				}
+			],
+			"ecsAvailable": [],
+			"hasTab": false,
+			"hasRevised": false
+		},
+		{
+			"id": "Gouritz:syn1",
+			"label": "syn1",
+			"basin": "Gouritz",
+			"quat": "Z80B",
+			"river": "Sample South",
+			"comment": "",
+			"lon": 22.5,
+			"lat": -33.4,
+			"approx": false,
+			"pes": "D",
+			"rec": "C",
+			"tec": "C/D",
+			"tecInc": "",
+			"tecCum": "",
+			"iua": "",
+			"ewrClass": "",
+			"ru": "",
+			"ewrBasis": "",
+			"ewrNote": "",
+			"gazPct": null,
+			"sites": [],
+			"ecSource": {
+				"tec": "Invented for the tests",
+				"pes": "Invented for the tests",
+				"rec": "Invented for the tests"
+			},
+			"files": [
+				{
+					"name": "SYN1B.tab",
+					"kind": "tab",
+					"ec": "B",
+					"basis": "",
+					"variant": false
+				},
+				{
+					"name": "SYN1C.tab",
+					"kind": "tab",
+					"ec": "C",
+					"basis": "",
+					"variant": false
+				},
+				{
+					"name": "SYN1D.tab",
+					"kind": "tab",
+					"ec": "D",
+					"basis": "",
+					"variant": false
+				}
+			],
+			"ecsAvailable": [
+				"B",
+				"C",
+				"D"
+			],
+			"hasTab": true,
+			"hasRevised": false
+		},
+		{
+			"id": "Gouritz:syr1",
+			"label": "syr1",
+			"basin": "Gouritz",
+			"quat": "Z80C",
+			"river": "Sample South",
+			"comment": "",
+			"lon": 21,
+			"lat": -33.2,
+			"approx": false,
+			"pes": "B",
+			"rec": "B",
+			"tec": "B",
+			"tecInc": "",
+			"tecCum": "",
+			"iua": "",
+			"ewrClass": "",
+			"ru": "",
+			"ewrBasis": "",
+			"ewrNote": "",
+			"gazPct": null,
+			"sites": [],
+			"ecSource": {
+				"tec": "Invented for the tests",
+				"pes": "Invented for the tests",
+				"rec": "Invented for the tests"
+			},
+			"files": [
+				{
+					"name": "syr1.rul(NEWFORM)",
+					"kind": "revised",
+					"ec": "",
+					"basis": "",
+					"variant": false
+				}
+			],
+			"ecsAvailable": [
+				"A",
+				"A/B",
+				"B",
+				"B/C",
+				"C",
+				"C/D",
+				"D"
+			],
+			"hasTab": false,
+			"hasRevised": true
+		},
+		{
+			"id": "Gouritz:syr2",
+			"label": "syr2",
+			"basin": "Gouritz",
+			"quat": "Z80E",
+			"river": "Sample South",
+			"comment": "",
+			"lon": 23,
+			"lat": -33.6,
+			"approx": false,
+			"pes": "C",
+			"rec": "B",
+			"tec": "C",
+			"tecInc": "",
+			"tecCum": "",
+			"iua": "",
+			"ewrClass": "",
+			"ru": "",
+			"ewrBasis": "",
+			"ewrNote": "",
+			"gazPct": null,
+			"sites": [],
+			"ecSource": {
+				"tec": "Invented for the tests",
+				"pes": "Invented for the tests",
+				"rec": "Invented for the tests"
+			},
+			"files": [
+				{
+					"name": "syr2.rul(NEWFORM)",
+					"kind": "revised",
+					"ec": "",
+					"basis": "",
+					"variant": false
+				}
+			],
+			"ecsAvailable": [
+				"A",
+				"A/B",
+				"B",
+				"B/C",
+				"C",
+				"C/D",
+				"D"
+			],
+			"hasTab": false,
+			"hasRevised": true
+		},
+		{
+			"id": "Gouritz:syt1",
+			"label": "syt1",
+			"basin": "Gouritz",
+			"quat": "Z80D",
+			"river": "Sample West",
+			"comment": "",
+			"lon": 21.5,
+			"lat": -33.5,
+			"approx": false,
+			"pes": "D",
+			"rec": "D",
+			"tec": "D",
+			"tecInc": "",
+			"tecCum": "",
+			"iua": "",
+			"ewrClass": "",
+			"ru": "",
+			"ewrBasis": "",
+			"ewrNote": "",
+			"gazPct": 17.6,
+			"sites": [
+				{
+					"label": "SYN-SITE1",
+					"how": "Invented for the tests"
+				}
+			],
+			"ecSource": {
+				"tec": "Invented for the tests",
+				"pes": "Invented for the tests",
+				"rec": "Invented for the tests"
+			},
+			"files": [
+				{
+					"name": "SYT1.nat",
+					"kind": "hydro",
+					"ec": "",
+					"basis": "",
+					"variant": false
+				},
+				{
+					"name": "SYT1C.tab",
+					"kind": "tab",
+					"ec": "C",
+					"basis": "",
+					"variant": false
+				},
+				{
+					"name": "SYT1CD.tab",
+					"kind": "tab",
+					"ec": "C/D",
+					"basis": "",
+					"variant": false
+				},
+				{
+					"name": "SYT1D.mrv",
+					"kind": "mrv",
+					"ec": "D",
+					"basis": "",
+					"variant": false
+				},
+				{
+					"name": "SYT1D.rul",
+					"kind": "rul",
+					"ec": "D",
+					"basis": "",
+					"variant": false
+				},
+				{
+					"name": "SYT1D.tab",
+					"kind": "tab",
+					"ec": "D",
+					"basis": "",
+					"variant": false
+				}
+			],
+			"ecsAvailable": [
+				"C",
+				"C/D",
+				"D"
+			],
+			"hasTab": true,
+			"hasRevised": false
+		},
+		{
+			"id": "Olifants-Doring:z10b",
+			"label": "Z10B (S44)",
+			"basin": "Olifants-Doring",
+			"quat": "Z10B",
+			"river": "Sample Central",
+			"comment": "",
+			"lon": 19.2,
+			"lat": -32.2,
+			"approx": false,
+			"pes": "C",
+			"rec": "C",
+			"tec": "C",
+			"tecInc": "B",
+			"tecCum": "C",
+			"iua": "",
+			"ewrClass": "",
+			"ru": "",
+			"ewrBasis": "",
+			"ewrNote": "",
+			"gazPct": 43.25,
+			"sites": [],
+			"ecSource": {
+				"tec": "Invented for the tests",
+				"pes": "Invented for the tests",
+				"rec": "Invented for the tests"
+			},
+			"files": [
+				{
+					"name": "Inc/Z10B_B_Inc_Con.txt",
+					"kind": "con",
+					"ec": "B",
+					"basis": "inc",
+					"variant": false
+				},
+				{
+					"name": "Inc/Z10B_inc_B_.mrv",
+					"kind": "mrv",
+					"ec": "B",
+					"basis": "inc",
+					"variant": false
+				},
+				{
+					"name": "Inc/Z10B_inc_B_.tab",
+					"kind": "tab",
+					"ec": "B",
+					"basis": "inc",
+					"variant": false
+				},
+				{
+					"name": "Cum/Z10B_C_cum.mrv",
+					"kind": "mrv",
+					"ec": "C",
+					"basis": "cum",
+					"variant": false
+				},
+				{
+					"name": "Cum/Z10B_C_cum.tab",
+					"kind": "tab",
+					"ec": "C",
+					"basis": "cum",
+					"variant": false
+				},
+				{
+					"name": "Cum/Z10B_C_Cum_Con.txt",
+					"kind": "con",
+					"ec": "C",
+					"basis": "cum",
+					"variant": false
+				}
+			],
+			"ecsAvailable": [
+				"B",
+				"C"
+			],
+			"hasTab": true,
+			"hasRevised": false
+		}
+	],
+	"sites": [
+		{
+			"label": "SYN-LOOSE",
+			"basin": "Berg",
+			"lon": 18.9,
+			"lat": -33.3,
+			"river": "",
+			"node": null,
+			"source": "Invented for the tests"
+		},
+		{
+			"label": "SYN-SITE1",
+			"basin": "Gouritz",
+			"lon": 21.5,
+			"lat": -33.5,
+			"river": "Sample West",
+			"node": "Gouritz:syt1",
+			"source": "Invented for the tests"
+		}
+	],
+	"issues": [
+		{
+			"kind": "code-fix",
+			"item": "syn9",
+			"detail": "Invented correction: read as syn1"
+		},
+		{
+			"kind": "code-fix",
+			"item": "syn8",
+			"detail": "Invented correction: read as syr2"
+		},
+		{
+			"kind": "ec-copy",
+			"item": "SYN1A.tab",
+			"detail": "Invented: identical to the B run, so no A run exists"
+		},
+		{
+			"kind": "file-skipped",
+			"item": "Berg/syb1-note.txt",
+			"detail": "Invented: a note, not a Desktop output"
+		}
+	],
+	"meta": {
+		"files": 21,
+		"sources": {
+			"quaternaries": "Quaternary catchments and basins: DWS service, loaded live (Weepener et al. 2012, updated 2018)",
+			"rivers": "DWS 1:500 000 rivers (2012 release), Cape datum shifted to WGS84",
+			"nodes": "Synthetic sample nodes, invented for the tests",
+			"ec": "Synthetic sample categories, invented for the tests"
+		}
+	}
+}

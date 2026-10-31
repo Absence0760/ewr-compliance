@@ -1,0 +1,49 @@
+name: gitleaks
+
+# Secret scan. Catches accidentally committed keys and tokens: anything an
+# automated pattern can recognise.
+#
+# Called, not triggered:
+#   - ci.yml's `gitleaks` job runs it on every push to main and every PR, so a
+#     detection fails the `CI gate`.
+#   - gitleaks-sweep.yml runs it weekly over the whole history, and opens an
+#     issue when it fails (that needs `issues: write`, which ci.yml's caller
+#     has no reason to hold, so the cron lives there).
+#
+# No config file: the default rules apply. A reviewed false positive goes in a
+# repo-root .gitleaks.toml, scoped to the matched value rather than the file,
+# so a real key in the same file still fails.
+
+on:
+  workflow_call:
+
+# A called workflow cannot escalate past what the calling job grants, so these
+# are declared in both places and the caller's are the ceiling. The action
+# posts no SARIF (it writes a job summary and exits 1 on a detection), so it
+# needs no `security-events: write`.
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  scan:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: the weekly sweep reads all of it; push/PR runs scan
+          # the commits in the event.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITLEAKS_LICENSE is intentionally unset: the repo is owned by a
+          # user account, which the free tier covers.
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
+          # PR comments need `pull-requests: write`, which no caller grants;
+          # the job summary and the exit status carry the finding.
+          GITLEAKS_ENABLE_COMMENTS: 'false'

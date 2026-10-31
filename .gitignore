@@ -1,0 +1,19 @@
+node_modules/
+.svelte-kit/
+build/
+test-results/
+playwright-report/
+coverage/
+*.log
+.env*
+!.env.example
+static/tiles/
+__pycache__/
+
+# Generated, and real data stays in the private repo. `pnpm data:sample` or `pnpm data:private` fills it.
+static/data/*
+!static/data/map.json
+
+# Copied in by `pnpm data:private`.
+src/private/
+e2e/tests/private/

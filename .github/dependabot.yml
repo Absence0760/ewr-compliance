@@ -1,0 +1,42 @@
+version: 2
+
+# Both ecosystems wait 7 days after a release before proposing it (`cooldown`;
+# security updates are exempt and still arrive at once): most malicious package
+# releases are found and pulled within days.
+#
+# Not covered: SheetJS `xlsx` is pinned to a CDN tarball URL in package.json,
+# which Dependabot can't read (/audit/deps checks it by hand), and tools/ has no
+# requirements file to watch.
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # npm is also Dependabot's ecosystem name for pnpm: it finds pnpm-lock.yaml
+  # beside package.json and updates that.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      # @types/node tracks Node's major, and the app builds on Node 24
+      # (`engines`, ci.yml). Lift this with the runtime.
+      - dependency-name: "@types/node"
+        versions: [">=25"]
+      # svelte-check and @sveltejs/kit set the TypeScript major this repo can
+      # use, so majors are bumped by hand when they allow it.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]

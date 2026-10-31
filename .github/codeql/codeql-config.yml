@@ -1,0 +1,5 @@
+# CodeQL configuration for this project (security.yml's init step reads it).
+#
+# static/data is generated JSON: nothing in it is code.
+paths-ignore:
+  - static/data/**

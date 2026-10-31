@@ -1,0 +1,188 @@
+name: CI
+
+# Always runs on pull_request, with no paths-ignore. Docs-only and draft PRs
+# skip the heavy jobs through the `changes` job instead, so `CI gate` still
+# reports. `ready_for_review` runs the full suite when a draft is marked ready.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# PRs: only the tip is worth building, so a new push cancels the old run.
+# main: every commit keeps its own run (per-SHA group, never cancelled).
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # Classifies the diff; heavy jobs gate on `code == 'true'`. Only a pull
+  # request may skip them: a push to main or a manual run always runs the
+  # full suite.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        name: Anything besides docs changed?
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then echo "code=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ "$DRAFT" = "true" ]; then
+            echo "::notice::Draft PR: heavy jobs skipped. Mark it ready for review to run the full suite."
+            echo "code=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE" 2>/dev/null || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if git diff --name-only "$BASE" HEAD | grep -qvE '^(docs/|\.claude/)|\.md$'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  test:
+    name: Typecheck, unit tests and build
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        # No `version:`: it reads package.json's packageManager, and naming both fails the step.
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Sample data
+        run: pnpm data:sample
+
+      - name: Typecheck
+        run: pnpm check
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  e2e:
+    name: E2E tests
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Sample data
+        run: pnpm data:sample
+
+      - name: E2E tests
+        run: pnpm test:e2e
+
+      - name: Upload failure traces
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-results
+          path: |
+            e2e/test-results/
+            e2e/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Runs on docs-only PRs too: a change under .claude/ counts as docs above,
+  # and this is the only check on the hook. The test also pins the hook's PR
+  # title rule to pr-title-lint.yml.
+  claude-tooling:
+    name: Claude tooling
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Hook tests
+        run: python3 .claude/hooks/git-scope-guard.test.py
+
+  # Secret scan, called so a detection fails the gate. Ungated on purpose: a
+  # pasted credential arrives in a markdown file as easily as in code, and a
+  # docs-only diff skips every code-gated job.
+  gitleaks:
+    name: Secret scan (gitleaks)
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/gitleaks.yml
+
+  # The single required status check for branch protection. It fans in on every
+  # job above via `needs` + always(), failing if any upstream job did not
+  # succeed (a skipped job counts as passing). Add each new job's id to `needs`.
+  ci-gate:
+    name: CI gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    needs: [changes, test, e2e, claude-tooling, gitleaks]
+    steps:
+      - name: Require every upstream job to have passed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS_JSON"
+          bad=$(echo "$NEEDS_JSON" | jq -r \
+            'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key)=\(.value.result)"')
+          if [ -n "$bad" ]; then
+            echo "::error::CI gate failing — upstream jobs did not pass:"
+            echo "$bad"
+            exit 1
+          fi
+          echo "All upstream jobs passed."

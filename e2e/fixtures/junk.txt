@@ -1,0 +1,2 @@
+This is not a flow file.
+It has no months, no dates and no numbers in columns.

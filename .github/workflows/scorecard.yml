@@ -1,0 +1,49 @@
+name: OpenSSF Scorecard
+
+# Weekly scorecard analysis: branch protection, action pinning, code-review
+# coverage, vulnerability management. Findings are advisory, not a CI gate, and
+# the result lands in the Security tab as SARIF and on scorecard.dev.
+#
+# GATED on the `PUBLIC_REPO` repo variable. Scorecard publishes only for public
+# repos and its SARIF upload needs code scanning, so with the variable unset
+# the job is skipped and nothing goes red while the repo is private.
+
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: '0 6 * * 1'
+  push:
+    branches: [main]
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    if: vars.PUBLIC_REPO == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Upload SARIF to the Security tab, and the OIDC token that publishes to
+      # scorecard.dev without a long-lived secret.
+      security-events: write
+      id-token: write
+      contents: read
+      actions: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload SARIF to Security tab
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        with:
+          sarif_file: results.sarif
+          category: scorecard

@@ -1,0 +1,45 @@
+# Architecture
+
+A client-only SvelteKit 3 app (`adapter-static`, `ssr = false`) with Svelte 5 runes and TypeScript.
+There is no server: flow files stay in the browser, and everything else is static JSON in `static/data`.
+
+## Data tiers
+
+`static/data` is not in this repo, apart from `map.json`. It holds one of two datasets, with the same schema:
+
+| | Synthetic sample | Real data |
+|---|---|---|
+| Source | `e2e/fixtures/sample-data`, written by `e2e/fixtures/make-sample-data.mjs` | The private repo `ewr-compliance-private`, built by its `tools/build_data.py` |
+| Into `static/data` | `pnpm data:sample` | `pnpm data:private` |
+| Tests | `pnpm test`, `pnpm test:e2e`, and CI | `pnpm test:private`, on a machine with the private repo |
+
+The specs in `e2e/tests` pin the sample's numbers and the private ones pin real numbers, so each dataset runs its own specs. `index.json` in the sample carries `sample: true`, and the Playwright config uses it to refuse the wrong pairing. `pnpm data:private` copies the private tests to `src/private` and `e2e/tests/private`, both ignored by git. Copied tests import with `#lib/...` and `#e2e/...`, because a relative import would not survive the copy. `console-clean.spec.ts` pins no data and runs in both tiers.
+
+The sample is small on purpose, and has one node of each kind the UI treats differently: `src/lib/ewr/sampleData.test.ts` keeps it that way, and `dataScripts.test.ts` covers the scripts that fill `static/data`, including that the committed sample is what its generator writes.
+
+## Layout
+
+| Path | Purpose |
+|---|---|
+| `src/lib/ewr/parsers.ts` | File parsers, conversion and comparison arithmetic. Pure. |
+| `src/lib/ewr/resolve.ts` | Which EC, method and file a node uses, and its notices. Pure. |
+| `src/lib/ewr/types.ts` | Shared shapes. |
+| `src/lib/ewr/format.ts` | Number format, series colours, file-kind labels. |
+| `src/lib/ewr/importFlow.ts` | Reads flow files and API responses, by `FlowWant`; `xlsx` loads only when needed. The DWS API is not published, so the API format is an assumption: README § DWS API. |
+| `src/lib/state/app.svelte.ts` | The single app state (`app`). Components read it and call its methods. |
+| `src/lib/components/map` | MapLibre map, popup, legend, basin zoom, search. `mapData.ts` holds its pure logic, `mapStyle.ts` the layers and base map style, `catchments.ts` the live DWS boundaries and flow gauges, paged, with a time limit. |
+| `src/lib/components/compliance` | Node panel, Historical and Real Time Comparison. `compare.ts` holds table rows and chart series. |
+| `src/lib/components/charts` | uPlot wrapper. |
+| `src/lib/components/nodes` | Nodes table and data notes. |
+| `src/lib/components/viewer` | File viewer dialog. |
+| `tools/` | `build_geo.py` for `map.json`, `sync-private.sh` and `sample-data.mjs`, which fill `static/data`, and `check-live-services.ts`, the contract check on the live layers. See README. |
+| `e2e/fixtures` | Synthetic flow files and the sample dataset, each with the script that writes it. |
+| `vite.config.ts` | Adapter, `BASE_PATH` and the content security policy. See `docs/hosting.md`. |
+
+## Conventions
+
+- SvelteKit 3: import with `#lib/...` and include the extension (`#lib/ewr/parsers.ts`, `#lib/state/app.svelte.ts`). `$lib` is removed. Paths take no leading slash and routes end in one, because each is built as `<route>/index.html`: `resolve('nodes/')`, `asset('data/index.json')`. The home route is `resolve('/')`.
+- Svelte 5 runes only. Tabs for indentation, single quotes.
+- Numbers on screen come from `src/lib/ewr`, never recomputed in a component.
+- Conversion uses `DAYS` in `parsers.ts` (Feb = 28), the same as the reference compliance workbook.
+- Chart line names are exact: `EWR Monthly Requirement`, `Drought EWR`, `Urgent action required`. Every node draws all three: `ewrLines` derives `urgent` for both methods.

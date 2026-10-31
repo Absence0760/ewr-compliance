@@ -1,0 +1,43 @@
+name: pr-title-lint
+
+# Enforces conventional-commit-style PR titles. Catches lazy PR titles
+# ("update", "fix stuff", "wip") at PR-open time so the merged history
+# stays scannable.
+#
+# Allowed types are below in `types:`. The scope is free-form (single
+# word) and optional. .claude/hooks/git-scope-guard.py applies the same rule
+# to `gh pr create --title`, and its test fails if the two drift.
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: read-all
+
+jobs:
+  lint:
+    name: lint title
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            chore
+            docs
+            refactor
+            test
+            perf
+            ci
+            build
+            revert
+          requireScope: false
+          subjectPattern: ^[a-z].+[^\.]$
+          subjectPatternError: |
+            The subject "{subject}" must start lowercase and not end with a period.
+          headerPatternCorrespondence: type, scope, subject

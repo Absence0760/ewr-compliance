@@ -1,0 +1,44 @@
+# Config for actions/labeler. Each top-level key is a label name; the
+# `changed-files` list is the set of globs that, if matched by any changed
+# file, applies the label.
+
+"area:app":
+  - changed-files:
+      - any-glob-to-any-file:
+          - src/**
+
+"area:data":
+  - changed-files:
+      - any-glob-to-any-file:
+          - static/data/map.json
+          - tools/**
+          - e2e/fixtures/**
+
+"area:ci":
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/**
+
+"area:docs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - docs/**
+
+"area:tests":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/**/*.test.ts"
+          - e2e/**
+
+"area:claude":
+  - changed-files:
+      - any-glob-to-any-file:
+          - .claude/**
+          - CLAUDE.md
+
+"area:deps":
+  - changed-files:
+      - any-glob-to-any-file:
+          - package.json
+          - pnpm-lock.yaml

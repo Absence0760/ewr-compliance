@@ -1,0 +1,4 @@
+# Path-based reviewer routing: GitHub requests review from the listed owner
+# when a PR touches matching files. Last matching line wins.
+
+*                                       @Absence0760

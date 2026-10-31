@@ -1,0 +1,86 @@
+name: Security
+
+# Static analysis (SAST) of our own code via CodeQL. Complements audit.yml,
+# which only catches known CVEs in dependencies. CodeQL finds vulnerabilities
+# in code we write (XSS sinks, prototype pollution, unsafe parsing) and, as a
+# separate language, injection sinks in the GitHub Actions YAML itself. Results
+# land in the repo's Security tab under "Code scanning alerts".
+#
+# GATED on the `PUBLIC_REPO` repo variable. Code scanning is free on public
+# repos, but a private one needs GitHub Code Security, and without it the
+# upload fails. With the variable unset the job is skipped, so nothing goes red
+# while the repo is private.
+#
+# Triggers:
+#   - pull_request to main: gate new code on a clean scan
+#   - push to main: scan post-merge state, refresh the Security-tab baseline
+#   - weekly cron (Sunday 06:00 UTC): catch new CodeQL queries flagging
+#     existing code without waiting for a PR
+#   - workflow_dispatch: ad-hoc manual runs
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 0'
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  # PRs only. On main a cancelled CodeQL job uploads a failed analysis, which
+  # the Security tab shows as a configuration error until the next full run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: read-all
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    if: vars.PUBLIC_REPO == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # SARIF upload publishes findings into the Security tab.
+      security-events: write
+      # The analyze step's workflow-run lookup needs this, or the action errors
+      # even when the analysis itself succeeded.
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # javascript-typescript covers src/ (the extractor reads .ts, .js and
+        # .svelte). actions covers .github/workflows/. python covers tools/
+        # and .claude/hooks.
+        language: [javascript-typescript, actions, python]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        if: matrix.language == 'python'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        with:
+          languages: ${{ matrix.language }}
+          # No compile step: every language here is interpreted.
+          build-mode: none
+          # security-and-quality is the broadest suite, and on a small codebase
+          # the extra noise is manageable. The `actions` language falls back to
+          # its own ceiling silently.
+          queries: security-and-quality
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Perform analysis
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        with:
+          category: '/language:${{ matrix.language }}'
