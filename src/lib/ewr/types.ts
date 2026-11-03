@@ -74,6 +74,67 @@ export interface IndexData {
 	sample?: boolean;
 }
 
+/** One month of a gauge record, as published. A flagged month keeps its figure, to be shown. */
+export interface GaugeMonth {
+	v: number | null;
+	quality: string;
+	/** The # flag: incomplete or missing, so left out of every mean. */
+	incomplete: boolean;
+}
+
+export interface GaugeYear {
+	label: string;
+	start: number;
+	months: GaugeMonth[];
+	total: GaugeMonth;
+}
+
+/** Monthly volumes of one gauge in Mm³, hydrological years, Oct first. */
+export interface GaugeRecord {
+	station: string;
+	years: GaugeYear[];
+}
+
+/** A gauge's flow in m³/s: its daily record, then its 12-minute readings. */
+export interface GaugeFlows {
+	daily: FlowPoint[];
+	readings: FlowPoint[];
+}
+
+/** A gauge's flow ready to plot. A day in the daily record is not taken from the readings as well. */
+export interface GaugeSeries {
+	days: DayMean[];
+	readings: FlowPoint[];
+	/** Days the daily record lists with no flow. */
+	missing: number;
+}
+
+/** The gauge that measures a node's flow. factor scales the record to the node, and is worked out outside the app. */
+export interface GaugeLink {
+	node: string;
+	station: string;
+	factor: number;
+	note: string;
+}
+
+/**
+ * static/data/gauges.json: the links, each gauge's monthly file text by station, the stations with a
+ * static/data/flows-<station>.json, which is loaded when one is opened, and the months to leave out.
+ */
+export interface GaugeData {
+	links: GaugeLink[];
+	records: Record<string, string>;
+	flows: string[];
+	/** Months by station, YYYY-MM, that the gauge's daily record shows as incomplete. */
+	incomplete: Record<string, string[]>;
+}
+
+/** static/data/flows-<station>.json: the text of a DWS daily file and of the 12-minute readings. */
+export interface GaugeFlowFile {
+	daily: string;
+	readings: string;
+}
+
 export interface ParsedTab {
 	ec: string;
 	natural: (number | null)[];
@@ -124,6 +185,8 @@ export interface Layout {
 	valueCol?: number;
 	cols?: { m: number; c: number }[];
 	firstMonth?: number;
+	/** The quality code column of dated rows, or -1. */
+	qualCol?: number;
 }
 
 export interface MonthRecord {
@@ -135,6 +198,8 @@ export interface MonthRecord {
 export interface FlowPoint {
 	t: number;
 	v: number | null;
+	/** Quality code, where the source gives one. */
+	code?: string;
 }
 
 export interface Flow {
@@ -163,6 +228,8 @@ export interface DayMean {
 	t: number;
 	mean: number;
 	n: number;
+	/** The day's quality code, a coded one first, where the source gives one. */
+	code?: string;
 }
 
 export interface Sheet {
@@ -192,6 +259,7 @@ export interface NodeChoices {
 	basis?: FlowBasis;
 	pct?: number;
 	dpct?: number;
+	factor?: number;
 }
 
 export interface Notice {
@@ -200,7 +268,7 @@ export interface Notice {
 }
 
 /** Where observed flow comes from. */
-export type FlowSource = 'sheet' | 'text' | 'api';
+export type FlowSource = 'sheet' | 'text' | 'api' | 'gauge';
 export type FlowWant = 'monthly' | 'instant';
 export type PeriodPreset = 'full' | '10' | '20' | 'custom';
 

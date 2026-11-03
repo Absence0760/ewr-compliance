@@ -411,3 +411,47 @@ describe('looksLikeBook', () => {
 		expect(looksLikeBook('a.txt')).toBe(false);
 	});
 });
+
+describe('a DWS monthly volume file', () => {
+	const cell = (v: string, flag = ' ') => ` ${v.padStart(6)} ${flag}`;
+	const rest = Array.from({ length: 10 }, () => cell('1.00'));
+	const text = ['MONTHLY VOLUMES X0H001', `2000/2001${[cell('2.00'), cell('4.00', '#'), ...rest].join('')}    #`, `2001/2002${[cell('', '#'), cell('6.00'), ...rest].join('')}    #`].join('\r\n');
+	const file = { name: 'X0H001.mon', text: async () => text, arrayBuffer: async () => new ArrayBuffer(0) };
+
+	it('loads with hydrological years and every # month missing', async () => {
+		const slot = await importFile(file, 'monthly');
+		expect(slot.unitIn).toBe('mm3');
+		expect(slot.message?.text).toBe('Read 22 months, Oct 2000 to Sep 2002, with 2 missing. Layout: year rows by month columns.');
+		const at = (y: number, m: number) => slot.flow!.records.find((r) => r.y === y && r.m === m)?.v;
+		expect(at(2000, 10)).toBe(2);
+		expect(at(2000, 11)).toBeNull();
+		expect(at(2001, 10)).toBeNull();
+		expect(at(2001, 11)).toBe(6);
+	});
+});
+
+describe('a DWS daily flow file', () => {
+	const row = (date: string, v: string, code: string) => `${date}${v.padStart(10)}${code.padStart(6)}`;
+	const text = ['DATE     D AVG F/R  QUAL', row('20030101', '1.000', '1'), row('20030102', '', '170'), row('20030103', '3.000', '91')].join('\r\n');
+	const file = { name: 'X0H001.day', text: async () => text, arrayBuffer: async () => new ArrayBuffer(0) };
+
+	it('loads for the Real Time Comparison in m³/s, with missing days and codes kept', async () => {
+		const slot = await importFile(file, 'instant');
+		expect(slot.message?.text).toBe('Read 2 readings, 2003-01-01 to 2003-01-03.');
+		expect(slot.flow?.points?.map((p) => [p.v, p.code])).toEqual([[1, '1'], [null, '170'], [3, '91']]);
+	});
+});
+
+describe('a monthly table worked up from a daily file', () => {
+	const row = (y: number, first: string) => `${y}${[first, ...Array.from({ length: 11 }, () => '1.000')].map((c) => c.padStart(9)).join('')}`;
+	const text = ['File Name : x0h001.mon   (from daily file : x0h001.day, dated: )', 'Units     : M.m3', 'Year      Oct      Nov      Dec', row(2000, '3.890+'), row(2001, '2.000')].join('\r\n');
+	const file = { name: 'X0H001.MON', text: async () => text, arrayBuffer: async () => new ArrayBuffer(0) };
+
+	it('counts a patched + month, and reads the table by its own format', async () => {
+		const slot = await importFile(file, 'monthly');
+		const at = (y: number, m: number) => slot.flow!.records.find((r) => r.y === y && r.m === m)?.v;
+		expect(at(2000, 10)).toBe(3.89);
+		expect(at(2001, 10)).toBe(2);
+		expect(slot.flow?.missing).toBe(0);
+	});
+});

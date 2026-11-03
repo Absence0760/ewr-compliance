@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DAYS, dailyMeans, meanMonthly, toCumec } from '#lib/ewr/parsers.ts';
-import { ecOptionLabel, flowKeys, histRows, histSeries, keyStr, lineSeries, loadedMonths, periodLabel, presetRange, rtLatest, rtRange, rtRows, rtSeries, strKey } from './compare.ts';
+import { CODED_LABEL, countOf, dayRowsOf, defaultMonth, ecOptionLabel, flowKeys, gaugeName, histRows, histSeries, keyStr, lineSeries, loadedMonths, periodLabel, presetRange, rtLatest, rtRange, rtRows, rtSeries, strKey, yearGroups } from './compare.ts';
 import type { EwrLines, EwrNode, Flow, FlowPoint, MonthRecord } from '#lib/ewr/types.ts';
 
 const twelve = (v: number) => new Array(12).fill(v);
@@ -27,6 +27,100 @@ describe('period', () => {
 		const short = flow(f.records.slice(0, 36));
 		expect(presetRange(short, '20', 0, 0).from).toBe(first);
 		expect(presetRange(f, 'custom', 5, 6)).toEqual({ from: 5, to: 6 });
+	});
+});
+
+describe('daily flow on the chart', () => {
+	const jan = (d: number) => Date.UTC(2003, 0, d);
+	const days = [{ t: jan(1), mean: 1, n: 1, code: '1' }, { t: jan(2), mean: 2, n: 1, code: '91' }, { t: jan(4), mean: 4, n: 1, code: '2' }];
+	const range: [number, number] = [jan(1), jan(5)];
+
+	it('leaves a missing day as a gap, and draws coded days in a series of their own', () => {
+		const [flow, coded] = rtSeries(null, days, null, range);
+		expect(flow.x).toEqual([1, 2, 3, 4].map((d) => jan(d) + DAY / 2));
+		expect(flow.y).toEqual([1, null, null, 4]);
+		expect(coded.label).toBe(CODED_LABEL);
+		expect(coded.color).not.toBe(flow.color);
+		expect(coded.y).toEqual([null, 2, null, null]);
+		expect(coded.markers).toBe(true);
+	});
+
+	it('has no coded series when no day has a code, and takes the label given', () => {
+		const s = rtSeries(null, [days[0]], null, range, 'Daily mean flow, X0H001 × 0.5');
+		expect(s.map((x) => x.label)).toEqual(['Daily mean flow, X0H001 × 0.5']);
+	});
+
+	it('lists every calendar day of a month, with the empty ones empty', () => {
+		const rows = dayRowsOf(days, '2003-02');
+		expect(rows).toHaveLength(28);
+		expect(rows[0]).toEqual({ date: '2003-02-01', flow: null, readings: 0, code: '', coded: false });
+		expect(dayRowsOf(days, '2003-01')[1]).toEqual({ date: '2003-01-02', flow: 2, readings: 1, code: '91', coded: true });
+	});
+
+	it('counts in the singular for one', () => {
+		expect(countOf(1, 'day')).toBe('1 day');
+		expect(countOf(2, 'day')).toBe('2 days');
+	});
+
+	it('groups months by year, newest first', () => {
+		expect(yearGroups(['2024-12', '2025-01', '2025-02'])).toEqual([
+			{ year: '2025', months: ['2025-02', '2025-01'] },
+			{ year: '2024', months: ['2024-12'] }
+		]);
+	});
+
+	it('opens on the latest month with most of its days, or the latest there is', () => {
+		const run = (y: number, m: number, n: number) => Array.from({ length: n }, (_, i) => ({ t: Date.UTC(y, m, i + 1), mean: 1, n: 1 }));
+		expect(defaultMonth([...run(2025, 10, 16), ...run(2025, 11, 2)])).toBe('2025-11');
+		expect(defaultMonth(run(2025, 11, 2))).toBe('2025-12');
+		expect(defaultMonth([])).toBe('');
+	});
+});
+
+describe('real time in the EWR\'s units', () => {
+	const at = (d: number) => Date.UTC(2025, 10, d);
+	const ewr: EwrLines = { ewr: twelve(1.7), drought: twelve(0.5), urgent: twelve(1.53) };
+	// Nov has 30 days: 1 m³/s for a month is 2.592 Mm³.
+	const days = [{ t: at(1), mean: 1, n: 1 }, { t: at(2), mean: 0.1, n: 1 }];
+
+	it('shows the monthly lines as the EWR states them, and each day as the month at that flow', () => {
+		const [flow, line] = rtSeries(ewr, days, [{ t: at(1), v: 1 }], [at(1), at(3)], 'Daily mean flow', 'mm3');
+		expect(flow.y[0]).toBeCloseTo(2.592, 9);
+		expect(line.y[0]).toBe(1.7);
+		const raw = rtSeries(null, days, [{ t: at(1), v: 2 }, { t: at(1) + 1, v: null }], [at(1), at(3)], 'x', 'mm3').at(-1)!;
+		expect(raw.y).toEqual([5.184, null]);
+	});
+
+	it('keeps status and counts the same in either unit, and only the figures change', () => {
+		const [c] = rtRows(ewr, days);
+		const [m] = rtRows(ewr, days, 'mm3');
+		expect([m.status, m.daysEwr, m.daysDrought, m.days]).toEqual([c.status, c.daysEwr, c.daysDrought, c.days]);
+		expect(m.ewr).toBe(1.7);
+		expect(m.urgent).toBe(1.53);
+		expect(m.drought).toBe(0.5);
+		expect(m.mean).toBeCloseTo(0.55 * 2.592, 9);
+	});
+
+	it('uses the EWR\'s 28-day February, so a leap year keeps a flow on the same side of a line', () => {
+		const feb = Date.UTC(2024, 1, 10);
+		const [flow] = rtSeries(null, [{ t: feb, mean: 1, n: 1 }], null, [feb, feb + DAY], 'x', 'mm3');
+		expect(flow.y[0]).toBeCloseTo(2.4192, 9);
+	});
+
+	it('gives the latest reading and day rows in the unit, and % of EWR either way', () => {
+		const pts: FlowPoint[] = [{ t: at(1), v: 1 }];
+		const l = rtLatest(ewr, pts, 'mm3')!;
+		expect(l.v).toBeCloseTo(2.592, 9);
+		expect(l.ewr).toBe(1.7);
+		expect(l.pct).toBeCloseTo(rtLatest(ewr, pts)!.pct!, 9);
+		expect(dayRowsOf(days, '2025-11', 'mm3')[0].flow).toBeCloseTo(2.592, 9);
+	});
+});
+
+describe('gauge name', () => {
+	it('shows a factor only when one is applied', () => {
+		expect(gaugeName('X0H001', 1)).toBe('X0H001');
+		expect(gaugeName('X0H001', 0.85)).toBe('X0H001 × 0.85');
 	});
 });
 

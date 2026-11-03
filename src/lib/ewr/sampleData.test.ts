@@ -3,9 +3,9 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
-import { parseTab } from './parsers.ts';
+import { parseGaugeFlows, parseMon, parseTab } from './parsers.ts';
 import { buildNotices, resolveView } from './resolve.ts';
-import type { EwrNode, IndexData } from './types.ts';
+import type { EwrNode, GaugeData, IndexData } from './types.ts';
 
 const DIR = new URL('../../../e2e/fixtures/sample-data/', import.meta.url);
 const load = (f: string) => JSON.parse(readFileSync(new URL(f, DIR), 'utf8'));
@@ -23,7 +23,7 @@ test('it says it is the sample, so nothing mistakes it for real data', () => {
 
 test('it has the same files as a real build, and no more', () => {
 	const basins = ['berg', 'breede', 'gouritz', 'olifantsdoring'];
-	const want = ['index.json', ...basins.flatMap((b) => [`ewr-${b}.json`, `series-${b}.json`])];
+	const want = ['index.json', 'gauges.json', 'flows-X0H997.json', 'flows-X0H998.json', 'flows-X0H999.json', ...basins.flatMap((b) => [`ewr-${b}.json`, `series-${b}.json`])];
 	assert.deepEqual(readdirSync(DIR).sort(), want.sort());
 });
 
@@ -72,6 +72,17 @@ test('it covers an approximate node and a node with no coordinates', () => {
 
 test('it covers a site with no node', () => {
 	assert.ok(index.sites.some((s) => s.node === null));
+});
+
+test('every gauge link joins a node to a record it can read, with a factor to apply', () => {
+	const { links, records, flows } = load('gauges.json') as GaugeData;
+	assert.ok(links.some((l) => l.factor !== 1));
+	for (const l of links) {
+		get(l.node);
+		assert.ok(records[l.station] || flows.includes(l.station), l.station);
+	}
+	for (const [station, text] of Object.entries(records)) assert.equal(parseMon(text).station, station);
+	for (const station of flows) assert.ok(parseGaugeFlows(load(`flows-${station}.json`)).daily.length, station);
 });
 
 test('no node code, quaternary or file name looks like a real one', () => {

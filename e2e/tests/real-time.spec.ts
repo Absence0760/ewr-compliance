@@ -71,7 +71,7 @@ test.describe('Real Time Comparison', () => {
 	test('the month filter narrows the chart and the latest reading', async ({ page }) => {
 		const rt = await loadCsv(page);
 		const month = select(rt, /^Month/);
-		await expect(month.getByRole('option')).toHaveText(['All loaded', 'Nov 2025', 'Dec 2025']);
+		await expect(month.getByRole('option')).toHaveText(['All loaded', 'Dec 2025', 'Nov 2025']);
 		await month.selectOption({ label: 'Nov 2025' });
 		await expect(stat(rt, /^Latest reading/)).toHaveText(/Latest reading, 2025-11-30 23:48\s*0\.710 m³\/s/);
 		await expect(stat(rt, 'EWR for Nov')).toContainText('0.656 m³/s');

@@ -1,7 +1,7 @@
 // Reads observed flow from a file or an API body into a FlowSlot. Pure: no DOM and no app state.
 // xlsx is loaded on demand so it stays out of the first page bundle.
 import { CALENDAR } from './format.ts';
-import { buildFlow, detectLayout, parseDelimited } from './parsers.ts';
+import { buildFlow, dayRows, detectLayout, isDay, isMon, monRows, parseDay, parseDelimited, parseMon } from './parsers.ts';
 import type { FlowSlot } from '#lib/state/app.svelte.ts';
 import type { Cell, FlowUnit, FlowWant, Sheet } from './types.ts';
 
@@ -20,7 +20,12 @@ export async function readBook(file: Pick<File, 'arrayBuffer'>): Promise<Sheet[]
 }
 
 export async function readText(file: Pick<File, 'name' | 'text'>): Promise<Sheet[]> {
-	const { rows, widths } = parseDelimited(await file.text());
+	const text = await file.text();
+	if (isMon(text) || isDay(text)) {
+		const rows = isMon(text) ? monRows(parseMon(text)) : dayRows(parseDay(text));
+		return [{ name: file.name, rows, widths: null, layout: detectLayout(rows) }];
+	}
+	const { rows, widths } = parseDelimited(text);
 	return [{ name: file.name, rows, widths, layout: detectLayout(rows, widths) }];
 }
 

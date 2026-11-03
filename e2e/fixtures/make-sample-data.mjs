@@ -6,8 +6,8 @@
 // Run it twice and the bytes are the same: nothing reads the clock or a random source. The specs do
 // not import this: they hold their expected numbers as hand arithmetic on these tables.
 //
-// It has the same shape as the real static/data: index.json, and for each basin ewr-<slug>.json and
-// series-<slug>.json, each mapping a file name to that file's text.
+// It has the same shape as the real static/data: index.json, gauges.json, flows-<station>.json,
+// and for each basin ewr-<slug>.json and series-<slug>.json, each mapping a file name to that file's text.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -90,6 +90,82 @@ function seriesFile(title) {
 	});
 	return [title, head, ...rows, ''].join('\n');
 }
+
+/**
+ * A DWS monthly volume file in its fixed widths. Hydrological year k = 0 to 2 from 2001/2002, month
+ * i = 0 for Oct: (k + 1) × (i + 1) × 0.1 Mm³. Nov of k = 1 is flagged # with a figure, and Jan of
+ * k = 2 is flagged with none. A year with a flagged month has its total flagged too.
+ */
+function monFile(station) {
+	const cell = (value, flagged) => ` ${(value === null ? '' : value.toFixed(3)).padStart(6)} ${flagged ? '#' : ' '}`;
+	const rows = [0, 1, 2].map((k) => {
+		const values = MONTHS.map((_, i) => round3((k + 1) * (i + 1) * 0.1));
+		const row = values.map((v, i) => (k === 1 && i === 1 ? cell(v, true) : k === 2 && i === 3 ? cell(null, true) : cell(v, false)));
+		const total = k === 0 ? `    ${round3(values.reduce((a, b) => a + b, 0)).toFixed(2)}` : '    #';
+		return `${2001 + k}/${2002 + k}${row.join('')}${total}`;
+	});
+	return [
+		'Synthetic monthly volumes, invented for the tests',
+		'Format of the data is as follows :(I4,X,I4,13(X,A6,A1,A1) where:',
+		'',
+		`MONTHLY VOLUMES ${station}`,
+		'I4,X,I4,13(X,A6,A1,A1)',
+		'AAAAAAAAAAAA',
+		...rows,
+		'ZZZZZZZZZZ',
+		''
+	].join('\r\n');
+}
+
+/**
+ * A DWS daily flow file. Jan 2003 is day d × 0.1 m³/s, code 1, except that day 4 is missing (code
+ * 170, no figure), day 7 has code 91 and day 9 has code 2. Days 2 and 3 are repeated out of order,
+ * as real files do. Three days of Feb 2003 follow at 1.000.
+ */
+function dayFile(station) {
+	const row = (date, v, code) => `${date}${(v === null ? '' : v.toFixed(3)).padStart(10)}${String(code).padStart(6)}`;
+	const jan = Array.from({ length: 31 }, (_, i) => {
+		const d = i + 1;
+		return row(`200301${String(d).padStart(2, '0')}`, d === 4 ? null : d * 0.1, { 4: 170, 7: 91, 9: 2 }[d] ?? 1);
+	});
+	return [
+		'Synthetic daily flow, invented for the tests',
+		'POS.  1-8   = Date of daily flow  CCYYMMDD',
+		'',
+		station,
+		'Variable 100.00 Surface Water Level',
+		'',
+		'DATE     D AVG F/R  QUAL',
+		...jan,
+		jan[1],
+		jan[2],
+		...[1, 2, 3].map((d) => row(`2003020${d}`, 1, 1)),
+		'ZZZZZZZZZZZZ',
+		''
+	].join('\r\n');
+}
+
+/**
+ * A monthly table worked up from a daily file, not the DWS format. Year k = 1 to 3 from Oct 2001, month
+ * i = 0 for Oct: k × (i + 1) Mm³. Oct of k = 1 has a +, a patched value, and k = 3 has no flow from Mar.
+ * Jan of k = 2, Jan 2003, shows a full figure, but the daily file has a day missing, so gauges.json lists that month.
+ */
+function tableFile(station) {
+	const cell = (k, i) => (k === 3 && i >= 5 ? '-99.999' : (k * (i + 1)).toFixed(3)) + (k === 1 && i === 0 ? '+' : '');
+	const rows = [1, 2, 3].map((k) => `${2000 + k}${MONTHS.map((_, i) => cell(k, i).padStart(9)).join('')}`);
+	return [
+		`File Name : ${station.toLowerCase()}.mon   (from daily file : ${station.toLowerCase()}.day, dated: )`,
+		'Units     : M.m3',
+		'',
+		`Year${MONTHS.map((m) => m.padStart(9)).join('')}`,
+		'-'.repeat(112),
+		...rows,
+		''
+	].join('\r\n');
+}
+
+/** 12-minute readings for two days of Mar 2003. Day 1 reads 1 and 3, so its mean is 2. Day 2 reads 4. */
+const READINGS = 'Date,Time,Flow (m3/s)\n2003-03-01,00:00:00,1\n2003-03-01,00:12:00,3\n2003-03-02,00:00:00,4\n';
 
 const ruleFile = (node, ec) => `Synthetic rule curve for ${node}, Ecological Category = ${ec}. Not read by the app.\n`;
 
@@ -226,6 +302,24 @@ const STORES = {
 	}
 };
 
+// X0H999 is the gauge support/app.ts stubs on the map, with every kind of record. X0H998 has flow
+// only. X0H997 has a monthly table beside a daily file that shows one of its months is incomplete.
+const GAUGES = {
+	links: [
+		{ node: 'Breede:syq1', station: 'X0H999', factor: 0.5, note: 'Invented: the gauge is upstream of the node' },
+		{ node: 'Gouritz:syr2', station: 'X0H998', factor: 1, note: '' },
+		{ node: 'Berg:syb1', station: 'X0H997', factor: 1, note: '' }
+	],
+	records: { X0H999: monFile('X0H999'), X0H997: tableFile('X0H997') },
+	flows: ['X0H997', 'X0H998', 'X0H999'],
+	incomplete: { X0H997: ['2003-01'] }
+};
+const FLOWS = {
+	X0H997: { daily: dayFile('X0H997'), readings: '' },
+	X0H998: { daily: dayFile('X0H998'), readings: '' },
+	X0H999: { daily: dayFile('X0H999'), readings: READINGS }
+};
+
 const json = (value) => `${JSON.stringify(value, null, '\t')}\n`;
 
 mkdirSync(OUT, { recursive: true });
@@ -245,6 +339,8 @@ writeFileSync(`${OUT}index.json`, json({
 		}
 	}
 }));
+writeFileSync(`${OUT}gauges.json`, json(GAUGES));
+for (const [station, file] of Object.entries(FLOWS)) writeFileSync(`${OUT}flows-${station}.json`, json(file));
 for (const slug of Object.values(BASINS)) {
 	for (const group of ['ewr', 'series']) writeFileSync(`${OUT}${group}-${slug}.json`, json(STORES[`${group}-${slug}`]));
 }

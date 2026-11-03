@@ -3,14 +3,15 @@ export const CALENDAR = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'A
 export const fmt = (v: number | null | undefined, d = 3): string =>
 	v === null || v === undefined || Number.isNaN(v) ? '–' : v.toFixed(d);
 
-/** Series colours. Validated for colour-blind separation; flow is drawn with markers, urgent dashed. */
+/** Series colours. Validated for colour-blind separation; flow is drawn with markers, urgent and coded dashed. */
 export const SERIES = {
 	flow: '#2a78d6',
 	ewr: '#eb6834',
 	urgent: '#6250d6',
 	drought: '#1baf7a',
 	full: '#52514e',
-	raw: '#a9c8ee'
+	raw: '#a9c8ee',
+	coded: '#c4186c'
 } as const;
 
 export const KIND_LABEL: Record<string, string> = {

@@ -17,6 +17,18 @@ The specs in `e2e/tests` pin the sample's numbers and the private ones pin real 
 
 The sample is small on purpose, and has one node of each kind the UI treats differently: `src/lib/ewr/sampleData.test.ts` keeps it that way, and `dataScripts.test.ts` covers the scripts that fill `static/data`, including that the committed sample is what its generator writes.
 
+## Gauge records
+
+`static/data/gauges.json` holds `links`, the gauge that measures each node with the factor on its record, `records`, each gauge's monthly file as text, in the DWS format or as a table worked up from a daily file, `flows`, the stations with a `flows-<station>.json`, and `incomplete`, the months of each station that its daily record shows are not whole. That file holds the gauge's DWS `.day` file and its 12-minute readings, as text. Like the Desktop outputs, the text is parsed in the browser (`parseMon`, `parseGaugeFlows`). `gauges.json` loads with `index.json`, and the app does not start without it. A flows file loads when its gauge is first opened.
+
+- A month flagged `#` is incomplete or missing and is left out of every mean, whatever figure it carries. The record panel still shows that figure, marked. The same goes for a `#` in a loaded file, through `cellNumber`.
+- A table worked up from a daily file has `+` for a patched value and `-99.999` for none. A patched value is real: it counts in the means and is marked in the record, like a coded day. `-99.999` is treated like `#`. Otherwise the table does not say when days are missing, adding up the measured days alone, and can show a month with no measured day as `0.000`. So the build lists every month the gauge's daily record shows is not whole (`incomplete`), and those are left out unless they are patched. A table loaded by hand has no such check.
+- In daily flow, code 170 or a blank is missing: a gap in the line, never a zero or a join. Codes 1 and 2 are clean. Any other code marks a real value, which counts in the means and is drawn as its own series (`isCoded`). A quality column in a loaded table or API response works the same way.
+- A day's flow is the mean of its readings, however few there are, as the reference workbook does. A day in the `.day` record is taken from it and not from the readings.
+- A node's factor multiplies its gauge's monthly volumes, daily flow and readings before anything is compared, and comes from outside the app. There is one factor per node, across both comparisons. A typed factor is the user's own, stored per node with the other choices, and clearing it goes back to the link's. The gauge's own panel always shows the record unfactored.
+- A linked node starts on its gauge in each comparison the gauge has data for. A file already loaded stays in use until the user picks the gauge in Data source. Under a gauge the Real Time Comparison shows one month at a time, opening on the latest month with most of its days measured.
+- A gauge opens from the map or from its node. The map's gauges are the live layer, so a gauge with a record can only be clicked while that layer has it. The node route always works.
+
 ## Layout
 
 | Path | Purpose |
@@ -28,7 +40,7 @@ The sample is small on purpose, and has one node of each kind the UI treats diff
 | `src/lib/ewr/importFlow.ts` | Reads flow files and API responses, by `FlowWant`; `xlsx` loads only when needed. The DWS API is not published, so the API format is an assumption: README § DWS API. |
 | `src/lib/state/app.svelte.ts` | The single app state (`app`). Components read it and call its methods. |
 | `src/lib/components/map` | MapLibre map, popup, legend, basin zoom, search. `mapData.ts` holds its pure logic, `mapStyle.ts` the layers and base map style, `catchments.ts` the live DWS boundaries and flow gauges, paged, with a time limit. |
-| `src/lib/components/compliance` | Node panel, Historical and Real Time Comparison. `compare.ts` holds table rows and chart series. |
+| `src/lib/components/compliance` | Node panel, Historical and Real Time Comparison, and `GaugePanel.svelte`, a gauge's published monthly volumes. `compare.ts` holds table rows and chart series. |
 | `src/lib/components/charts` | uPlot wrapper. |
 | `src/lib/components/nodes` | Nodes table and data notes. |
 | `src/lib/components/viewer` | File viewer dialog. |
@@ -42,4 +54,5 @@ The sample is small on purpose, and has one node of each kind the UI treats diff
 - Svelte 5 runes only. Tabs for indentation, single quotes.
 - Numbers on screen come from `src/lib/ewr`, never recomputed in a component.
 - Conversion uses `DAYS` in `parsers.ts` (Feb = 28), the same as the reference compliance workbook.
+- The Units switch covers both comparisons, m³/s by default. The Real Time Comparison compares in m³/s and only its display changes: in Mm³ a day or reading is the month's volume at that flow, by `DAYS`, so a flow and an EWR line keep their order and status in either unit.
 - Chart line names are exact: `EWR Monthly Requirement`, `Drought EWR`, `Urgent action required`. Every node draws all three: `ewrLines` derives `urgent` for both methods.

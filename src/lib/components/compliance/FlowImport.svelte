@@ -12,7 +12,7 @@
 	const view = $derived(real ? app.rtView : app.histView);
 	const sheet = $derived(slot.sheet);
 	const fileLabel = $derived(real ? '12-minute flow file' : 'Monthly flow file');
-	const accept = $derived(view.source === 'sheet' ? '.xlsx,.xlsm,.xlsb,.xls,.ods' : '.txt,.csv,.tsv,.dat,.prn,.mrv,.mon');
+	const accept = $derived(view.source === 'sheet' ? '.xlsx,.xlsm,.xlsb,.xls,.ods' : '.txt,.csv,.tsv,.dat,.prn,.mrv,.mon,.day');
 
 	/** What is happening now: shown above the status of the data in use, which stays until replaced. */
 	let working = $state<{ level: 'info' | 'error'; text: string } | null>(null);
@@ -65,7 +65,8 @@
 	}
 
 	const setSource = (s: FlowSource) => {
-		view.source = s;
+		if (real) app.setRtSource(s);
+		else app.setHistSource(s);
 		working = null;
 	};
 	const setSheet = (name: string) => commit(pickSheet(slot, name, want));
@@ -76,12 +77,15 @@
 <div class="controls">
 	<label>Data source
 		<select bind:value={() => view.source, setSource}>
+			{#if app.link && (real ? app.flowStations.has(app.link.station) : app.gaugeFlow)}
+				<option value="gauge">Linked gauge, {app.link.station}</option>
+			{/if}
 			<option value="sheet">Spreadsheet</option>
 			<option value="text">Text file</option>
 			<option value="api">API (not yet established)</option>
 		</select>
 	</label>
-	{#if view.source !== 'api'}
+	{#if view.source === 'sheet' || view.source === 'text'}
 		<label class="file">{fileLabel}
 			<input type="file" {accept} onchange={onFile} />
 		</label>
@@ -110,7 +114,7 @@
 {#if working}
 	<div class="notice {working.level}" role={working.level === 'error' ? 'alert' : 'status'}>{working.text}</div>
 {/if}
-{#if slot.message && sheet}
+{#if slot.message && sheet && view.source !== 'gauge'}
 	<div class="notice {slot.message.level}" role={slot.message.level === 'error' ? 'alert' : 'status'}><b>{slot.name}.</b> {slot.message.text}</div>
 	<div class="controls">
 		{#if slot.sheets.length > 1}

@@ -59,6 +59,14 @@ python $P/tools/build_data.py "<EWR Compliance folder>" <unzipped dir> $P/static
 
 `data-review.csv` in the private repo lists every join and correction a person should check. Commit the rebuild there, then run `pnpm test:private` here.
 
+Gauges have their own step, which needs nothing but the links and the gauge files:
+
+```
+python $P/tools/build_gauges.py $P/docs/gauge-links.csv $P/static/data <file> ...
+```
+
+Give it every monthly `.mon` file, in either format, every DWS `.day` file and every workbook of 12-minute readings each time, because what it writes replaces what was there. A workbook needs `openpyxl`. `gauge-links.csv` holds a row for each linked node: its gauge, the factor on the gauge record, and a note shown beside the factor. The factor is worked out outside the app, and 1 means none is applied.
+
 A node with no KML point is placed inside its quaternary. Once `index.json` holds a point for that quaternary, a rebuild keeps it, so re-simplified polygons do not move those nodes. Build into the private repo's `static/data`, or a copy of it, to keep them.
 
 `tools/build_geo.py` rebuilds `static/data/map.json`, which holds rivers only (also needs `pyshp pyproj`, and mapshaper):

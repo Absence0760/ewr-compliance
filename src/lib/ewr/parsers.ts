@@ -1,6 +1,6 @@
 // File parsers and flow arithmetic. No DOM access, so this runs anywhere.
 import type {
-  Cell, DayMean, EwrLines, Flow, FlowPoint, FlowStep, FlowUnit, Layout, LineInput, MonthMean, MonthRecord, MonthState,
+  Cell, DayMean, EwrLines, Flow, FlowPoint, FlowStep, FlowUnit, GaugeFlowFile, GaugeFlows, GaugeMonth, GaugeRecord, GaugeSeries, Layout, LineInput, MonthMean, MonthRecord, MonthState,
   ParsedRevised, ParsedTab, YearIs,
 } from './types.ts';
 
@@ -110,10 +110,13 @@ function monthWord(cell: unknown): number {
   return m && (s.length === 3 || s === 'sept' || full[m - 1] === s) ? m : 0;
 }
 
-/** Value from a cell, ignoring DWS-style quality flags such as 12.34# or 0.56 A. */
+/**
+ * Value from a cell, ignoring a quality code such as 0.56 A. A # marks a month as incomplete or
+ * missing in DWS data, whatever figure it carries, so a flagged cell has no value.
+ */
 export function cellNumber(cell: unknown): number | null {
   if (typeof cell === 'number') return Number.isFinite(cell) ? cell : null;
-  if (typeof cell !== 'string') return null;
+  if (typeof cell !== 'string' || cell.includes('#')) return null;
   const m = cell.trim().match(/^[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?(?=[^\d.]*$)/);
   return m ? parseFloat(m[0]) : null;
 }
@@ -234,7 +237,8 @@ function findSeries(rows: Cell[][]): Layout | null {
         v = heads.findIndex((h, i) => i !== dc && i !== tc && !skipRe.test(h) &&
           probe.some((row) => cellNumber(row[i]) !== null));
       }
-      if (v >= 0) return { kind: 'series', headerRow: r, dateCol: dc, timeCol: tc, valueCol: v, unitHint: detectUnit([heads[v]]), unit: '', title: '' };
+      const qualCol = lower.findIndex((h, i) => i !== v && /^(qual|code\b)/.test(h));
+      if (v >= 0) return { kind: 'series', headerRow: r, dateCol: dc, timeCol: tc, valueCol: v, qualCol, unitHint: detectUnit([heads[v]]), unit: '', title: '' };
     }
   }
   // No header: first column is a date, next numeric column is the value.
@@ -307,7 +311,9 @@ function seriesPoints(rows: Cell[][], L: Layout): FlowPoint[] {
       if (t !== null && L.timeCol! >= 0) t += timeFraction(row[L.timeCol!]) ?? 0;
     }
     if (t === null) continue;
-    pts.push({ t, v: clean(cellNumber(row[L.valueCol!])) });
+    const code = L.qualCol !== undefined && L.qualCol >= 0 ? String(row[L.qualCol] ?? '').trim() : '';
+    const v = code === MISSING_CODE ? null : clean(cellNumber(row[L.valueCol!]));
+    pts.push(code ? { t, v, code } : { t, v });
   }
   return pts.sort((a, b) => a.t - b.t);
 }
@@ -355,6 +361,10 @@ export function buildFlow(rows: Cell[][], widths: number[][] | null, layout: Lay
       records = monthlyFromPoints(pts, unit);
     }
   }
+  return flowOf(records, points, step, unit);
+}
+
+function flowOf(records: MonthRecord[], points: FlowPoint[] | null, step: FlowStep, unit: FlowUnit): Flow {
   records.sort((a, b) => a.y - b.y || a.m - b.m);
   const present = records.filter((r) => r.v !== null);
   return {
@@ -385,6 +395,171 @@ function monthlyFromPoints(pts: FlowPoint[], unit: FlowUnit): MonthRecord[] {
     out.push({ y, m, v: !complete ? null : unit === 'mm3' ? g.sum : (mean * dim * 86400) / 1e6 });
   }
   return out;
+}
+
+// ---- DWS daily flow (.day) ---------------------------------------------------
+
+/** No flow that day, with or without a figure. */
+export const MISSING_CODE = '170';
+// DWS: 1 is good continuous data and 2 is good edited data. Any other code marks a value as patched
+// or unreliable. Those are real values, so they are plotted, in a colour of their own.
+const GOOD_CODES = new Set(['', '1', '2']);
+
+export const isCoded = (code: string | undefined) => !GOOD_CODES.has(code ?? '');
+
+const DAY_HEAD = /^DATE\s+D AVG F\/R\s+QUAL/m;
+const DAY_ROW = /^(\d{4})(\d{2})(\d{2})\b/;
+
+export const isDay = (text: string) => DAY_HEAD.test(text);
+
+/**
+ * A DWS daily flow file, m³/s, in date order. Positions 1-8 hold the date, 10-18 the flow and 20-24
+ * the quality code. The files can repeat a block of days out of order, so a later row replaces an earlier one.
+ */
+export function parseDay(text: string): FlowPoint[] {
+  const days = new Map<number, FlowPoint>();
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(DAY_ROW);
+    if (!m) continue;
+    const t = Date.UTC(+m[1], +m[2] - 1, +m[3]);
+    const code = line.slice(19, 24).trim();
+    const figure = line.slice(9, 18).trim();
+    const v = figure && code !== MISSING_CODE ? Number(figure) : null;
+    if (Number.isNaN(v)) throw new Error(`Daily flow file: "${figure}" is not a flow, ${m[0]}`);
+    days.set(t, { t, v, code });
+  }
+  if (!days.size) throw new Error('Daily flow file has no dated rows');
+  return [...days.values()].sort((a, b) => a.t - b.t);
+}
+
+/** A daily file as a table for the file import. */
+export const dayRows = (points: FlowPoint[]): Cell[][] => [
+  ['Date', 'Flow (m3/s)', 'Qual'],
+  ...points.map((p) => [new Date(p.t).toISOString().slice(0, 10), p.v, p.code ?? '']),
+];
+
+/** Dated readings in m³/s from a table's text, as stored for a gauge. */
+export function parseReadings(text: string): FlowPoint[] {
+  const { rows, widths } = parseDelimited(text);
+  const layout = detectLayout(rows, widths);
+  if (!layout) throw new Error('Gauge readings have no flow table');
+  return buildFlow(rows, widths, layout, { unit: 'cumec' }).points ?? [];
+}
+
+export const parseGaugeFlows = (file: GaugeFlowFile): GaugeFlows => ({
+  daily: file.daily ? parseDay(file.daily) : [],
+  readings: file.readings ? parseReadings(file.readings) : [],
+});
+
+const scaled = (pts: FlowPoint[], factor: number) => pts.map((p) => ({ ...p, v: p.v === null ? null : p.v * factor }));
+
+/** Days and readings scaled by the factor. A day the daily record holds is left out of the readings' days. */
+export function gaugeSeries(flows: GaugeFlows, factor = 1): GaugeSeries {
+  const readings = scaled(flows.readings, factor);
+  const inRecord = new Set(flows.daily.map((p) => p.t));
+  const days = [...dailyMeans(scaled(flows.daily, factor)), ...dailyMeans(readings).filter((d) => !inRecord.has(d.t))];
+  return { days: days.sort((a, b) => a.t - b.t), readings, missing: flows.daily.filter((p) => p.v === null).length };
+}
+
+// ---- DWS monthly volumes (.mon) --------------------------------------------
+
+const MON_TITLE = /^MONTHLY VOLUMES\s+(\S+)/m;
+const MON_YEAR = /^(\d{4})\/(\d{4})/;
+// Format I4,X,I4,13(X,A6,A1,A1): a nine-character year, then nine characters a month. The yearly
+// total comes after the twelfth month, and is not always padded to its full width.
+const MON_CELL = 9;
+
+// A monthly table worked up from a daily file: a Year heading over Oct to Sep, a value and an optional
+// + a month. The year is the year of October, + marks a patched value, which is real and counts, and
+// -99.999 has no value.
+const TABLE_TITLE = /^File Name\s*:\s*(\S+?)\.mon\b/im;
+const TABLE_HEAD = /^Year\s+Oct\s+Nov\s+Dec/m;
+const TABLE_ROW = /^(\d{4})\s/;
+const TABLE_CELL = /(-?\d*\.\d+)(\+?)/g;
+
+const isTable = (text: string) => TABLE_TITLE.test(text) && TABLE_HEAD.test(text);
+
+export const isMon = (text: string) => MON_TITLE.test(text) || isTable(text);
+
+function parseTable(text: string): GaugeRecord {
+  const years = text.split(/\r?\n/).flatMap((line) => {
+    const m = line.match(TABLE_ROW);
+    if (!m) return [];
+    const cells = [...line.slice(4).matchAll(TABLE_CELL)];
+    if (cells.length !== 12) throw new Error(`Monthly volume file: ${cells.length} months in the ${m[1]} row`);
+    const months = cells.map(([, value, plus]) => {
+      const v = Number(value);
+      return { v: v < 0 ? null : v, quality: plus, incomplete: v < 0 };
+    });
+    return [{ label: m[1], start: Number(m[1]), months, total: { v: null, quality: '', incomplete: false } }];
+  });
+  const station = text.match(TABLE_TITLE)![1].toUpperCase();
+  if (!years.length) throw new Error(`Monthly volume file ${station} has no year rows`);
+  return { station, years };
+}
+
+function monCell(raw: string, where: string): GaugeMonth {
+  const value = raw.slice(1, 7).trim();
+  const v = value ? Number(value) : null;
+  if (Number.isNaN(v)) throw new Error(`Monthly volume file: "${value}" is not a volume, ${where}`);
+  return { v, quality: raw.slice(7, 8).trim(), incomplete: v === null || raw.slice(8, 9) === '#' };
+}
+
+/**
+ * Flag the months a daily record shows as incomplete, as YYYY-MM, which a monthly file may not say.
+ * A patched month has had its gaps filled, so it stands.
+ */
+function flagMonths(record: GaugeRecord, months: string[]): GaugeRecord {
+  const flagged = new Set(months);
+  for (const yr of record.years) {
+    yr.months.forEach((c, i) => {
+      const { y, m } = monthOfYear(yr.start, i);
+      if (c.quality !== '+' && flagged.has(`${y}-${String(m).padStart(2, '0')}`)) c.incomplete = true;
+    });
+  }
+  return record;
+}
+
+/** A monthly volume file, Mm3, hydrological years, in either format. Flagged values are kept, for display. */
+export function parseMon(text: string, incomplete: string[] = []): GaugeRecord {
+  return flagMonths(isTable(text) ? parseTable(text) : parseDws(text), incomplete);
+}
+
+const monthOfYear = (start: number, i: number) => ({ y: i < 3 ? start : start + 1, m: ((i + 9) % 12) + 1 });
+
+function parseDws(text: string): GaugeRecord {
+  const title = text.match(MON_TITLE);
+  if (!title) throw new Error('Not a monthly volume file: the MONTHLY VOLUMES title is missing');
+  const years = text.split(/\r?\n/).flatMap((line) => {
+    const m = line.match(MON_YEAR);
+    if (!m) return [];
+    const months = MONTHS.map((name, i) => monCell(line.slice(MON_CELL * (i + 1), MON_CELL * (i + 2)).padEnd(MON_CELL), `${name} ${m[0]}`));
+    const total = line.slice(MON_CELL * 13).trim();
+    const end = Number(total.replace('#', ''));
+    return [{ label: m[0], start: Number(m[1]), months, total: { v: total.startsWith('#') || Number.isNaN(end) ? null : end, quality: '', incomplete: total.includes('#') } }];
+  });
+  if (!years.length) throw new Error(`Monthly volume file ${title[1]} has no year rows`);
+  return { station: title[1], years };
+}
+
+/** A record as a year-by-month table for the file import. Flagged months are left blank. */
+export function monRows(record: GaugeRecord): Cell[][] {
+  return [['Year', ...MONTHS], ...record.years.map((y) => [y.start, ...y.months.map((c) => (c.incomplete ? null : c.v))])];
+}
+
+/** Observed flow from a gauge record. Flagged months have no value; the rest are scaled by the factor. */
+export function gaugeFlow(record: GaugeRecord, factor = 1): Flow {
+  const records = record.years.flatMap((yr) => yr.months.map((c, i) => ({
+    ...monthOfYear(yr.start, i),
+    v: c.incomplete ? null : c.v! * factor,
+  })));
+  return flowOf(records, null, 'monthly', 'mm3');
+}
+
+/** A factor as typed: a positive number, or null when it is anything else. */
+export function parseFactor(text: string): number | null {
+  const f = Number(text);
+  return text.trim() && Number.isFinite(f) && f > 0 ? f : null;
 }
 
 // ---- Comparisons -----------------------------------------------------------
@@ -420,14 +595,15 @@ export const shareAtLeast = (values: number[], target: number) =>
 
 /** Daily mean flow from instantaneous readings. */
 export function dailyMeans(points: FlowPoint[]): DayMean[] {
-  const days = new Map<number, { sum: number; n: number }>();
+  const days = new Map<number, { sum: number; n: number; code: string }>();
   for (const p of points) {
     if (p.v === null) continue;
     const k = Math.floor(p.t / 86400000);
-    if (!days.has(k)) days.set(k, { sum: 0, n: 0 });
+    if (!days.has(k)) days.set(k, { sum: 0, n: 0, code: '' });
     const d = days.get(k)!;
     d.sum += p.v;
     d.n++;
+    if (p.code && !isCoded(d.code)) d.code = p.code;
   }
-  return [...days].sort((a, b) => a[0] - b[0]).map(([k, d]) => ({ t: k * 86400000, mean: d.sum / d.n, n: d.n }));
+  return [...days].sort((a, b) => a[0] - b[0]).map(([k, d]) => ({ t: k * 86400000, mean: d.sum / d.n, n: d.n, ...(d.code ? { code: d.code } : {}) }));
 }

@@ -21,6 +21,7 @@ pnpm 10 and Node 24. One package, no workspace.
 | `pnpm test`, `pnpm test:watch` | Vitest (`src/**/*.test.ts`, beside each module), on the sample |
 | `pnpm test:e2e` | Playwright (`e2e/`), on the sample. Needs `pnpm data:sample` |
 | `pnpm test:private` | `pnpm data:private`, then Vitest and Playwright over the real data |
+| `python3 ../ewr-compliance-private/tools/build_gauges.py` | Rebuild `gauges.json` and `flows-<station>.json`, the node-to-gauge links and gauge records, in the private repo. Arguments: `README.md` § Rebuild the data |
 | `python3 ../ewr-compliance-private/tools/build_data.py`, `python3 tools/build_geo.py` | Rebuild the real data in the private repo, and `static/data/map.json` here. Arguments and dependencies: `README.md` § Rebuild the data |
 | `node tools/check-live-services.ts` | Check the live ArcGIS layers against what the app assumes. Network, by hand |
 
@@ -41,6 +42,10 @@ The numbers are checked against the brief and a reference compliance workbook, b
 - **The `.tab` columns used** are Low Flows Drought (the 5th data column, the `Drought EWR` line) and Total Flows Maint. (the last column, the `EWR Monthly Requirement` line).
 - **Revised `.rul` reading uses the Present Day section,** the one headed "EWR (low and total Flows) are constrained to be below Present Day Flows", not the Natural one. The header text is the same in both, so the section decides.
 - **File name vs header EC conflicts are resolved by `tools/build_data.py` in the private repo** (`resolve_ec_conflicts`), by comparing values with the sibling run. Never by trusting the name or the header alone, and never in the app.
+- **A month flagged `#` in DWS data is left out of every mean,** whatever figure it carries, as the client specified. It is still shown, marked, in a gauge's record. A blank month counts the same.
+- **A monthly table worked up from a daily file can hide gaps.** `+` is a patched value and counts. `-99.999`, and every unpatched month the daily record shows is not whole (`incomplete` in `gauges.json`), are left out. Its `0.000` can mean no data.
+- **In daily flow, code 170 or a blank is missing and is never drawn.** Codes 1 and 2 are clean. Any other code is a real value, patched or unreliable, and is drawn in its own colour (`isCoded`).
+- **The factor on a node's gauge record comes from outside the app.** Never derive it here. It scales the node's observed flow, in both comparisons, never the gauge's own record.
 - `Urgent action required` is 10% below `EWR Monthly Requirement`, for both the `.tab` and Revised methods (the brief lists it under Revised only; this is a project decision). Defaults: TEC for the EC, the 50th percentile for `EWR Monthly Requirement`, the 90th for `Drought EWR` (the 99th is the option).
 
 ## Working alongside other Claude sessions

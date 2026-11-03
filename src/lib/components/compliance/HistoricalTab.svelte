@@ -4,21 +4,23 @@
 	import { meanMonthly } from '#lib/ewr/parsers.ts';
 	import { app } from '#lib/state/app.svelte.ts';
 	import type { PeriodPreset } from '#lib/ewr/types.ts';
-	import { MONTH_RANGE, flowKeys, histRows, histSeries, keyStr, periodLabel, presetRange, strKey, unitName, unitTitle } from './compare.ts';
+	import { MONTH_RANGE, flowKeys, gaugeName, histRows, histSeries, keyStr, periodLabel, presetRange, strKey, unitName, unitTitle } from './compare.ts';
 	import CopyTable from './CopyTable.svelte';
 	import FlowImport from './FlowImport.svelte';
+	import GaugeFactor from './GaugeFactor.svelte';
 
 	const h = app.histView;
-	const f = $derived(app.hist.flow);
+	const f = $derived(app.histFlow);
+	const link = $derived(h.source === 'gauge' ? app.link : null);
 	const keys = $derived(f ? flowKeys(f) : null);
 	const selected = $derived(f ? meanMonthly(f.records, h.from, h.to) : null);
 	const isFull = $derived(!!keys && h.from === keys.first && h.to === keys.last);
 	const full = $derived(f && keys && h.overlay && !isFull ? meanMonthly(f.records, keys.first, keys.last) : null);
-	const series = $derived(histSeries(app.lines, app.unit, selected, full, periodLabel(h.from, h.to)));
+	const label = $derived(`${link ? `${gaugeName(link.station, app.factor)}, ` : ''}${periodLabel(h.from, h.to)}`);
+	const series = $derived(histSeries(app.lines, app.unit, selected, full, label));
 	const rows = $derived(app.lines ? histRows(app.lines, selected, app.unit) : null);
 	const u = $derived(unitName(app.unit));
 	let table = $state<HTMLTableElement>();
-
 	function setPreset(preset: PeriodPreset) {
 		if (!f) return;
 		h.preset = preset;
@@ -34,6 +36,14 @@
 </script>
 
 <FlowImport want="monthly" />
+
+{#if link && f && keys}
+	<div class="notice info" role="status">
+		<b>{link.station}.</b> Using {f.months} months, {periodLabel(keys.first, keys.last)}. {f.missing} months flagged # are left out of the means.
+		<button type="button" onclick={() => app.showGauge(link.station)}>View monthly volumes</button>
+	</div>
+	<GaugeFactor {link} />
+{/if}
 
 {#if f && keys}
 	<div class="controls">

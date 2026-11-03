@@ -12,8 +12,8 @@ import type { Locator } from '@playwright/test';
 //   Nov by year is 0.2 k: EWR met from k = 9, so 7 of 15 (47%) or 7 of 10 (70%).
 //   Drought met from k = 5: 11 of 15 (73%).
 const XLSX_READ = 'monthly.xlsx. Read 179 months, Oct 2005 to Sep 2020, with 1 missing. Layout: year rows by month columns.';
-// monthly-flagged.txt: 3 years × 12 with Nov 2017 blank. Oct is 1, 2, 3 under its flags, Nov 2, –, 6.
-const TEXT_READ = 'monthly-flagged.txt. Read 35 months, Oct 2016 to Sep 2019, with 1 missing. Layout: year rows by month columns.';
+// monthly-flagged.txt: 3 years × 12 with Nov 2017 blank. Oct is 1#, 2, 3 and the # month is left out. Nov 2, –, 6.
+const TEXT_READ = 'monthly-flagged.txt. Read 34 months, Nov 2016 to Sep 2019, with 2 missing. Layout: year rows by month columns.';
 
 const status = (hist: Locator) => hist.getByRole('status').first();
 const table = (hist: Locator) => hist.getByRole('table');
@@ -100,7 +100,7 @@ test.describe('Historical Comparison', () => {
 			await select(hist, /Data source/).selectOption({ label: 'Text file' });
 			await loadFile(hist, 'Monthly flow file', 'monthly-flagged.txt');
 			await expect(status(hist)).toHaveText(TEXT_READ);
-			await expectRow(table(hist), 'Oct', { 'Mean Mm³': '2.000', Years: '3' });
+			await expectRow(table(hist), 'Oct', { 'Mean Mm³': '2.500', Years: '2' });
 			await expectRow(table(hist), 'Nov', { 'Mean Mm³': '4.000', Years: '2' });
 			await expectRow(table(hist), 'Dec', { 'Mean Mm³': '6.000', Years: '3' });
 		});

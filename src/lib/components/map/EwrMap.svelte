@@ -209,6 +209,7 @@
 		if (!f) return;
 		const at = lngLatOf(f);
 		if (f.layer.id === GAUGES || f.layer.id === GAUGES_CLOSED) {
+			app.showGauge(f.properties.station, f.properties.name);
 			openPopup({ gauge: f.properties as Gauge }, at);
 			return;
 		}

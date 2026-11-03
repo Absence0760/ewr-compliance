@@ -1,7 +1,7 @@
 // Table rows and chart series for the two comparisons, so the components only render.
 // Conversion and status all come from src/lib/ewr.
 import { CALENDAR, SERIES } from '#lib/ewr/format.ts';
-import { MONTHS, monthIndex, monthStatus, shareAtLeast, toCumec, ymKey } from '#lib/ewr/parsers.ts';
+import { MONTHS, isCoded, monthIndex, monthStatus, shareAtLeast, toCumec, toMm3, ymKey } from '#lib/ewr/parsers.ts';
 import type { ChartSeries } from '#lib/components/charts/chart.ts';
 import type { DayMean, EwrLines, EwrNode, Flow, FlowBasis, FlowPoint, FlowUnit, MonthMean, MonthState, PeriodPreset } from '#lib/ewr/types.ts';
 
@@ -19,6 +19,12 @@ export const unitTitle = (unit: FlowUnit) => (unit === 'cumec' ? 'Discharge (m³
 
 const inUnit = (v: number | null, i: number, unit: FlowUnit) => (unit === 'cumec' ? toCumec(v, i) : v);
 
+/**
+ * A flow in m³/s in the unit shown at a time. Mm³ is the month's volume at that flow, by the same
+ * days as the EWR's conversion, so a flow and a line keep their order in either unit.
+ */
+const flowInUnit = (v: number, t: number, unit: FlowUnit) => (unit === 'cumec' ? v : (toMm3(v, monthIndex(new Date(t).getUTCMonth() + 1)) as number));
+
 // ---- period -------------------------------------------------------------------
 
 export const keyStr = (k: number) => `${Math.floor(k / 12)}-${String((k % 12) + 1).padStart(2, '0')}`;
@@ -31,6 +37,9 @@ export function periodLabel(from: number, to: number): string {
 	const f = (k: number) => `${CALENDAR[(k % 12) + 1]} ${Math.floor(k / 12)}`;
 	return `${f(from)} to ${f(to)}`;
 }
+
+/** The station, with its factor when one is applied, as the chart names the record. */
+export const gaugeName = (station: string, factor: number) => (factor === 1 ? station : `${station} × ${factor}`);
 
 export const flowKeys = (f: Flow) => ({ first: ymKey(f.first!.y, f.first!.m), last: ymKey(f.last!.y, f.last!.m) });
 
@@ -89,28 +98,47 @@ export function rtRange(days: DayMean[], month: string): [number, number] {
 	return [days[0].t, days[days.length - 1].t + DAY];
 }
 
-/** A monthly line over time in m³/s, stepping on the first of each month. */
-function timeStep(values: number[], t0: number, t1: number, label: string, color: string, dash?: number[]): ChartSeries {
+/** A monthly line over time, stepping on the first of each month. */
+function timeStep(values: number[], t0: number, t1: number, label: string, color: string, dash: number[] | undefined, unit: FlowUnit): ChartSeries {
 	const x: number[] = [], y: number[] = [];
 	for (let m = monthFloor(t0); m < t1; m = monthNext(m)) {
 		const i = monthIndex(new Date(m).getUTCMonth() + 1);
 		x.push(Math.max(m, t0));
-		y.push(toCumec(values[i], i) as number);
+		y.push(inUnit(values[i], i, unit) as number);
 	}
 	return { label, color, dash, stepped: true, x: [...x, t1], y: [...y, y[y.length - 1]] };
 }
 
-export function rtSeries(lines: EwrLines | null, days: DayMean[], raw: FlowPoint[] | null, [t0, t1]: [number, number]): ChartSeries[] {
-	const out: ChartSeries[] = [{
-		label: 'Daily mean flow', color: SERIES.flow, markers: days.length <= 62, reach: DAY,
-		x: days.map((d) => d.t + DAY / 2), y: days.map((d) => d.mean)
-	}];
-	if (lines) {
-		out.push(timeStep(lines.ewr, t0, t1, 'EWR Monthly Requirement', SERIES.ewr));
-		out.push(timeStep(lines.urgent, t0, t1, 'Urgent action required', SERIES.urgent, [6, 4]));
-		out.push(timeStep(lines.drought, t0, t1, 'Drought EWR', SERIES.drought));
+/** A value for each day of the span, so a day with no flow is a gap in the line and not a join. */
+function dayValues(days: DayMean[], t0: number, t1: number, unit: FlowUnit, keep: (d: DayMean) => boolean) {
+	const byDay = new Map(days.map((d) => [d.t, d]));
+	const x: number[] = [], y: (number | null)[] = [];
+	for (let t = Math.floor(t0 / DAY) * DAY; t < t1; t += DAY) {
+		const d = byDay.get(t);
+		x.push(t + DAY / 2);
+		y.push(d && keep(d) ? flowInUnit(d.mean, t, unit) : null);
 	}
-	if (raw) out.push({ label: '12-minute readings', color: SERIES.raw, width: 1, reach: 3600000, x: raw.map((p) => p.t), y: raw.map((p) => p.v) });
+	return { x, y };
+}
+
+export const countOf = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+
+export const CODED_LABEL = 'Patched or unreliable (quality code)';
+
+/** Days with a quality code get a line and colour of their own, drawn only when a day has one. */
+export function rtSeries(lines: EwrLines | null, days: DayMean[], raw: FlowPoint[] | null, [t0, t1]: [number, number], label = 'Daily mean flow', unit: FlowUnit = 'cumec'): ChartSeries[] {
+	const out: ChartSeries[] = [{
+		label, color: SERIES.flow, markers: days.length <= 62, reach: DAY, ...dayValues(days, t0, t1, unit, (d) => !isCoded(d.code))
+	}];
+	if (days.some((d) => isCoded(d.code))) {
+		out.push({ label: CODED_LABEL, color: SERIES.coded, dash: [2, 3], markers: true, reach: DAY, ...dayValues(days, t0, t1, unit, (d) => isCoded(d.code)) });
+	}
+	if (lines) {
+		out.push(timeStep(lines.ewr, t0, t1, 'EWR Monthly Requirement', SERIES.ewr, undefined, unit));
+		out.push(timeStep(lines.urgent, t0, t1, 'Urgent action required', SERIES.urgent, [6, 4], unit));
+		out.push(timeStep(lines.drought, t0, t1, 'Drought EWR', SERIES.drought, undefined, unit));
+	}
+	if (raw) out.push({ label: '12-minute readings', color: SERIES.raw, width: 1, reach: 3600000, x: raw.map((p) => p.t), y: raw.map((p) => (p.v === null ? null : flowInUnit(p.v, p.t, unit))) });
 	return out;
 }
 
@@ -150,6 +178,42 @@ export function histRows(lines: EwrLines, selected: MonthMean[] | null, unit: Fl
 	});
 }
 
+// ---- months and days of a gauge -----------------------------------------------
+
+/** Months as pull-down groups, newest year first. */
+export function yearGroups(months: string[]): { year: string; months: string[] }[] {
+	const years = [...new Set(months.map((m) => m.slice(0, 4)))].sort().reverse();
+	return years.map((year) => ({ year, months: months.filter((m) => m.startsWith(year)).sort().reverse() }));
+}
+
+const daysInMonth = (month: string) => new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).getUTCDate();
+
+/** The latest month with most of its days measured, or the latest of all when none has. */
+export function defaultMonth(days: DayMean[]): string {
+	const months = loadedMonths(days);
+	const count = (m: string) => days.filter((d) => monthOf(d.t) === m).length;
+	return months.findLast((m) => count(m) * 2 > daysInMonth(m)) ?? months[months.length - 1] ?? '';
+}
+
+export interface DayRow {
+	date: string;
+	flow: number | null;
+	readings: number;
+	code: string;
+	coded: boolean;
+}
+
+/** One row a calendar day: a day with no flow stays in the list, empty. */
+export function dayRowsOf(days: DayMean[], month: string, unit: FlowUnit = 'cumec'): DayRow[] {
+	const start = Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)) - 1, 1);
+	const byDay = new Map(days.map((d) => [d.t, d]));
+	return Array.from({ length: daysInMonth(month) }, (_, i) => {
+		const t = start + i * DAY;
+		const d = byDay.get(t);
+		return { date: new Date(t).toISOString().slice(0, 10), flow: d ? flowInUnit(d.mean, t, unit) : null, readings: d?.n ?? 0, code: d?.code ?? '', coded: isCoded(d?.code) };
+	});
+}
+
 export interface RtRow {
 	label: string;
 	days: number;
@@ -164,8 +228,8 @@ export interface RtRow {
 
 export const loadedMonths = (daily: DayMean[]) => [...new Set(daily.map((d) => monthOf(d.t)))];
 
-/** Everything here is in m³/s: daily flow against the converted lines. */
-export function rtRows(lines: EwrLines, daily: DayMean[]): RtRow[] {
+/** Compared in m³/s, daily flow against the converted lines; the unit only changes what is shown. */
+export function rtRows(lines: EwrLines, daily: DayMean[], unit: FlowUnit = 'cumec'): RtRow[] {
 	const cumec = (arr: number[]) => arr.map((v, i) => toCumec(v, i) as number);
 	const c = { ewr: cumec(lines.ewr), urgent: cumec(lines.urgent), drought: cumec(lines.drought) };
 	return loadedMonths(daily).map((m) => {
@@ -173,7 +237,8 @@ export function rtRows(lines: EwrLines, daily: DayMean[]): RtRow[] {
 		const i = monthIndex(Number(m.slice(5)));
 		const mean = ds.reduce((a, d) => a + d.mean, 0) / ds.length;
 		return {
-			label: monthName(m), days: ds.length, mean, ewr: c.ewr[i], urgent: c.urgent[i], drought: c.drought[i],
+			label: monthName(m), days: ds.length, mean: flowInUnit(mean, ds[0].t, unit),
+			ewr: inUnit(lines.ewr[i], i, unit) as number, urgent: inUnit(lines.urgent[i], i, unit) as number, drought: inUnit(lines.drought[i], i, unit) as number,
 			daysEwr: ds.filter((d) => d.mean >= c.ewr[i]).length,
 			daysDrought: ds.filter((d) => d.mean >= c.drought[i]).length,
 			status: monthStatus(mean, c, i)
@@ -189,11 +254,14 @@ export interface RtLatest {
 	pct: number | null;
 }
 
-export function rtLatest(lines: EwrLines | null, pts: FlowPoint[]): RtLatest | null {
+export function rtLatest(lines: EwrLines | null, pts: FlowPoint[], unit: FlowUnit = 'cumec'): RtLatest | null {
 	const last = pts[pts.length - 1];
 	if (!last || last.v === null) return null;
 	const i = monthIndex(new Date(last.t).getUTCMonth() + 1);
 	const ewr = lines ? toCumec(lines.ewr[i], i) : null;
-	return { t: last.t, v: last.v, month: MONTHS[i], ewr, pct: ewr !== null && ewr > 0 ? (100 * last.v) / ewr : null };
+	return {
+		t: last.t, v: flowInUnit(last.v, last.t, unit), month: MONTHS[i], ewr: lines ? inUnit(lines.ewr[i], i, unit) : null,
+		pct: ewr !== null && ewr > 0 ? (100 * last.v) / ewr : null
+	};
 }
 

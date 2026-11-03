@@ -1,9 +1,9 @@
 // The one app state. Components read it and call its methods; none fetch data themselves.
 import { asset } from '$app/paths';
-import { ewrLines, parseRevised, parseTab, ymKey } from '#lib/ewr/parsers.ts';
+import { ewrLines, gaugeFlow, gaugeSeries, parseGaugeFlows, parseMon, parseRevised, parseTab, ymKey } from '#lib/ewr/parsers.ts';
 import { allFiles, buildNotices, resolveView } from '#lib/ewr/resolve.ts';
 import type {
-	EcBasis, EwrNode, EwrSite, Flow, FlowUnit, FlowWant, HistView, IndexData, Issue, NodeChoices, NodeFile, NodeView, Notice, ResolvedLines, RtView, Sheet, YearIs
+	EcBasis, EwrNode, EwrSite, Flow, FlowSource, FlowUnit, FlowWant, GaugeData, GaugeFlowFile, GaugeFlows, GaugeLink, GaugeRecord, HistView, IndexData, Issue, NodeChoices, NodeFile, NodeView, Notice, ResolvedLines, RtView, Sheet, YearIs
 } from '#lib/ewr/types.ts';
 
 const slug = (b: string) => b.toLowerCase().replace(/-/g, '');
@@ -31,6 +31,12 @@ class AppState {
 	issues = $state.raw<Issue[]>([]);
 	meta = $state.raw<IndexData['meta'] | null>(null);
 	byId = new Map<string, EwrNode>();
+	links = $state.raw<GaugeLink[]>([]);
+	gaugeRecords = new Map<string, GaugeRecord>();
+	flowStations = new Set<string>();
+	/** Gauges' daily and 12-minute flow, by station, as each is first opened. */
+	flows = $state.raw<Record<string, GaugeFlows>>({});
+	flowsError = $state('');
 
 	ecBasis = $state<EcBasis>('TEC');
 	choices = $state<Record<string, NodeChoices>>({});
@@ -51,6 +57,9 @@ class AppState {
 	lines = $state.raw<ResolvedLines | null>(null);
 	notices = $state.raw<Notice[]>([]);
 
+	/** The gauge whose record fills the panel, or null when the panel shows the node. */
+	gaugeView = $state<{ station: string; name: string } | null>(null);
+
 	/** File shown in the viewer dialog, or null when closed. */
 	viewer = $state<{ nodeId: string; file: string } | null>(null);
 
@@ -59,6 +68,21 @@ class AppState {
 
 	selected = $derived(this.selectedId ? (this.byId.get(this.selectedId) ?? null) : null);
 	view = $derived(this.selected ? this.viewOf(this.selected) : null);
+	link = $derived(this.selected ? this.linkOf(this.selected.id) : null);
+	/** The factor in use: the node's own if one was typed, otherwise its link's. */
+	factor = $derived(this.link ? (this.choices[this.link.node]?.factor ?? this.link.factor) : 1);
+	/** The selected node's gauge record, factored to the node. */
+	gaugeFlow = $derived.by(() => {
+		const record = this.link && this.gaugeRecords.get(this.link.station);
+		return record ? gaugeFlow(record, this.factor) : null;
+	});
+	/** The selected node's gauge flow for the Real Time Comparison, factored to the node. */
+	gaugeRt = $derived.by(() => {
+		const flows = this.link && this.flows[this.link.station];
+		return flows ? gaugeSeries(flows, this.factor) : null;
+	});
+	/** The observed record the Historical Comparison is using. */
+	histFlow = $derived(this.histView.source === 'gauge' ? this.gaugeFlow : this.hist.flow);
 
 	viewOf(n: EwrNode): NodeView {
 		return resolveView(n, this.ecBasis, this.choices[n.id], !!this.uploads[n.id]);
@@ -68,12 +92,20 @@ class AppState {
 		return allFiles(n, this.uploads[n.id]);
 	}
 
+	linkOf(nodeId: string): GaugeLink | null {
+		return this.links.find((l) => l.node === nodeId) ?? null;
+	}
+
 	async load(): Promise<void> {
 		this.restore();
 		try {
-			const res = await fetch(asset('data/index.json'));
+			const [res, gaugeRes] = await Promise.all([fetch(asset('data/index.json')), fetch(asset('data/gauges.json'))]);
 			if (!res.ok) throw new Error(`index.json: HTTP ${res.status}`);
-			const d = (await res.json()) as IndexData;
+			if (!gaugeRes.ok) throw new Error(`gauges.json: HTTP ${gaugeRes.status}`);
+			const [d, g] = (await Promise.all([res.json(), gaugeRes.json()])) as [IndexData, GaugeData];
+			this.gaugeRecords = new Map(Object.entries(g.records).map(([station, text]) => [station, parseMon(text, g.incomplete[station])]));
+			this.links = g.links;
+			this.flowStations = new Set(g.flows);
 			this.byId = new Map(d.nodes.map((n) => [n.id, n]));
 			this.nodes = d.nodes;
 			this.sites = d.sites;
@@ -159,8 +191,57 @@ class AppState {
 
 	select(id: string, opts: { focus?: boolean } = {}) {
 		this.selectedId = id;
+		this.gaugeView = null;
+		this.syncHistSource();
+		this.syncRtSource();
 		if (opts.focus) this.focus = { id, n: (this.focus?.n ?? 0) + 1 };
 		void this.refresh();
+	}
+
+	/** A linked gauge is the node's record unless a loaded file is in use; a node with no link cannot stay on it. */
+	private syncHistSource() {
+		const h = this.histView;
+		if (h.source === 'gauge' && !this.gaugeFlow) h.source = 'sheet';
+		else if (this.gaugeFlow && h.source !== 'api' && !this.hist.flow) h.source = 'gauge';
+		if (h.source === 'gauge') this.wholeRecord(this.gaugeFlow);
+	}
+
+	private syncRtSource() {
+		const r = this.rtView;
+		const station = this.link && this.flowStations.has(this.link.station) ? this.link.station : null;
+		if (r.source === 'gauge' && !station) this.setRtSource('sheet');
+		else if (station && r.source !== 'api' && !this.rt.flow) r.source = 'gauge';
+		if (station) void this.loadFlows(station);
+	}
+
+	setRtSource(source: FlowSource) {
+		this.rtView.source = source;
+		this.rtView.month = 'all';
+	}
+
+	/** Read once. A failed read is said in the panel, and is tried again next time. */
+	async loadFlows(station: string): Promise<void> {
+		if (this.flows[station]) return;
+		this.flowsError = '';
+		try {
+			const res = await fetch(asset(`data/flows-${station}.json` as never));
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			this.flows = { ...this.flows, [station]: parseGaugeFlows((await res.json()) as GaugeFlowFile) };
+		} catch (e) {
+			this.flowsError = `Flow for ${station} could not be loaded: ${(e as Error).message}`;
+		}
+	}
+
+	setHistSource(source: FlowSource) {
+		this.histView.source = source;
+		this.wholeRecord(this.histFlow);
+	}
+
+	/** Open a gauge's record in the panel. A gauge with no record leaves the panel on the node. */
+	showGauge(station: string, name = '') {
+		const has = this.flowStations.has(station);
+		this.gaugeView = has || this.gaugeRecords.has(station) ? { station, name } : null;
+		if (has) void this.loadFlows(station);
 	}
 
 	setEcBasis(b: EcBasis) {
@@ -187,7 +268,10 @@ class AppState {
 	/** Newly built flow restarts from the whole record, as a new file should. */
 	setHist(slot: FlowSlot) {
 		this.hist = slot;
-		const f = slot.flow;
+		this.wholeRecord(slot.flow);
+	}
+
+	private wholeRecord(f: Flow | null) {
 		if (f?.first && f.last) {
 			this.histView.preset = 'full';
 			this.histView.from = ymKey(f.first.y, f.first.m);

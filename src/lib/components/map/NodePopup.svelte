@@ -11,6 +11,8 @@
 	const files = $derived(node ? app.filesOf(node) : []);
 	const inUse = $derived(view ? fileInUse(view, files) : undefined);
 	let chosen = $derived(inUse ?? files[0]?.name ?? '');
+	const link = $derived(node ? app.linkOf(node.id) : null);
+	const linked = $derived(gauge ? app.links.filter((l) => l.station === gauge.station).map((l) => app.byId.get(l.node)?.label ?? l.node) : []);
 </script>
 
 <div class="pop">
@@ -25,6 +27,9 @@
 		<div class="row">
 			PES {node.pes || '–'}, REC {node.rec || '–'}, TEC {node.tec || '–'}, in use <b>{view?.ec || 'none'}</b>
 		</div>
+		{#if link}
+			<div class="row">Measured at gauge {link.station}</div>
+		{/if}
 		{#if files.length}
 			<label>
 				View a file
@@ -46,6 +51,9 @@
 		<h3>{gauge.station}</h3>
 		<div class="row">{gauge.name}</div>
 		<div class="row">Flow gauge{gauge.quat ? `, ${gauge.quat}` : ''}{gauge.closed ? ', closed' : ''}</div>
+		{#if linked.length}
+			<div class="row">Measured flow for {linked.join(', ')}</div>
+		{/if}
 		<div class="row">
 			<a href={`https://www.dws.gov.za/Hydrology/Verified/HyData.aspx?Station=${encodeURIComponent(gauge.station)}`} target="_blank" rel="noopener noreferrer">
 				DWS verified flow data
