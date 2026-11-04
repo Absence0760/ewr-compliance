@@ -3,6 +3,7 @@
 	import { tecOf } from './compare.ts';
 	import GaugePanel from './GaugePanel.svelte';
 	import HistoricalTab from './HistoricalTab.svelte';
+	import LoadFlowDialog from './LoadFlowDialog.svelte';
 	import NodeControls from './NodeControls.svelte';
 	import RealTimeTab from './RealTimeTab.svelte';
 
@@ -14,6 +15,7 @@
 	const n = $derived(app.selected);
 	const v = $derived(app.view);
 	let tabEls: HTMLButtonElement[] = $state([]);
+	let loading = $state(false);
 
 	function onTabKey(e: KeyboardEvent, i: number) {
 		const last = TABS.length - 1;
@@ -56,6 +58,12 @@
 			<div class="notice {note.level}">{note.text}</div>
 		{/each}
 
+		<div class="loadbar">
+			<button type="button" onclick={() => (loading = true)}>Load flow data…</button>
+			<span class="muted">from a spreadsheet or text file, for either comparison</span>
+		</div>
+		<LoadFlowDialog bind:open={loading} />
+
 		<div class="tabs" role="tablist" aria-label="Comparison">
 			{#each TABS as t, i (t.id)}
 				<button
@@ -81,3 +89,14 @@
 		</div>
 	</div>
 </aside>
+
+<style>
+	.loadbar {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+		margin-top: 10px;
+		font-size: 13px;
+	}
+</style>

@@ -26,6 +26,10 @@ The app opens on South Africa's six Water Management Areas of 2023 (`/`): a bann
 - A WMA with no EWR data opens anyway, on its catchments, rivers and gauges, and says it has none.
 - Rivers are `static/geo/rivers-<slug>.json`, the DWS 1:500 000 rivers built by `tools/build-rivers.ts`, with name `n`, Strahler order `s` and flow class `c`. Orders 1 and 2 are drawn from zoom 9. Hovering names a river, clicking opens its popup, and from zoom 10 names run along the line when the base map's fonts are there.
 
+## Loading flow by hand
+
+Observed flow comes from a linked gauge, the DWS API once it exists, or a file. A file can be loaded in each comparison's Data source, or in the Load flow data window, opened from the compliance panel: monthly flow for the Historical Comparison, and 12-minute or daily flow for the Real Time Comparison, chosen or dropped. The window uses the same importer (`importFile`) and puts the file in use in its comparison, in place of a gauge or the API. Sheet, units and year are then set in the comparison. A file is read in the browser and never sent anywhere.
+
 ## Gauge records
 
 `static/data/gauges.json` holds `links`, the gauge that measures each node with the factor on its record, `records`, each gauge's monthly file as text, in the DWS format or as a table worked up from a daily file, `flows`, the stations with a `flows-<station>.json`, and `incomplete`, the months of each station that its daily record shows are not whole. That file holds the gauge's DWS `.day` file and its 12-minute readings, as text. Like the Desktop outputs, the text is parsed in the browser (`parseMon`, `parseGaugeFlows`). `gauges.json` loads with `index.json`, and the app does not start without it. A flows file loads when its gauge is first opened.
@@ -51,7 +55,7 @@ The app opens on South Africa's six Water Management Areas of 2023 (`/`): a bann
 | `src/lib/state/app.svelte.ts` | The single app state (`app`). Components read it and call its methods. |
 | `src/lib/components/map` | `WmaMap.svelte`, the national map of WMAs, and `EwrMap.svelte`, one WMA's map, with popup, legend, basin zoom and search. `wma.ts` holds the WMAs and the geometry tests, `mapData.ts` the map's other pure logic, `mapStyle.ts` the layers and base map style, `catchments.ts` the live DWS boundaries and flow gauges, paged, with a time limit. |
 | `src/routes` | `/`, the WMA chooser. `wma/[wma]/`, one WMA's map and compliance panel. `nodes/`, `notes/`, and `+error.svelte`. |
-| `src/lib/components/compliance` | Node panel, Historical and Real Time Comparison, and `GaugePanel.svelte`, a gauge's published monthly volumes. `compare.ts` holds table rows and chart series. |
+| `src/lib/components/compliance` | Node panel, Historical and Real Time Comparison, `GaugePanel.svelte`, a gauge's published monthly volumes, and `LoadFlowDialog.svelte`, the Load flow data window. `compare.ts` holds table rows and chart series. |
 | `src/lib/components/charts` | uPlot wrapper. |
 | `src/lib/components/nodes` | Nodes table and data notes. |
 | `src/lib/components/viewer` | File viewer dialog. |

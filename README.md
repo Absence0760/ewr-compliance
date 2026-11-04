@@ -96,6 +96,8 @@ The client brief is in the private repo.
 
 DWS has not published the API, so its address, its parameters and its response format are unknown. The form under each comparison (Data source > API) is ready for it, and what it accepts is an assumption until DWS publishes something. Expect to change it then.
 
+Until then, and afterwards, flow can be loaded by hand from a spreadsheet or text file: in each comparison's Data source, or in the Load flow data window in the compliance panel, which takes monthly flow for the Historical Comparison and 12-minute or daily flow for the Real Time Comparison.
+
 Enter the address with `{station}`, `{from}` and `{to}` where they belong; they are filled in as an ISO date and time. The endpoint must allow cross-origin requests from wherever this app is hosted, or be proxied, and a site on `https` can only call an `https` endpoint. The address and station are kept in the browser, separately for each comparison, so don't put a key in the address.
 
 | | Historical Comparison | Real Time Comparison |
