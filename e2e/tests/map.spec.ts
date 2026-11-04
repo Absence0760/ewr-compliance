@@ -76,7 +76,7 @@ test.describe('map', () => {
 		await expect(mapRegion(page).getByRole('alert')).toHaveText('Quaternary catchments could not be loaded from the DWS service. Everything else still works.');
 	});
 
-	test('labels a flow gauge, and its popup links to the DWS verified data', async ({ page }) => {
+	test('labels a flow gauge, and its popup names it, with no link off the site', async ({ page }) => {
 		await page.goto(MAP);
 		await findNode(page, 'syt1', 'syt1 / SYN-SITE1');
 		const map = mapRegion(page);
@@ -89,9 +89,8 @@ test.describe('map', () => {
 		await page.mouse.click(box!.x + box!.width + 8, box!.y + box!.height / 2);
 		await expect(map.getByRole('heading', { name: 'X0H999' })).toBeVisible();
 		await expect(map.getByText('Test River @ Test Weir', { exact: true })).toBeVisible();
-		await expect(map.getByRole('link', { name: 'DWS verified flow data' })).toHaveAttribute(
-			'href', 'https://www.dws.gov.za/Hydrology/Verified/HyData.aspx?Station=X0H999'
-		);
+		// The DWS website link was taken out: following it broke the app for its users.
+		await expect(map.locator('.maplibregl-popup').getByRole('link')).toHaveCount(0);
 
 		await map.getByRole('button', { name: 'Close popup' }).click();
 		await map.getByRole('checkbox', { name: 'Flow gauges', exact: true }).uncheck();

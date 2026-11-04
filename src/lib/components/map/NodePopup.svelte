@@ -71,11 +71,6 @@
 		{#if linked.length}
 			<div class="row">Measured flow for {linked.join(', ')}</div>
 		{/if}
-		<div class="row">
-			<a href={`https://www.dws.gov.za/Hydrology/Verified/HyData.aspx?Station=${encodeURIComponent(gauge.station)}`} target="_blank" rel="noopener noreferrer">
-				DWS verified flow data
-			</a>
-		</div>
 	{/if}
 </div>
 
