@@ -25,6 +25,16 @@ test.describe('choosing a Water Management Area', () => {
 		await expect(page.getByRole('alert')).toHaveCount(0);
 	});
 
+	test('the national map names each WMA, and marks the one in focus in the list', async ({ page }) => {
+		await page.goto('/');
+		const national = page.getByRole('region', { name: 'Map of Water Management Areas' });
+		const names = ['Limpopo-Olifants', 'Inkomati-Usuthu', 'Pongola-Mtamvuna', 'Vaal-Orange', 'Mzimvubu-Tsitsikamma', 'Breede-Olifants'];
+		for (const name of names) await expect(national.getByText(name, { exact: true })).toBeVisible();
+		await chooser(page).getByRole('link', { name: /Vaal-Orange/ }).focus();
+		await expect(national.getByText('Vaal-Orange', { exact: true })).toHaveClass(/\bon\b/);
+		await expect(national.getByText('Breede-Olifants', { exact: true })).not.toHaveClass(/\bon\b/);
+	});
+
 	test('a WMA with data opens on its nodes, and the Nodes table goes back to it', async ({ page }) => {
 		await page.goto('/');
 		await chooser(page).getByRole('link', { name: /Breede-Olifants/ }).click();
@@ -58,6 +68,8 @@ test.describe('choosing a Water Management Area', () => {
 		await page.route(/\/WMA_2023\//, (route) => route.fulfill({ json: { error: { code: 500, message: 'down' } } }));
 		await page.goto('/');
 		await expect(page.getByRole('alert')).toHaveText('Water Management Areas could not be loaded from the DWS service. Choose one from the list.');
+		// No names over a map with no outlines.
+		await expect(page.getByRole('region', { name: 'Map of Water Management Areas' }).getByText('Vaal-Orange', { exact: true })).toHaveCount(0);
 		await chooser(page).getByRole('link', { name: /Breede-Olifants/ }).click();
 		await expect(page).toHaveURL(new RegExp(`/${MAP}$`));
 	});

@@ -16,6 +16,10 @@ describe('the WMAs', () => {
 		}
 	});
 
+	test('write each name inside the WMA, within its box', () => {
+		for (const { label: [x, y], bounds: [[w, s], [e, n]] } of WMAS) expect(x > w && x < e && y > s && y < n).toBe(true);
+	});
+
 	test('are found by slug and by their name in the DWS layer', () => {
 		expect(wmaBySlug('vaal-orange')?.service).toBe('Vaal_Orange');
 		expect(wmaByService('Breede_Olifants')?.slug).toBe('breede-olifants');

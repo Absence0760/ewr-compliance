@@ -12,16 +12,18 @@ export interface Wma {
 	service: string;
 	/** Extent, so the map can open on the area before the live boundary arrives. */
 	bounds: Bounds;
+	/** Where the national map writes its name: the point inside it farthest from its edge, worked out from the DWS outline. */
+	label: Position;
 }
 
 /** The six WMAs, in their gazetted order. Lesotho and Eswatini are in the layer too, and are not WMAs. */
 export const WMAS: Wma[] = [
-	{ slug: 'limpopo-olifants', name: 'Limpopo-Olifants', service: 'Limpopo_Olifants', bounds: [[25.69, -26.52], [31.91, -22.12]] },
-	{ slug: 'inkomati-usuthu', name: 'Inkomati-Usuthu', service: 'Inkomati_Usuthu', bounds: [[29.8, -27.32], [32.03, -24.17]] },
-	{ slug: 'pongola-mtamvuna', name: 'Pongola-Mtamvuna', service: 'Pongola_Mtamvuna', bounds: [[28.87, -31.08], [32.89, -26.8]] },
-	{ slug: 'vaal-orange', name: 'Vaal-Orange', service: 'Vaal_Orange', bounds: [[16.45, -32.67], [30.31, -24.77]] },
-	{ slug: 'mzimvubu-tsitsikamma', name: 'Mzimvubu-Tsitsikamma', service: 'Mzimvubu_Tsitsikamma', bounds: [[22.42, -34.21], [30.19, -29.91]] },
-	{ slug: 'breede-olifants', name: 'Breede-Olifants', service: 'Breede_Olifants', bounds: [[17.81, -34.84], [23.72, -29.81]] }
+	{ slug: 'limpopo-olifants', name: 'Limpopo-Olifants', service: 'Limpopo_Olifants', bounds: [[25.69, -26.52], [31.91, -22.12]], label: [28.8, -24.43] },
+	{ slug: 'inkomati-usuthu', name: 'Inkomati-Usuthu', service: 'Inkomati_Usuthu', bounds: [[29.8, -27.32], [32.03, -24.17]], label: [31.48, -25.11] },
+	{ slug: 'pongola-mtamvuna', name: 'Pongola-Mtamvuna', service: 'Pongola_Mtamvuna', bounds: [[28.87, -31.08], [32.89, -26.8]], label: [30.78, -28.41] },
+	{ slug: 'vaal-orange', name: 'Vaal-Orange', service: 'Vaal_Orange', bounds: [[16.45, -32.67], [30.31, -24.77]], label: [24.08, -28.52] },
+	{ slug: 'mzimvubu-tsitsikamma', name: 'Mzimvubu-Tsitsikamma', service: 'Mzimvubu_Tsitsikamma', bounds: [[22.42, -34.21], [30.19, -29.91]], label: [25.53, -32.6] },
+	{ slug: 'breede-olifants', name: 'Breede-Olifants', service: 'Breede_Olifants', bounds: [[17.81, -34.84], [23.72, -29.81]], label: [19.44, -33.08] }
 ];
 
 /** South Africa, for the national map. */
