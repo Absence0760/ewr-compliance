@@ -216,6 +216,6 @@ test.describe('map', () => {
 		await expect(page).toHaveURL(/\/wma\/vaal-orange\/$/);
 		await expect(page).toHaveTitle('Vaal-Orange · Map and compliance · EWR Compliance Measurement');
 		await select(mapRegion(page), 'Water Management Area').selectOption({ label: 'All WMAs' });
-		await expect(page.getByRole('heading', { name: 'EWR Compliance Measurement', level: 2 })).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'EWR Compliance Measurement', level: 1 })).toBeVisible();
 	});
 });

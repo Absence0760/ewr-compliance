@@ -7,7 +7,9 @@ test.describe('choosing a Water Management Area', () => {
 	test('the app opens on a banner, the national map and every WMA, with what each holds', async ({ page }) => {
 		await page.goto('/');
 		await expect(page).toHaveTitle('Map and compliance · EWR Compliance Measurement');
-		await expect(page.getByRole('heading', { name: 'EWR Compliance Measurement', level: 2 })).toBeVisible();
+		// One title, in the banner: the app bar leaves its own out on this page.
+		await expect(page.getByRole('heading', { level: 1 })).toHaveText('EWR Compliance Measurement');
+		await expect(page.getByRole('banner').getByRole('heading')).toHaveCount(0);
 		await expect(page.getByRole('region', { name: 'Map of Water Management Areas' }).locator('canvas.maplibregl-canvas')).toBeVisible();
 		const links = chooser(page).getByRole('link');
 		await expect(links).toHaveText([
@@ -28,6 +30,8 @@ test.describe('choosing a Water Management Area', () => {
 		await chooser(page).getByRole('link', { name: /Breede-Olifants/ }).click();
 		await expect(page).toHaveURL(new RegExp(`/${MAP}$`));
 		await findNode(page, 'syt1', 'syt1 / SYN-SITE1');
+		// Away from the home page, the title is the app bar's.
+		await expect(page.getByRole('banner').getByRole('heading', { level: 1 })).toHaveText('EWR Compliance Measurement');
 
 		await page.getByRole('link', { name: 'Nodes and ECs' }).click();
 		await page.getByRole('button', { name: 'Show syr1 on the map' }).click();

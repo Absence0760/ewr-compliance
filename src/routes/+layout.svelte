@@ -20,6 +20,8 @@
 	const here = (href: string) => page.url.pathname.replace(/\/$/, '') === href.replace(/\/$/, '') || (href === home && inWma);
 	const current = $derived(nav.find((n) => here(n.href)));
 	const wmaName = $derived(inWma ? wmaBySlug(page.params.wma ?? '')?.name : undefined);
+	/** The home page's banner carries the title, as its h1, so the bar leaves it out there. */
+	const isHome = $derived(page.url.pathname.replace(/\/$/, '') === home.replace(/\/$/, '') && !page.error);
 	onMount(() => app.load());
 </script>
 
@@ -29,7 +31,9 @@
 
 <a class="skip" href="#main">Skip to main content</a>
 <header class="appbar">
-	<h1>EWR Compliance Measurement</h1>
+	{#if !isHome}
+		<h1>EWR Compliance Measurement</h1>
+	{/if}
 	<nav aria-label="Views">
 		{#each nav as n (n.href)}
 			<a href={n.href} class:on={here(n.href)} aria-current={here(n.href) ? 'page' : undefined}>{n.label}</a>

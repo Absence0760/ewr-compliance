@@ -19,7 +19,7 @@
 
 <div class="home">
 	<header class="banner">
-		<h2>EWR Compliance Measurement</h2>
+		<h1>EWR Compliance Measurement</h1>
 		<p>Choose a Water Management Area to see its EWR nodes, flow gauges, quaternary catchments and rivers.</p>
 	</header>
 	<section class="view split">
@@ -61,7 +61,7 @@
 		background: linear-gradient(90deg, #2f2152, #4b2e83);
 		color: #fff;
 	}
-	.banner h2 {
+	.banner h1 {
 		margin: 0;
 		font-size: 24px;
 		letter-spacing: 0.01em;
