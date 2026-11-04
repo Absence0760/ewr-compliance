@@ -26,6 +26,12 @@ export const WMAS: Wma[] = [
 	{ slug: 'breede-olifants', name: 'Breede-Olifants', service: 'Breede_Olifants', bounds: [[17.81, -34.84], [23.72, -29.81]], label: [19.44, -33.08] }
 ];
 
+/** The countries in the WMA layer that are not WMAs, named on the national map for orientation. Points as for `label`. */
+export const NEIGHBOURS: { name: string; label: Position }[] = [
+	{ name: 'Lesotho', label: [28.48, -29.41] },
+	{ name: 'Eswatini', label: [31.5, -26.52] }
+];
+
 /** South Africa, for the national map. */
 export const NATIONAL_BOUNDS: Bounds = [[16.45, -34.84], [32.89, -22.12]];
 

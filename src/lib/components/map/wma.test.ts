@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { Feature } from 'geojson';
-import { BASIN_WMA, NATIONAL_BOUNDS, WMAS, inRings, mostlyInside, ringsOf, touches, verticesOf, wmaByService, wmaBySlug, wmaOfBasin } from './wma.ts';
+import { BASIN_WMA, NATIONAL_BOUNDS, NEIGHBOURS, WMAS, inRings, mostlyInside, ringsOf, touches, verticesOf, wmaByService, wmaBySlug, wmaOfBasin } from './wma.ts';
 
 const SQUARE = [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]];
 const polygon = (coordinates: number[][][]): Feature => ({ type: 'Feature', geometry: { type: 'Polygon', coordinates }, properties: {} });
@@ -18,6 +18,13 @@ describe('the WMAs', () => {
 
 	test('write each name inside the WMA, within its box', () => {
 		for (const { label: [x, y], bounds: [[w, s], [e, n]] } of WMAS) expect(x > w && x < e && y > s && y < n).toBe(true);
+	});
+
+	test('name Lesotho and Eswatini within the national box, and neither is a WMA', () => {
+		for (const { name, label: [x, y] } of NEIGHBOURS) {
+			expect(x > NATIONAL_BOUNDS[0][0] && x < NATIONAL_BOUNDS[1][0] && y > NATIONAL_BOUNDS[0][1] && y < NATIONAL_BOUNDS[1][1]).toBe(true);
+			expect(WMAS.some((w) => w.name === name)).toBe(false);
+		}
 	});
 
 	test('are found by slug and by their name in the DWS layer', () => {

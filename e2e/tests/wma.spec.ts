@@ -30,6 +30,11 @@ test.describe('choosing a Water Management Area', () => {
 		const national = page.getByRole('region', { name: 'Map of Water Management Areas' });
 		const names = ['Limpopo-Olifants', 'Inkomati-Usuthu', 'Pongola-Mtamvuna', 'Vaal-Orange', 'Mzimvubu-Tsitsikamma', 'Breede-Olifants'];
 		for (const name of names) await expect(national.getByText(name, { exact: true })).toBeVisible();
+		// Not WMAs, and named for orientation: in grey, and not in the list.
+		for (const name of ['Lesotho', 'Eswatini']) {
+			await expect(national.getByText(name, { exact: true })).toHaveClass(/\bother\b/);
+			await expect(chooser(page).getByRole('link', { name })).toHaveCount(0);
+		}
 		await chooser(page).getByRole('link', { name: /Vaal-Orange/ }).focus();
 		await expect(national.getByText('Vaal-Orange', { exact: true })).toHaveClass(/\bon\b/);
 		await expect(national.getByText('Breede-Olifants', { exact: true })).not.toHaveClass(/\bon\b/);

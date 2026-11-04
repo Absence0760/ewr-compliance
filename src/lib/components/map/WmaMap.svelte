@@ -9,7 +9,7 @@
 	import type { GeoJSONSource, GeoJSONSourceSpecification, Map as MapLibreMap, Marker, Popup } from 'maplibre-gl';
 	import { loadWmas } from '#lib/components/map/catchments.ts';
 	import { CREDIT, FIRST_LABEL, WMA_PURPLE, baseStyle } from '#lib/components/map/mapStyle.ts';
-	import { NATIONAL_BOUNDS, WMAS } from '#lib/components/map/wma.ts';
+	import { NATIONAL_BOUNDS, NEIGHBOURS, WMAS } from '#lib/components/map/wma.ts';
 
 	/** The slug of the WMA under the pointer or in focus in the list, highlighted on both. */
 	let { hovered = $bindable(''), withData }: { hovered?: string; withData: Set<string> } = $props();
@@ -49,13 +49,16 @@
 	async function start(gone: () => boolean) {
 		try {
 			const ml = await import('#lib/components/map/maplibre.ts');
+			const nameLabel = (text: string, at: number[], className: string) => {
+				const el = document.createElement('div');
+				el.className = className;
+				el.textContent = text;
+				return new ml.Marker({ element: el }).setLngLat(at as [number, number]).addTo(map!);
+			};
 			const nameLabels = () => {
-				for (const w of WMAS) {
-					const el = document.createElement('div');
-					el.className = 'wma-label';
-					el.textContent = w.name;
-					labels.set(w.slug, new ml.Marker({ element: el }).setLngLat(w.label as [number, number]).addTo(map!));
-				}
+				for (const w of WMAS) labels.set(w.slug, nameLabel(w.name, w.label, 'wma-label'));
+				// Lesotho and Eswatini are named in grey, like their fill: they cannot be chosen.
+				for (const c of NEIGHBOURS) nameLabel(c.name, c.label, 'wma-label other');
 			};
 			if (tilesUrl) await ml.usePmtiles();
 			if (gone()) return;
@@ -169,6 +172,12 @@
 		font-size: 12px;
 		font-weight: 600;
 		white-space: nowrap;
+	}
+	.wrap :global(.wma-label.other) {
+		background: rgba(255, 255, 255, 0.7);
+		color: #52514e;
+		font-weight: 400;
+		font-style: italic;
 	}
 	.wrap :global(.wma-label.on) {
 		background: #fff;
