@@ -90,6 +90,31 @@ test.describe('daily flow from a linked gauge', () => {
 		await expect(gauge.getByRole('table', { name: /^Monthly volumes/ })).toBeVisible();
 	});
 
+	test("the gauge's own panel shows its 12-minute readings, unfactored, in the months that have them", async ({ page }) => {
+		const rt = await atSyq1(page);
+		await rt.getByRole('button', { name: 'View gauge record' }).click();
+		const gauge = panel(page);
+		const keys = legend(gauge, 'Daily flow, X0H999');
+		const raw = gauge.getByRole('checkbox', { name: 'Show 12-minute readings' });
+		await raw.check();
+		await expect(gauge.getByText('No 12-minute readings in this month.')).toBeVisible();
+		await expect(keys.getByRole('button', { name: '12-minute readings' })).toHaveCount(0);
+
+		await month(gauge).locator('visible=true').selectOption({ label: 'Mar 2003' });
+		await expect(gauge.getByText('No 12-minute readings in this month.')).toHaveCount(0);
+		await expect(keys.getByRole('button', { name: '12-minute readings' })).toBeVisible();
+		await raw.uncheck();
+		await expect(keys.getByRole('button', { name: '12-minute readings' })).toHaveCount(0);
+	});
+
+	test('a gauge with no 12-minute readings offers no switch for them', async ({ page }) => {
+		await openNode(page, 'syr2');
+		await showRealTime(page);
+		await realTime(page).getByRole('button', { name: 'View gauge record' }).click();
+		await expect(panel(page).getByRole('table', { name: 'Daily flow, Jan 2003' })).toBeVisible();
+		await expect(panel(page).getByRole('checkbox', { name: 'Show 12-minute readings' })).toHaveCount(0);
+	});
+
 	test('a gauge with flow and no monthly record is offered only where it has something', async ({ page }) => {
 		await openNode(page, 'syr2');
 		const rt = realTime(page);
