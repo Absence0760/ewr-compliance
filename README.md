@@ -21,7 +21,7 @@ To host it, run `pnpm build` and copy `build/` to any static host, at a domain r
 
 ## Data
 
-`static/data` is ignored by git, all but `map.json`, and is filled by one of two commands.
+`static/data` is ignored by git, and is filled by one of two commands.
 
 - **`pnpm data:sample`** copies the synthetic sample from `e2e/fixtures/sample-data`. It has a node of each kind the app treats differently, in every basin: a `.tab` node, Revised `.rul` nodes, a flow-only node, an Olifants-Doring node with Cumulative and Incremental runs, a site at a node, an approximate node and a node with no coordinates. Every code and number is invented by `e2e/fixtures/make-sample-data.mjs`, which is deterministic. To change the sample, change that script and rerun it. If `static/data` holds anything but the sample the command refuses, so real data is never lost silently. `pnpm data:sample --force` replaces it.
 - **`pnpm data:private`** needs access to the private repo `ewr-compliance-private`, cloned beside this one, or named by `EWR_PRIVATE_DIR`. It copies the real data to `static/data`, and the tests pinned to it to `src/private` and `e2e/tests/private`. All of that is ignored by git.
@@ -69,16 +69,21 @@ Give it every monthly `.mon` file, in either format, every DWS `.day` file and e
 
 A node with no KML point is placed inside its quaternary. Once `index.json` holds a point for that quaternary, a rebuild keeps it, so re-simplified polygons do not move those nodes. Build into the private repo's `static/data`, or a copy of it, to keep them.
 
-`tools/build_geo.py` rebuilds `static/data/map.json`, which holds rivers only (also needs `pyshp pyproj`, and mapshaper):
+The rivers each WMA's map draws and names are public, and committed in `static/geo/rivers-<wma>.json`. Rebuild them with:
 
-- Rivers: DWS 1:500 000 `southafricanrivers_wriall500.zip`, from the WRC Water Resources Observatory.
-- Quaternaries: the DWS service, used here only to place nodes. The polygons must not be committed, because DWS supplies them without distribution rights. The app reads them and the basin outlines live in the browser. See `NOTICE.md`.
+```
+node tools/build-rivers.ts
+```
+
+It reads the DWS 1:500 000 rivers, the primary and secondary rivers with each reach's `NAME`, `STRAHLER` order and flow `CLASS`, from the `Rivers` layer of the DWS ArcGIS service. It puts each reach in every 2023 WMA whose outline it enters, so a river on a boundary is on both maps. It needs network access and takes about a minute.
+
+`tools/build_geo.py` writes the quaternaries file that the private build places nodes with (needs mapshaper). Its source is the DWS service. The polygons must not be committed, because DWS supplies them without distribution rights. The app reads them and the WMA and basin outlines live in the browser. See `NOTICE.md`.
 
 ## Base map
 
 Optional. Without it the map draws on a plain background.
 
-`tools/fetch-tiles.sh` puts a Western Cape Protomaps extract and label fonts in `static/tiles/`, which git ignores, and writes `.env.local`. It needs the `pmtiles` CLI. To host, keep `static/tiles/` in the build, or set `VITE_TILES_URL` to any host that allows cross-origin range requests. See `.env.example` and `docs/hosting.md`.
+`tools/fetch-tiles.sh` puts a Protomaps extract of South Africa, to zoom 13, and label fonts in `static/tiles/`, which git ignores, and writes `.env.local`. It needs the `pmtiles` CLI. To host, keep `static/tiles/` in the build, or set `VITE_TILES_URL` to any host that allows cross-origin range requests. See `.env.example` and `docs/hosting.md`.
 
 ## Docs
 

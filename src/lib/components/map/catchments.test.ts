@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { FeatureCollection } from 'geojson';
-import { LIVE_TIMEOUT_MS, gaugeProperties, gaugeUrl, getAll, loadGauges, queryUrl, reduceProperties } from './catchments.ts';
+import {
+	LIVE_TIMEOUT_MS, envelope, loadQuaternaries, namedQuaternaries, gaugeProperties, gaugeUrl, getAll, loadGauges, loadWmas, outlineOf, quaternaryUrl, queryUrl, reduceProperties, within, wmaUrl
+} from './catchments.ts';
+import { touches, wmaBySlug } from './wma.ts';
+
+const WMA = wmaBySlug('breede-olifants')!;
+/** A square from 0 to 10 each way, standing in for a WMA's outline. */
+const SQUARE = [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]];
+const pointAt = (x: number, y: number): FeatureCollection['features'][number] => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [x, y] }, properties: {} });
 
 describe('catchments', () => {
 	test('asks the service for GeoJSON in WGS84 with the given filter', () => {
@@ -11,17 +19,69 @@ describe('catchments', () => {
 		expect(u.searchParams.get('outSR')).toBe('4326');
 	});
 
-	test('asks for flow gauges in the study area by station number, not by the Quat field', () => {
-		const u = new URL(gaugeUrl());
-		const where = u.searchParams.get('where');
-		expect(where).toContain("Station LIKE 'H_H%' OR Station LIKE 'J_H%' OR Station LIKE 'F6H%' OR Station LIKE 'K1H%'");
-		expect(where).not.toContain('Quat');
+	test("asks for flow gauges in the WMA's box by station number, not by the Quat field", () => {
+		const u = new URL(gaugeUrl(WMA));
+		expect(u.searchParams.get('where')).toBe("Station LIKE '__H%'");
+		expect(u.searchParams.get('geometry')).toBe('17.81,-34.84,23.72,-29.81');
+		expect(u.searchParams.get('inSR')).toBe('4326');
 		expect(u.searchParams.get('outFields')).toBe('Station,Name,Quat,Status');
 		expect(u.searchParams.get('f')).toBe('geojson');
 	});
 
+	test("asks for the quaternaries crossing the WMA's box, and the WMA by its name in the 2023 layer", () => {
+		const q = new URL(quaternaryUrl(WMA));
+		expect(q.searchParams.get('where')).toBe('1=1');
+		expect(q.searchParams.get('geometryType')).toBe('esriGeometryEnvelope');
+		expect(q.searchParams.get('spatialRel')).toBe('esriSpatialRelIntersects');
+		const w = new URL(wmaUrl(WMA));
+		expect(w.pathname).toContain('/WMA_2023/FeatureServer/0/query');
+		expect(w.searchParams.get('where')).toBe("WMA_NAME = 'Breede_Olifants'");
+	});
+
+	test('adds no box to a query that has none', () => {
+		expect(envelope()).toEqual({});
+		expect(new URL(queryUrl('WMA_2004', '1=1', 'WMA_Name', 0.003, 4)).searchParams.has('geometry')).toBe(false);
+	});
+
+	test("keeps what lies in the WMA's outline, or everything in the box when the outline is lost", () => {
+		const fc: FeatureCollection = { type: 'FeatureCollection', features: [pointAt(5, 5), pointAt(15, 5)] };
+		expect(within(fc, SQUARE as never).features).toHaveLength(1);
+		expect(within(fc, null).features).toHaveLength(2);
+		const line = (x: number): FeatureCollection['features'][number] => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: [[x, 5], [x + 10, 5]] }, properties: {} });
+		expect(within({ type: 'FeatureCollection', features: [line(5), line(20)] }, SQUARE as never, touches).features).toHaveLength(1);
+	});
+
+	test("keeps a quaternary a node of the WMA names, though it lies mostly outside", async () => {
+		const quat = (QUATERNARY: string, x: number) => ({
+			type: 'Feature', properties: { QUATERNARY }, geometry: { type: 'Polygon', coordinates: [[[x, 1], [x + 2, 1], [x + 2, 3], [x, 3], [x, 1]]] }
+		});
+		vi.stubGlobal('fetch', vi.fn(async () => Response.json({ type: 'FeatureCollection', features: [quat('Z10A', 1), quat('Z10B', 20), quat('Z10C', 30)] })));
+		const named = namedQuaternaries([{ quat: 'Z10B / Z10D' }, { quat: '' }]);
+		expect([...named]).toEqual(['Z10B', 'Z10D']);
+		expect((await loadQuaternaries(WMA, SQUARE as never, named)).features.map((f) => f.properties?.q)).toEqual(['Z10A', 'Z10B']);
+		vi.unstubAllGlobals();
+	});
+
+	test('reads the outline of every polygon and multipolygon', () => {
+		const fc: FeatureCollection = {
+			type: 'FeatureCollection',
+			features: [
+				{ type: 'Feature', geometry: { type: 'Polygon', coordinates: SQUARE }, properties: {} },
+				{ type: 'Feature', geometry: { type: 'MultiPolygon', coordinates: [SQUARE, SQUARE] }, properties: {} }
+			]
+		};
+		expect(outlineOf(fc)).toHaveLength(3);
+	});
+
+	test('names each WMA by its slug, and gives Lesotho and Eswatini none, so they cannot be chosen', async () => {
+		const square = (WMA_NAME: string) => ({ type: 'Feature', geometry: { type: 'Polygon', coordinates: SQUARE }, properties: { WMA_NAME } });
+		vi.stubGlobal('fetch', vi.fn(async () => Response.json({ type: 'FeatureCollection', features: [square('Vaal_Orange'), square('Lesotho')] })));
+		expect((await loadWmas()).features.map((f) => f.properties)).toEqual([{ w: 'vaal-orange', name: 'Vaal-Orange' }, { w: '', name: 'Lesotho' }]);
+		vi.unstubAllGlobals();
+	});
+
 	test('orders every query, so that pages of it cannot overlap', () => {
-		for (const url of [gaugeUrl(), queryUrl('WMA_2004', '1=1', 'WMA_Name', 0.003, 4)]) {
+		for (const url of [gaugeUrl(WMA), quaternaryUrl(WMA), wmaUrl(WMA), queryUrl('WMA_2004', '1=1', 'WMA_Name', 0.003, 4)]) {
 			expect(new URL(url).searchParams.get('orderByFields')).toBe('OBJECTID');
 		}
 	});
@@ -92,7 +152,7 @@ describe('getAll', () => {
 
 	test('pages the gauge query too', async () => {
 		const fetch = answer(page(['H1H001'], true), page(['H1H002']));
-		expect((await loadGauges()).features.map((f) => f.properties?.station)).toEqual(['H1H001', 'H1H002']);
+		expect((await loadGauges(WMA, null)).features.map((f) => f.properties?.station)).toEqual(['H1H001', 'H1H002']);
 		expect(fetch).toHaveBeenCalledTimes(2);
 	});
 

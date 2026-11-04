@@ -29,7 +29,7 @@ Read `CLAUDE.md`, `docs/architecture.md` and `package.json`, then the code for y
 | `xss` | Boundary 2 | Grep `src` for `@html`, `innerHTML`, `outerHTML` and `insertAdjacentHTML`, then every popup and dynamic attribute |
 | `uploads` | Boundary 1, with a crafted-file probe where you can | `src/lib/ewr/parsers.ts`, the import path in `src/lib/state/app.svelte.ts`, the `xlsx` import |
 | `ci` | Boundary 5 | `.github/workflows/`, `.github/dependabot.yml` |
-| `public-repo` | Boundary 6: what is public in the repo: nothing under `static/data` but `map.json`, no client material in `docs/`, code, tests or fixtures, and the history | `git ls-files`, `git log --stat` |
+| `public-repo` | Boundary 6: what is public in the repo: nothing under `static/data`, no client material in `docs/`, code, tests or fixtures, and the history | `git ls-files`, `git log --stat` |
 | `all` | Every area above, briefly; go deep only where something smells | |
 
 ## How to work

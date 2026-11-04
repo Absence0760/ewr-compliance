@@ -1,11 +1,24 @@
-<!-- The popup for a node, a site with no linked node, or a flow gauge. EwrMap mounts it into a MapLibre popup. -->
+<!-- The popup for a node, a site with no linked node, a flow gauge or a river. EwrMap mounts it into a MapLibre popup. -->
+<script module lang="ts">
+	/** A reach of the DWS 1:500 000 rivers: its name, Strahler order and flow class. */
+	export interface River {
+		name: string;
+		order: number;
+		flow: string;
+	}
+
+	const FLOW: Record<string, string> = { Perennial: 'Perennial', NonPerennial: 'Non-perennial', Dry: 'Dry' };
+</script>
+
 <script lang="ts">
 	import { app } from '#lib/state/app.svelte.ts';
 	import type { EwrNode, EwrSite } from '#lib/ewr/types.ts';
 	import type { Gauge } from '#lib/components/map/catchments.ts';
 	import { fileInUse, fileOption } from '#lib/components/map/mapData.ts';
 
-	let { node = null, site = null, gauge = null }: { node?: EwrNode | null; site?: EwrSite | null; gauge?: Gauge | null } = $props();
+	let {
+		node = null, site = null, gauge = null, river = null
+	}: { node?: EwrNode | null; site?: EwrSite | null; gauge?: Gauge | null; river?: River | null } = $props();
 
 	const view = $derived(node ? app.viewOf(node) : null);
 	const files = $derived(node ? app.filesOf(node) : []);
@@ -47,6 +60,10 @@
 		<h3>{site.label}</h3>
 		<div class="row">EWR site, {site.basin}</div>
 		<div class="row">{site.river ? `${site.river}. ` : ''}No EWR files are linked.</div>
+	{:else if river}
+		<h3>{river.name || 'River not named'}</h3>
+		<div class="row">{[FLOW[river.flow], `Strahler order ${river.order}`].filter(Boolean).join(', ')}</div>
+		<div class="row muted">DWS 1:500 000 rivers</div>
 	{:else if gauge}
 		<h3>{gauge.station}</h3>
 		<div class="row">{gauge.name}</div>

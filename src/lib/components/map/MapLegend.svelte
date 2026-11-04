@@ -1,7 +1,7 @@
 <!-- The key to the map's symbols, and the switches for its optional layers. -->
 <script lang="ts">
 	import {
-		BASIN_BLACK, GAUGE_GREEN, NO_FILE_EDGE, NODE_BLUE, NODE_EDGE, QUAT_LINE, QUAT_TINT, RIVER_BLUE, SITE_EDGE, SITE_ORANGE
+		BASIN_BLACK, GAUGE_GREEN, NO_FILE_EDGE, NODE_BLUE, NODE_EDGE, QUAT_LINE, QUAT_TINT, RIVER_BLUE, SITE_EDGE, SITE_ORANGE, WMA_PURPLE
 	} from '#lib/components/map/mapStyle.ts';
 
 	let {
@@ -11,6 +11,7 @@
 		gauges = $bindable(),
 		closedGauges = $bindable(),
 		basemap = $bindable(),
+		hasNodes,
 		hasBasemap,
 		basemapFailed
 	}: {
@@ -20,27 +21,35 @@
 		gauges: boolean;
 		closedGauges: boolean;
 		basemap: boolean;
+		/** A WMA with no EWR data has no nodes, sites or basins to explain. */
+		hasNodes: boolean;
 		hasBasemap: boolean;
 		basemapFailed: boolean;
 	} = $props();
 </script>
 
 <div class="legend">
+	{#if hasNodes}
+		<div class="key">
+			<svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="5" fill={NODE_BLUE} stroke={NODE_EDGE} /></svg>
+			EWR node
+		</div>
+		<div class="key">
+			<svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="5" fill="#fff" stroke={NODE_BLUE} stroke-width="2" /></svg>
+			EWR node, location approximate
+		</div>
+		<div class="key">
+			<svg width="14" height="14" aria-hidden="true"><path d="M7 1 13 7 7 13 1 7Z" fill={SITE_ORANGE} stroke={SITE_EDGE} /></svg>
+			EWR site
+		</div>
+		<div class="key">
+			<svg width="14" height="14" aria-hidden="true"><path d="M1 7h12" stroke={BASIN_BLACK} stroke-width="3" /></svg>
+			Basin boundary
+		</div>
+	{/if}
 	<div class="key">
-		<svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="5" fill={NODE_BLUE} stroke={NODE_EDGE} /></svg>
-		EWR node
-	</div>
-	<div class="key">
-		<svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="5" fill="#fff" stroke={NODE_BLUE} stroke-width="2" /></svg>
-		EWR node, location approximate
-	</div>
-	<div class="key">
-		<svg width="14" height="14" aria-hidden="true"><path d="M7 1 13 7 7 13 1 7Z" fill={SITE_ORANGE} stroke={SITE_EDGE} /></svg>
-		EWR site
-	</div>
-	<div class="key">
-		<svg width="14" height="14" aria-hidden="true"><path d="M1 7h12" stroke={BASIN_BLACK} stroke-width="3" /></svg>
-		Basin boundary
+		<svg width="14" height="14" aria-hidden="true"><path d="M1 7h12" stroke={WMA_PURPLE} stroke-width="2.5" stroke-dasharray="4 2" /></svg>
+		WMA boundary
 	</div>
 	<label>
 		<input type="checkbox" bind:checked={quaternaries} />
@@ -52,11 +61,13 @@
 		<svg width="14" height="14" aria-hidden="true"><path d="M1 10 5 5 9 9 13 4" fill="none" stroke={RIVER_BLUE} stroke-width="2" /></svg>
 		Rivers
 	</label>
-	<label>
-		<input type="checkbox" bind:checked={noFile} />
-		<svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="3.5" fill="#fff" stroke={NO_FILE_EDGE} /></svg>
-		Nodes with no EC file
-	</label>
+	{#if hasNodes}
+		<label>
+			<input type="checkbox" bind:checked={noFile} />
+			<svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="3.5" fill="#fff" stroke={NO_FILE_EDGE} /></svg>
+			Nodes with no EC file
+		</label>
+	{/if}
 	<label>
 		<input type="checkbox" bind:checked={gauges} />
 		<svg width="14" height="14" aria-hidden="true"><path d="M7 2 13 12H1Z" fill={GAUGE_GREEN} /></svg>

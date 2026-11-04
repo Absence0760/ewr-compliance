@@ -13,15 +13,28 @@ export const DWS = /^https:\/\/services[38]\.arcgis\.com\//;
 /** The path of the made-up flow API. Its failures are what the API tests are for, so the watch lets them by. */
 export const API_STUB = '/stub-api/';
 
-/** One made-up square, so a test never depends on the service or holds any of its data. */
-const boundary = (props: Record<string, string>) => ({
-	type: 'FeatureCollection',
-	features: [{
-		type: 'Feature',
-		properties: props,
-		geometry: { type: 'Polygon', coordinates: [[[21, -34.2], [21.2, -34.2], [21.2, -34], [21, -34], [21, -34.2]]] }
-	}]
+/** The map of the WMA the sample's basins are in, which most specs work on. */
+export const MAP = 'wma/breede-olifants/';
+
+type Box = [number, number, number, number];
+const square = ([w, s, e, n]: Box, properties: Record<string, string>) => ({
+	type: 'Feature',
+	properties,
+	geometry: { type: 'Polygon', coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]] }
 });
+
+/** One made-up square, so a test never depends on the service or holds any of its data. */
+const boundary = (props: Record<string, string>) => ({ type: 'FeatureCollection', features: [square([21, -34.2, 21.2, -34], props)] });
+
+/**
+ * Made-up WMAs: Breede-Olifants takes in every point of the sample, and the quaternary and gauge
+ * above. A query for one WMA by name gets that one.
+ */
+const STUB_WMAS: [string, Box][] = [['Breede_Olifants', [18.5, -34.5, 23.5, -31.5]], ['Vaal_Orange', [24, -31, 28, -27]], ['Lesotho', [27.5, -30.5, 29, -29]]];
+function wmas(url: string) {
+	const one = /WMA_NAME = '([^']+)'/.exec(new URL(url).searchParams.get('where') ?? '')?.[1];
+	return { type: 'FeatureCollection', features: STUB_WMAS.filter(([name]) => !one || name === one).map(([name, box]) => square(box, { WMA_NAME: name })) };
+}
 
 /**
  * A made-up gauge. The point is down and left of the sample's syt1: labelled when that node is in
@@ -46,9 +59,11 @@ export const test = base.extend<{ gaugeAt: [number, number]; watch: void }>({
 				route.fulfill({
 					json: route.request().url().includes('Gauging_Weirs')
 						? gauges(gaugeAt)
-						: route.request().url().includes('/WMA_2004/')
-							? boundary({ WMA_Name: 'Gouritz' })
-							: boundary({ QUATERNARY: 'Z80D' })
+						: route.request().url().includes('/WMA_2023/')
+							? wmas(route.request().url())
+							: route.request().url().includes('/WMA_2004/')
+								? boundary({ WMA_Name: 'Gouritz' })
+								: boundary({ QUATERNARY: 'Z80D' })
 				})
 			);
 			page.on('console', (m) => {
@@ -89,9 +104,9 @@ export async function findNode(page: Page, text: string, heading: string = text)
 	await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText(heading);
 }
 
-/** Open the home route with this node selected. */
+/** Open the sample's WMA with this node selected. */
 export async function openNode(page: Page, text: string, heading: string = text) {
-	await page.goto('/');
+	await page.goto(MAP);
 	await findNode(page, text, heading);
 }
 

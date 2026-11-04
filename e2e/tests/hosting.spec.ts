@@ -1,5 +1,5 @@
 import { test as plain, type Page } from '@playwright/test';
-import { DWS, expect, findNode, mapRegion, test } from '../support/app.ts';
+import { DWS, MAP, expect, findNode, mapRegion, test } from '../support/app.ts';
 
 // The build for /ewr/ on a plain static host (support/static-host.mjs). Paths here take no leading
 // slash, which would leave /ewr/. See docs/hosting.md.
@@ -9,14 +9,25 @@ test.use({ baseURL: SITE });
 plain.use({ baseURL: SITE });
 
 test.describe('under a sub-path on a plain static host', () => {
-	test('a direct load of the map reads its data from under the path', async ({ page }) => {
-		const map = page.waitForResponse(`${SITE}data/map.json`);
-		await page.goto('./');
+	test("a direct load of a WMA's map reads its data from under the path", async ({ page }) => {
+		const map = page.waitForResponse(`${SITE}geo/rivers-breede-olifants.json`);
+		await page.goto(MAP);
 		await map;
 		await expect(page.getByRole('link', { name: 'Map and compliance' })).toHaveAttribute('aria-current', 'page');
 		const files = page.waitForResponse(`${SITE}data/ewr-gouritz.json`);
 		await findNode(page, 'syt1', 'syt1 / SYN-SITE1');
 		await files;
+	});
+
+	test("a WMA's map survives a reload, and its link goes back to the chooser", async ({ page }) => {
+		await page.goto(MAP);
+		await page.reload();
+		await expect(page).toHaveURL(`${SITE}${MAP}`);
+		await expect(mapRegion(page)).toBeVisible();
+		await page.getByRole('link', { name: 'Map and compliance' }).click();
+		await expect(page).toHaveURL(SITE);
+		await page.getByRole('link', { name: /Breede-Olifants/ }).click();
+		await expect(page).toHaveURL(`${SITE}${MAP}`);
 	});
 
 	for (const [route, link] of [
@@ -40,10 +51,10 @@ test.describe('under a sub-path on a plain static host', () => {
 	}
 
 	// Not the watching `test`: it counts the address without the slash as leaving the site.
-	plain('the address of the site without its slash loads the map', async ({ page }) => {
+	plain('the address of the site without its slash loads the WMA map', async ({ page }) => {
 		await page.goto(SITE.slice(0, -1));
 		await expect(page).toHaveURL(SITE);
-		await expect(mapRegion(page)).toBeVisible();
+		await expect(page.getByRole('region', { name: 'Map of Water Management Areas' })).toBeVisible();
 	});
 
 	test('the links stay under the path', async ({ page }) => {
@@ -54,9 +65,10 @@ test.describe('under a sub-path on a plain static host', () => {
 		await expect(page).toHaveURL(`${SITE}notes/`);
 		await page.getByRole('link', { name: 'Map and compliance' }).click();
 		await expect(page).toHaveURL(SITE);
-		await expect(mapRegion(page)).toBeVisible();
+		const national = page.getByRole('region', { name: 'Map of Water Management Areas' });
+		await expect(national).toBeVisible();
 		await page.reload();
-		await expect(mapRegion(page)).toBeVisible();
+		await expect(national).toBeVisible();
 	});
 
 	// Not the watching `test`: this one is meant to get a 404.
@@ -72,7 +84,7 @@ test.describe('under a sub-path on a plain static host', () => {
 
 test.describe('content security policy', () => {
 	test('every built page carries one', async ({ page }) => {
-		for (const route of ['./', 'nodes/', 'notes/']) {
+		for (const route of ['./', MAP, 'nodes/', 'notes/']) {
 			await page.goto(route);
 			await expect(page.locator('meta[http-equiv="content-security-policy"]')).toHaveAttribute('content', /default-src 'none'/);
 		}

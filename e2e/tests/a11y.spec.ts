@@ -1,4 +1,4 @@
-import { expect, findNode, mapRegion, openNode, panel, test } from '../support/app.ts';
+import { MAP, expect, findNode, mapRegion, openNode, panel, test } from '../support/app.ts';
 
 test.describe('keyboard', () => {
 	test('the skip link is first, shows on focus and moves to the main content', async ({ page }) => {
@@ -42,7 +42,7 @@ test.describe('keyboard', () => {
 	test('a popup that opens late leaves focus where the person moved it', async ({ page }) => {
 		let release = () => {};
 		const held = new Promise<void>((r) => (release = r));
-		await page.route('**/data/map.json', async (route) => {
+		await page.route('**/geo/rivers-*.json', async (route) => {
 			await held;
 			await route.continue();
 		});
@@ -65,7 +65,7 @@ test.describe('keyboard', () => {
 	});
 
 	test('Tab reaches only the selected comparison tab', async ({ page }) => {
-		await page.goto('/');
+		await page.goto(MAP);
 		const tabs = panel(page).getByRole('tab');
 		await expect(tabs.nth(0)).toHaveAttribute('tabindex', '0');
 		await expect(tabs.nth(1)).toHaveAttribute('tabindex', '-1');

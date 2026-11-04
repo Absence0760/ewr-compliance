@@ -2,7 +2,7 @@
 # `pnpm data:private`: copies the real data and the tests pinned to it from the private repo into
 # this checkout, where they run with the code here. Everything it writes is ignored by git.
 #
-#   static/data/*      to static/data/, all but map.json, which is public and tracked here
+#   static/data/*      to static/data/
 #   tests/unit/*       to src/private/
 #   tests/e2e/*        to e2e/tests/private/
 #
@@ -30,7 +30,9 @@ if [ "$private" = "$root" ]; then
 	exit 1
 fi
 
-find "$root/static/data" -mindepth 1 -maxdepth 1 ! -name map.json -delete
+mkdir -p "$root/static/data"
+find "$root/static/data" -mindepth 1 -maxdepth 1 -delete
+# map.json is skipped: the rivers it held are public now, in static/geo, and the private repo may still have a copy.
 find "$private/static/data" -mindepth 1 -maxdepth 1 ! -name map.json -exec cp -- {} "$root/static/data/" \;
 
 for pair in "tests/unit:src/private" "tests/e2e:e2e/tests/private"; do

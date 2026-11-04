@@ -1,14 +1,16 @@
 // `pnpm data:sample`: copies the synthetic dataset in e2e/fixtures/sample-data to static/data.
 // Real data in static/data is not synthetic and may be the only copy to hand, so this refuses to
-// overwrite it. `pnpm data:sample --force` overwrites it. static/data/map.json is public and stays.
-import { copyFileSync, existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+// overwrite it. `pnpm data:sample --force` overwrites it.
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const path = (p) => fileURLToPath(new URL(`../${p}`, import.meta.url));
 const DATA = path('static/data/');
 const SAMPLE = path('e2e/fixtures/sample-data/');
 
-const present = readdirSync(DATA).filter((f) => f !== 'map.json');
+// On a fresh clone the folder is not there: git keeps nothing in it.
+mkdirSync(DATA, { recursive: true });
+const present = readdirSync(DATA);
 const isSample = existsSync(`${DATA}index.json`) && JSON.parse(readFileSync(`${DATA}index.json`, 'utf8')).sample === true;
 
 if (present.length && !isSample) {

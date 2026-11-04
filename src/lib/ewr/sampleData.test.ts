@@ -6,6 +6,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { parseGaugeFlows, parseMon, parseTab } from './parsers.ts';
 import { buildNotices, resolveView } from './resolve.ts';
 import type { EwrNode, GaugeData, IndexData } from './types.ts';
+import { wmaOfBasin } from '#lib/components/map/wma.ts';
 
 const DIR = new URL('../../../e2e/fixtures/sample-data/', import.meta.url);
 const load = (f: string) => JSON.parse(readFileSync(new URL(f, DIR), 'utf8'));
@@ -25,6 +26,10 @@ test('it has the same files as a real build, and no more', () => {
 	const basins = ['berg', 'breede', 'gouritz', 'olifantsdoring'];
 	const want = ['index.json', 'gauges.json', 'flows-X0H997.json', 'flows-X0H998.json', 'flows-X0H999.json', ...basins.flatMap((b) => [`ewr-${b}.json`, `series-${b}.json`])];
 	assert.deepEqual(readdirSync(DIR).sort(), want.sort());
+});
+
+test("every node and site is in a WMA, or it would be on no WMA's map", () => {
+	for (const x of [...index.nodes, ...index.sites]) assert.ok(wmaOfBasin(x.basin), `${x.basin}: ${x.label}`);
 });
 
 test('every basin the UI lists has a node on the map', () => {

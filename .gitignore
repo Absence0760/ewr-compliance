@@ -11,8 +11,7 @@ static/tiles/
 __pycache__/
 
 # Generated, and real data stays in the private repo. `pnpm data:sample` or `pnpm data:private` fills it.
-static/data/*
-!static/data/map.json
+static/data/
 
 # Copied in by `pnpm data:private`.
 src/private/

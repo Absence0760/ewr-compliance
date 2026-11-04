@@ -5,6 +5,7 @@
 	import { onMount } from 'svelte';
 	import { app } from '#lib/state/app.svelte.ts';
 	import FileViewer from '#lib/components/viewer/FileViewer.svelte';
+	import { wmaBySlug } from '#lib/components/map/wma.ts';
 	import type { EcBasis } from '#lib/ewr/types.ts';
 
 	let { children } = $props();
@@ -13,13 +14,17 @@
 		{ href: resolve('nodes/'), label: 'Nodes and ECs' },
 		{ href: resolve('notes/'), label: 'Method and data notes' }
 	];
-	const here = (href: string) => page.url.pathname.replace(/\/$/, '') === href.replace(/\/$/, '');
+	const home = resolve('/');
+	/** A WMA's map is part of the map, under its first link. */
+	const inWma = $derived(page.url.pathname.startsWith(`${home.replace(/\/$/, '')}/wma/`));
+	const here = (href: string) => page.url.pathname.replace(/\/$/, '') === href.replace(/\/$/, '') || (href === home && inWma);
 	const current = $derived(nav.find((n) => here(n.href)));
+	const wmaName = $derived(inWma ? wmaBySlug(page.params.wma ?? '')?.name : undefined);
 	onMount(() => app.load());
 </script>
 
 <svelte:head>
-	<title>{current ? `${current.label} · ` : ''}EWR Compliance Measurement</title>
+	<title>{wmaName ? `${wmaName} · ` : ''}{current ? `${current.label} · ` : ''}EWR Compliance Measurement</title>
 </svelte:head>
 
 <a class="skip" href="#main">Skip to main content</a>

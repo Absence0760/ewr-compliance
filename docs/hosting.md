@@ -22,7 +22,7 @@ pnpm build
 
 Use `pnpm data:sample` in place of `pnpm data:private` for a trial build. With neither, the build still succeeds but the app cannot start, because it needs `data/index.json`.
 
-Upload the contents of `build/`, not the folder itself. That is about 21 MB with the real data, or 115 MB with the base map.
+Upload the contents of `build/`, not the folder itself. That is about 30 MB with the real data and the rivers, or about 295 MB with the base map.
 
 | Build setting | Default | Purpose |
 |---|---|---|
@@ -82,7 +82,7 @@ Every built page carries the policy as a meta tag, with the hash of its own star
 | `connect-src` | `'self' https: http:` | See below. |
 | `base-uri`, `form-action`, `object-src` | `'self'`, `'none'`, `'none'` | |
 
-The site's own origin covers `data/`, and `tiles/` when the base map is uploaded. The origins the browser needs beyond it are:
+The site's own origin covers `data/`, `geo/`, and `tiles/` when the base map is uploaded. The origins the browser needs beyond it are:
 
 | Origin | For |
 |---|---|
@@ -101,7 +101,7 @@ The host needs nothing for these. Each browser reads them directly from the ArcG
 
 ## Base map
 
-`tools/fetch-tiles.sh` fills `static/tiles/`, 84 MB of `.pmtiles` and 14 MB of fonts, and `pnpm build` copies it into `build/tiles/`. Check the host's limit on one file. To keep the file elsewhere, set `VITE_TILES_URL` and `VITE_TILES_GLYPHS_URL` to full `https` URLs.
+`tools/fetch-tiles.sh` fills `static/tiles/`, 251 MB of `.pmtiles` for South Africa and the label fonts, and `pnpm build` copies it into `build/tiles/`. Check the host's limit on one file. To keep the file elsewhere, set `VITE_TILES_URL` and `VITE_TILES_GLYPHS_URL` to full `https` URLs.
 
 The host of the `.pmtiles`, here or elsewhere, must:
 

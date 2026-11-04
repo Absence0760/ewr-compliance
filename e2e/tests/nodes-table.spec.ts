@@ -61,7 +61,7 @@ test.describe('nodes table', () => {
 		await page.getByRole('checkbox', { name: 'Only nodes with an EC file available' }).uncheck();
 		await expect(count(page)).toHaveText('9 of 9 nodes');
 		await page.getByRole('link', { name: 'Map and compliance' }).click();
-		await expect(mapRegion(page)).toBeVisible();
+		await expect(page.getByRole('region', { name: 'Map of Water Management Areas' })).toBeVisible();
 		await page.getByRole('link', { name: 'Nodes and ECs' }).click();
 		await expect(count(page)).toHaveText('9 of 9 nodes');
 	});

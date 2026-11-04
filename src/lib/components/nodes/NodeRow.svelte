@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { app } from '#lib/state/app.svelte.ts';
 	import type { EwrNode } from '#lib/ewr/types.ts';
+	import { wmaOfBasin } from '#lib/components/map/wma.ts';
 
 	let { node: n }: { node: EwrNode } = $props();
 
@@ -18,7 +19,9 @@
 		// Dragging across a cell to copy its text is not a request to leave the table.
 		if (getSelection()?.toString()) return;
 		app.select(n.id, { focus: true });
-		void goto(resolve('/'));
+		// The node's own WMA, or the WMA chooser for a basin no WMA claims.
+		const wma = wmaOfBasin(n.basin);
+		void goto(wma ? resolve(`wma/${wma.slug}/` as '/') : resolve('/'));
 	}
 </script>
 

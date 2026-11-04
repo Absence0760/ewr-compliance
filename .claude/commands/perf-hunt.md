@@ -17,7 +17,7 @@ Find performance problems that **actually bite at realistic scale** and fix them
 
 ## Where the cost usually lives
 
-- **The first load.** The real `static/data` is 21 MB across basins, so what loads when matters: `index.json` and `map.json` first, a basin's files on demand. Check the compression a static host gives, and bytes per node.
+- **The first load.** The real `static/data` is 21 MB across basins, so what loads when matters: `index.json` first, a WMA's rivers (`static/geo`, up to 3 MB for Vaal-Orange) with its map, a basin's files on demand. Check the compression a static host gives, and bytes per node.
 - **Large flow files.** Years of 12-minute readings are hundreds of thousands of rows through `parseDelimited`, `seriesPoints` and `monthlyFromPoints`, on the main thread. SheetJS adds the workbook parse.
 - **Recomputation.** A `$derived` over a whole record that reruns on every selection change or keystroke.
 - **Chart and map.** uPlot with every instantaneous point; MapLibre layers rebuilt rather than updated.

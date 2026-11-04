@@ -1,4 +1,4 @@
-import { chip, expect, expectRow, findNode, historical, legend, loadFile, openNode, panel, select, tableRow, test } from '../support/app.ts';
+import { MAP, chip, expect, expectRow, findNode, historical, legend, loadFile, openNode, panel, select, tableRow, test } from '../support/app.ts';
 import type { Locator } from '@playwright/test';
 
 // monthly.xlsx: 15 years (k = 1 to 15), a month is k × (i + 1) × 0.1 Mm³ with i = 0 for Oct, and
@@ -149,7 +149,7 @@ test.describe('Historical Comparison', () => {
 	});
 
 	test('flow loaded first carries across nodes', async ({ page }) => {
-		await page.goto('/');
+		await page.goto(MAP);
 		const hist = historical(page);
 		await loadFile(hist, 'Monthly flow file', 'monthly.xlsx');
 		await expect(status(hist)).toHaveText(XLSX_READ);

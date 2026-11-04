@@ -1,6 +1,6 @@
 <!--
-	The map: catchments, rivers, basins, EWR nodes and sites, with a popup for each point, basin
-	zoom, search and a legend. It fills the left column of the home route.
+	One WMA's map: its catchments, rivers, flow gauges, basins, EWR nodes and sites, with a popup
+	for each point and river, basin zoom, search and a legend. It fills the left column of the WMA route.
 	The canvas is drawn by MapLibre, which is loaded when this mounts (maplibre.ts). Points are
 	picked by position rather than per-layer events, so the nearest of a dense cluster wins and a
 	diamond is hit across its full width. The search is the keyboard route to every point.
@@ -12,32 +12,34 @@
 
 <script lang="ts">
 	import { mount, onMount, unmount, untrack } from 'svelte';
-	import { asset } from '$app/paths';
+	import { goto } from '$app/navigation';
+	import { asset, resolve } from '$app/paths';
 	import type { FeatureCollection } from 'geojson';
 	import type { GeoJSONSource, GeoJSONSourceSpecification, LngLatLike, MapGeoJSONFeature, Marker, Popup, PointLike } from 'maplibre-gl';
 	import type { Map as MapLibreMap } from 'maplibre-gl';
 	import { app } from '#lib/state/app.svelte.ts';
 	import type { EwrNode, EwrSite } from '#lib/ewr/types.ts';
-	import { loadBasins, loadGauges, loadQuaternaries, type Gauge } from '#lib/components/map/catchments.ts';
+	import { loadBasins, loadGauges, loadQuaternaries, loadWma, namedQuaternaries, outlineOf, type Gauge } from '#lib/components/map/catchments.ts';
+	import { WMAS, wmaOfBasin, type Wma } from '#lib/components/map/wma.ts';
 	import MapLegend from '#lib/components/map/MapLegend.svelte';
-	import NodePopup from '#lib/components/map/NodePopup.svelte';
+	import NodePopup, { type River } from '#lib/components/map/NodePopup.svelte';
 	import {
 		basinBounds, boundsOf, findEntry, gaugeLabels, labelPoints, nodeFeatures, searchEntries, siteFeatures, type Bounds, type MapLabel
 	} from '#lib/components/map/mapData.ts';
 	import {
-		BASEMAP_SOURCE, BASINS, CREDIT, DIAMOND, FIRST_LABEL, GAUGE_CLOSED_ICON, GAUGE_ICON, GAUGES, GAUGES_CLOSED, NO_FILE, NODES,
-		OVERLAY_LAYERS, POINT_LAYERS, QUAT_FILL, QUAT_LINES, RIVERS, SITES, baseStyle, basemapLayerIds, diamondImage, gaugeImage
+		BASEMAP_SOURCE, BASINS, CREDIT, DIAMOND, FIRST_LABEL, GAUGE_CLOSED_ICON, GAUGE_ICON, GAUGES, GAUGES_CLOSED, MINOR_RIVERS, NO_FILE,
+		NODES, OVERLAY_LAYERS, POINT_LAYERS, QUAT_FILL, QUAT_LINES, RIVER_LABEL_LAYER, RIVER_LABELS, RIVERS, SITES, baseStyle, basemapLayerIds,
+		diamondImage, gaugeImage
 	} from '#lib/components/map/mapStyle.ts';
 
-	interface MapGeo {
-		rivers: FeatureCollection;
-	}
+	let { wma }: { wma: Wma } = $props();
 
 	const LABEL_ZOOM = 9;
 	const FOCUS_ZOOM = 10;
 	const PICK_RADIUS = 9;
 	const FIT = { padding: 30, duration: 500 };
 	/** The map's notice for each live layer it lost, in the order they are read out. */
+	const LOST_WMA = 'The WMA boundary could not be loaded from the DWS service.';
 	const LOST_QUATERNARIES = 'Quaternary catchments could not be loaded from the DWS service.';
 	const LOST_BASINS = 'Basin boundaries could not be loaded from the DWS service.';
 	const LOST_GAUGES = 'Flow gauges could not be loaded.';
@@ -81,11 +83,15 @@
 	const glyphs = absolute(import.meta.env.VITE_TILES_GLYPHS_URL);
 	const style = baseStyle(tilesUrl, glyphs);
 
-	const entries = $derived(searchEntries(app.nodes, app.sites));
+	/** The nodes and sites of this WMA. Every map is of one WMA, and the app's data may cover several. */
+	const inWma = (basin: string) => wmaOfBasin(basin)?.slug === wma.slug;
+	const nodes = $derived(app.nodes.filter((n) => inWma(n.basin)));
+	const sites = $derived(app.sites.filter((s) => inWma(s.basin)));
+	const entries = $derived(searchEntries(nodes, sites));
 	const liveNote = $derived(
-		lostLive.length ? `${[LOST_QUATERNARIES, LOST_BASINS, LOST_GAUGES].filter((l) => lostLive.includes(l)).join(' ')} Everything else still works.` : ''
+		lostLive.length ? `${[LOST_WMA, LOST_QUATERNARIES, LOST_BASINS, LOST_GAUGES].filter((l) => lostLive.includes(l)).join(' ')} Everything else still works.` : ''
 	);
-	const labels = $derived([...labelPoints(app.nodes, app.sites, showNoFile), ...gaugeLabels(gauges, showGauges, showClosedGauges)]);
+	const labels = $derived([...labelPoints(nodes, sites, showNoFile), ...gaugeLabels(gauges, showGauges, showClosedGauges)]);
 
 	onMount(() => {
 		let gone = false;
@@ -102,15 +108,18 @@
 
 	async function start(gone: () => boolean) {
 		try {
-			const [lib, res] = await Promise.all([import('#lib/components/map/maplibre.ts'), fetch(asset('data/map.json'))]);
-			if (!res.ok) throw new Error(`map.json: HTTP ${res.status}`);
-			const geo = (await res.json()) as MapGeo;
+			// One per WMA, written by tools/build-rivers.ts.
+			const riversFile = `geo/rivers-${wma.slug}.json` as Parameters<typeof asset>[0];
+			const [lib, res] = await Promise.all([import('#lib/components/map/maplibre.ts'), fetch(asset(riversFile))]);
+			if (!res.ok) throw new Error(`${riversFile}: HTTP ${res.status}`);
+			const rivers = (await res.json()) as FeatureCollection;
 			if (gone()) return;
 			ml = lib;
 			if (tilesUrl) await ml.usePmtiles();
 			if (gone()) return;
-			basins = basinBounds(app.nodes);
-			allBounds = boundsOf(basins.map((b) => b.bounds));
+			basins = basinBounds(nodes);
+			// A WMA with nodes opens on them, and one without on the whole area.
+			allBounds = basins.length ? boundsOf(basins.map((b) => b.bounds)) : wma.bounds;
 			const m = new ml.MapLibreMap({
 				container,
 				style,
@@ -132,13 +141,16 @@
 				const source = (data: unknown) => ({ type: 'geojson', data }) as GeoJSONSourceSpecification;
 				const empty = { type: 'FeatureCollection', features: [] };
 				m.addSource('quaternaries', source(empty));
-				m.addSource('rivers', source(geo.rivers));
+				m.addSource('rivers', source(rivers));
+				m.addSource('wma', source(empty));
 				m.addSource('basins', source(empty));
-				m.addSource('nodes', source(nodeFeatures(app.nodes)));
-				m.addSource('sites', source(siteFeatures(app.sites, app.nodes)));
+				m.addSource('nodes', source(nodeFeatures(nodes)));
+				m.addSource('sites', source(siteFeatures(sites, nodes)));
 				m.addSource('gauges', source(empty));
 				const under = tilesUrl && glyphs ? FIRST_LABEL : undefined;
 				for (const layer of OVERLAY_LAYERS) m.addLayer(layer, POINT_LAYERS.includes(layer.id) ? undefined : under);
+				// River names need glyphs, which come with the base map. They sit under the points.
+				if (glyphs) m.addLayer(RIVER_LABEL_LAYER, POINT_LAYERS[0]);
 				if (tilesUrl) m.setPaintProperty(QUAT_FILL, 'fill-opacity', 0.12);
 				loadLive(m);
 				m.on('click', onClick);
@@ -167,12 +179,21 @@
 				}
 			);
 		const set = (id: string, data: FeatureCollection) => (m.getSource(id) as GeoJSONSource).setData(data);
-		void live(loadQuaternaries, LOST_QUATERNARIES, (fc) => set('quaternaries', fc));
-		void live(loadBasins, LOST_BASINS, (fc) => set('basins', fc));
-		void live(loadGauges, LOST_GAUGES, (fc) => {
+		// Catchments and gauges are asked for by the WMA's box and kept by its outline. Without the
+		// outline, which is reported, they are kept by the box alone.
+		// Read now: the callbacks below can run after the page has moved on, when props are stale.
+		const area = wma;
+		const boundary = loadWma(area);
+		void live(() => boundary, LOST_WMA, (fc) => set('wma', fc));
+		const outline = boundary.then(outlineOf, () => null);
+		const named = namedQuaternaries(nodes);
+		void live(() => outline.then((o) => loadQuaternaries(area, o, named)), LOST_QUATERNARIES, (fc) => set('quaternaries', fc));
+		void live(() => outline.then((o) => loadGauges(area, o)), LOST_GAUGES, (fc) => {
 			set('gauges', fc);
 			gauges = fc;
 		});
+		// The 2004 basin outlines are drawn where there are nodes, to go with the basin zoom.
+		if (nodes.length) void live(loadBasins, LOST_BASINS, (fc) => set('basins', fc));
 	}
 
 	function onError(e: { error: { message: string } }) {
@@ -204,9 +225,13 @@
 
 	const lngLatOf = (f: MapGeoJSONFeature) => (f.geometry as unknown as { coordinates: [number, number] }).coordinates;
 
-	function onClick(e: { point: { x: number; y: number } }) {
+	function onClick(e: { point: { x: number; y: number }; lngLat: LngLatLike }) {
 		const f = pointsNear(e.point)[0];
-		if (!f) return;
+		if (!f) {
+			const river = riverAt(e.point);
+			if (river) openPopup({ river }, e.lngLat);
+			return;
+		}
 		const at = lngLatOf(f);
 		if (f.layer.id === GAUGES || f.layer.id === GAUGES_CLOSED) {
 			app.showGauge(f.properties.station, f.properties.name);
@@ -218,7 +243,7 @@
 			return;
 		}
 		if (f.properties.node) activate(f.properties.node, at);
-		else openPopup({ site: app.sites[f.properties.i] }, at);
+		else openPopup({ site: sites[f.properties.i] }, at);
 	}
 
 	function activate(id: string, at: LngLatLike) {
@@ -230,21 +255,27 @@
 	function onHover(e: { point: { x: number; y: number }; lngLat: LngLatLike }) {
 		const m = map!;
 		const near = pointsNear(e.point);
-		m.getCanvas().style.cursor = near.length ? 'pointer' : '';
+		m.getCanvas().style.cursor = near.length || riverAt(e.point) ? 'pointer' : '';
 		const text = near[0]?.properties.label ?? riverOrQuaternaryAt(e.point);
 		if (text) tip?.setLngLat(e.lngLat).setText(text).addTo(m);
 		else tip?.remove();
 	}
 
-	function riverOrQuaternaryAt(p: { x: number; y: number }): string {
-		const m = map!;
-		const rivers = showRivers ? m.queryRenderedFeatures([[p.x - 3, p.y - 3], [p.x + 3, p.y + 3]], { layers: [RIVERS] }) : [];
-		const name = rivers.find((f) => f.properties.n)?.properties.n;
-		if (name) return name;
-		return showQuaternaries ? (m.queryRenderedFeatures([p.x, p.y], { layers: [QUAT_FILL] })[0]?.properties.q ?? '') : '';
+	/** The river drawn under the pixel, named first, then the larger. */
+	function riverAt(p: { x: number; y: number }): River | null {
+		if (!showRivers) return null;
+		const near = map!.queryRenderedFeatures([[p.x - 3, p.y - 3], [p.x + 3, p.y + 3]], { layers: [RIVERS, MINOR_RIVERS] });
+		const f = near.sort((a, b) => Number(!!b.properties.n) - Number(!!a.properties.n) || (b.properties.s ?? 1) - (a.properties.s ?? 1))[0];
+		return f ? { name: f.properties.n ?? '', order: f.properties.s ?? 1, flow: f.properties.c ?? '' } : null;
 	}
 
-	function openPopup(content: { node?: EwrNode; site?: EwrSite; gauge?: Gauge }, at: LngLatLike) {
+	function riverOrQuaternaryAt(p: { x: number; y: number }): string {
+		const name = riverAt(p)?.name;
+		if (name) return name;
+		return showQuaternaries ? (map!.queryRenderedFeatures([p.x, p.y], { layers: [QUAT_FILL] })[0]?.properties.q ?? '') : '';
+	}
+
+	function openPopup(content: { node?: EwrNode; site?: EwrSite; gauge?: Gauge; river?: River }, at: LngLatLike) {
 		popup?.remove();
 		const el = document.createElement('div');
 		const body = mount(NodePopup, { target: el, props: content });
@@ -304,7 +335,7 @@
 	$effect(() => {
 		if (!ready) return;
 		setVisible([QUAT_FILL, QUAT_LINES], showQuaternaries);
-		setVisible([RIVERS], showRivers);
+		setVisible(glyphs ? [RIVERS, MINOR_RIVERS, RIVER_LABELS] : [RIVERS, MINOR_RIVERS], showRivers);
 		setVisible([NO_FILE], showNoFile);
 		setVisible([GAUGES], showGauges);
 		setVisible([GAUGES_CLOSED], showClosedGauges);
@@ -327,7 +358,8 @@
 		if (!ready || !f || f.n === handledFocus) return;
 		handledFocus = f.n;
 		const node = app.byId.get(f.id);
-		if (node && node.lon !== null && node.lat !== null) untrack(() => flyAndOpen({ node }, [node.lon!, node.lat!]));
+		// A node of another WMA is found on that WMA's map.
+		if (node && inWma(node.basin) && node.lon !== null && node.lat !== null) untrack(() => flyAndOpen({ node }, [node.lon!, node.lat!]));
 	});
 
 	$effect(() => {
@@ -350,20 +382,32 @@
 		if (entry.target.kind === 'node') {
 			app.select(entry.target.id, { focus: true });
 		} else {
-			pendingSite = app.sites[entry.target.index];
+			pendingSite = sites[entry.target.index];
 		}
+	}
+
+	function changeWma(slug: string) {
+		void goto(slug ? resolve(`wma/${slug}/` as '/') : resolve('/'));
 	}
 </script>
 
 <section class="wrap" aria-label="Map of EWR nodes and sites" bind:this={wrap}>
 	<div class="map" bind:this={container}></div>
 	<div class="bar">
-		<select aria-label="Zoom to a basin" bind:value={basin} onchange={zoomToBasin}>
-			<option value="">All basins</option>
-			{#each basins as b (b.name)}
-				<option value={b.name}>{b.name}</option>
+		<select aria-label="Water Management Area" value={wma.slug} onchange={(e) => changeWma(e.currentTarget.value)}>
+			<option value="">All WMAs</option>
+			{#each WMAS as w (w.slug)}
+				<option value={w.slug}>{w.name}</option>
 			{/each}
 		</select>
+		{#if basins.length}
+			<select aria-label="Zoom to a basin" bind:value={basin} onchange={zoomToBasin}>
+				<option value="">All basins</option>
+				{#each basins as b (b.name)}
+					<option value={b.name}>{b.name}</option>
+				{/each}
+			</select>
+		{/if}
 		<input
 			type="search"
 			aria-label="Find a node or site"
@@ -381,6 +425,9 @@
 			<span class="miss" role="status">No node or site called {searchMiss}</span>
 		{/if}
 	</div>
+	{#if !nodes.length && !sites.length}
+		<p class="empty" role="status">No EWR data for {wma.name} yet. Its catchments, rivers and flow gauges are shown.</p>
+	{/if}
 	<MapLegend
 		bind:quaternaries={showQuaternaries}
 		bind:rivers={showRivers}
@@ -388,6 +435,7 @@
 		bind:gauges={showGauges}
 		bind:closedGauges={showClosedGauges}
 		bind:basemap={showBasemap}
+		hasNodes={nodes.length > 0 || sites.length > 0}
 		hasBasemap={!!tilesUrl}
 		{basemapFailed}
 	/>
@@ -430,6 +478,18 @@
 		flex: 1;
 		min-width: 120px;
 		max-width: 240px;
+	}
+	.empty {
+		position: absolute;
+		left: 48px;
+		right: 10px;
+		bottom: 28px;
+		z-index: 3;
+		margin: 0;
+		padding: 6px 10px;
+		background: rgba(252, 252, 251, 0.95);
+		border-left: 3px solid var(--accent);
+		font-size: 13px;
 	}
 	.miss {
 		background: rgba(252, 252, 251, 0.95);

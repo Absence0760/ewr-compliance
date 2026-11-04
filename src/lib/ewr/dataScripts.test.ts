@@ -13,8 +13,6 @@ function tree(): string {
 	const dir = mkdtempSync(join(tmpdir(), 'ewr-'));
 	trees.push(dir);
 	mkdirSync(join(dir, 'tools'));
-	mkdirSync(join(dir, 'static/data'), { recursive: true });
-	writeFileSync(join(dir, 'static/data/map.json'), 'public rivers');
 	return dir;
 }
 
@@ -32,16 +30,17 @@ describe('pnpm data:sample', () => {
 
 	function sampleTree() {
 		const dir = tree();
+		mkdirSync(join(dir, 'static'));
 		copyFileSync(join(REPO, 'tools/sample-data.mjs'), join(dir, 'tools/sample-data.mjs'));
 		cpSync(join(REPO, 'e2e/fixtures/sample-data'), join(dir, 'e2e/fixtures/sample-data'), { recursive: true });
 		return dir;
 	}
 
-	it('fills an empty folder and leaves map.json', () => {
+	it('fills a fresh clone, where git has left no static/data at all', () => {
 		const dir = sampleTree();
+		expect(existsSync(join(dir, 'static/data'))).toBe(false);
 		expect(script(dir).status).toBe(0);
 		expect(JSON.parse(readFileSync(join(dir, 'static/data/index.json'), 'utf8')).sample).toBe(true);
-		expect(readFileSync(join(dir, 'static/data/map.json'), 'utf8')).toBe('public rivers');
 	});
 
 	it('runs again over the sample', () => {
@@ -52,6 +51,7 @@ describe('pnpm data:sample', () => {
 
 	it('refuses to overwrite real data, and leaves it', () => {
 		const dir = sampleTree();
+		mkdirSync(join(dir, 'static/data'));
 		writeFileSync(join(dir, 'static/data/index.json'), '{"nodes":[]}');
 		const r = script(dir);
 		expect(r.status).toBe(1);
@@ -61,6 +61,7 @@ describe('pnpm data:sample', () => {
 
 	it('treats other data files with no index as real', () => {
 		const dir = sampleTree();
+		mkdirSync(join(dir, 'static/data'));
 		writeFileSync(join(dir, 'static/data/ewr-berg.json'), '{}');
 		expect(script(dir).status).toBe(1);
 		expect(readFileSync(join(dir, 'static/data/ewr-berg.json'), 'utf8')).toBe('{}');
@@ -68,6 +69,7 @@ describe('pnpm data:sample', () => {
 
 	it('overwrites real data when forced', () => {
 		const dir = sampleTree();
+		mkdirSync(join(dir, 'static/data'));
 		writeFileSync(join(dir, 'static/data/index.json'), '{"nodes":[]}');
 		writeFileSync(join(dir, 'static/data/stale.json'), '{}');
 		expect(script(dir, '--force').status).toBe(0);
@@ -96,14 +98,14 @@ describe('pnpm data:private', () => {
 
 	const sync = (dir: string, source: string) => run('bash', ['-e', join(dir, 'tools/sync-private.sh')], { EWR_PRIVATE_DIR: source });
 
-	it('copies the data and the tests, and keeps the public map.json', () => {
+	it("copies the data and the tests, but not the private repo's old map.json", () => {
 		const dir = publicTree();
+		mkdirSync(join(dir, 'static/data'), { recursive: true });
 		writeFileSync(join(dir, 'static/data/stale.json'), '{}');
 		mkdirSync(join(dir, 'src/private'), { recursive: true });
 		writeFileSync(join(dir, 'src/private/gone.test.ts'), 'old');
 		expect(sync(dir, privateTree()).status).toBe(0);
-		expect(readdirSync(join(dir, 'static/data')).sort()).toEqual(['index.json', 'map.json']);
-		expect(readFileSync(join(dir, 'static/data/map.json'), 'utf8')).toBe('public rivers');
+		expect(readdirSync(join(dir, 'static/data'))).toEqual(['index.json']);
 		expect(readFileSync(join(dir, 'src/private/nested/a.test.ts'), 'utf8')).toBe('unit');
 		expect(readFileSync(join(dir, 'e2e/tests/private/b.spec.ts'), 'utf8')).toBe('spec');
 		expect(existsSync(join(dir, 'src/private/gone.test.ts'))).toBe(false);
@@ -123,6 +125,8 @@ describe('pnpm data:private', () => {
 
 	it('stops with a reason, touching nothing, when the folder is missing or is not the private repo', () => {
 		const dir = publicTree();
+		mkdirSync(join(dir, 'static/data'), { recursive: true });
+		writeFileSync(join(dir, 'static/data/index.json'), 'kept');
 		const missing = sync(dir, join(dir, 'no-such-folder'));
 		expect(missing.status).toBe(1);
 		expect(missing.out).toContain('No private repo');
@@ -130,7 +134,7 @@ describe('pnpm data:private', () => {
 		const wrong = sync(dir, tree());
 		expect(wrong.status).toBe(1);
 		expect(wrong.out).toContain('is not the private repo');
-		expect(readdirSync(join(dir, 'static/data'))).toEqual(['map.json']);
+		expect(readFileSync(join(dir, 'static/data/index.json'), 'utf8')).toBe('kept');
 	});
 });
 

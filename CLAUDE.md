@@ -2,7 +2,7 @@
 
 Guidance for Claude Code working in this repository. Keep this file short — it loads into every conversation.
 
-EWR Compliance Measurement compares observed river flows with Environmental Water Requirements at the EWR nodes and sites of the Berg, Breede-Overberg, Gouritz and Olifants-Doorn basins. It is a static, client-only SvelteKit 3 app (`adapter-static`, `ssr = false`) with Svelte 5 runes and TypeScript. There is no server, database or deploy target. Layout and conventions: `docs/architecture.md`.
+EWR Compliance Measurement compares observed river flows with Environmental Water Requirements at the EWR nodes and sites of the Berg, Breede-Overberg, Gouritz and Olifants-Doorn basins. It opens on South Africa's Water Management Areas of 2023, each with its own map. It is a static, client-only SvelteKit 3 app (`adapter-static`, `ssr = false`) with Svelte 5 runes and TypeScript. There is no server, database or deploy target. Layout and conventions: `docs/architecture.md`.
 
 This repo is public and holds the code. The real data, the client's brief and the tests pinned to them are in the private repo `ewr-compliance-private`, a sibling folder. This repo runs on a synthetic sample.
 
@@ -22,14 +22,15 @@ pnpm 10 and Node 24. One package, no workspace.
 | `pnpm test:e2e` | Playwright (`e2e/`), on the sample. Needs `pnpm data:sample` |
 | `pnpm test:private` | `pnpm data:private`, then Vitest and Playwright over the real data |
 | `python3 ../ewr-compliance-private/tools/build_gauges.py` | Rebuild `gauges.json` and `flows-<station>.json`, the node-to-gauge links and gauge records, in the private repo. Arguments: `README.md` § Rebuild the data |
-| `python3 ../ewr-compliance-private/tools/build_data.py`, `python3 tools/build_geo.py` | Rebuild the real data in the private repo, and `static/data/map.json` here. Arguments and dependencies: `README.md` § Rebuild the data |
+| `python3 ../ewr-compliance-private/tools/build_data.py`, `python3 tools/build_geo.py` | Rebuild the real data in the private repo, and the quaternaries file it places nodes with. Arguments and dependencies: `README.md` § Rebuild the data |
+| `node tools/build-rivers.ts` | Rebuild `static/geo/rivers-<wma>.json`, the named DWS 1:500 000 rivers of each WMA. Network |
 | `node tools/check-live-services.ts` | Check the live ArcGIS layers against what the app assumes. Network, by hand |
 
 ## Hard rules
 
 1. **Client-only.** No server code, SSR adapter, server load function or API key. A flow file a user loads stays in the browser: nothing in `src/` sends it anywhere.
 2. **Everything here is public.** No secret in any file, encrypted or not, and no personal data. No client material either: no real flow or EWR value, node code, site, file name or quoted brief, in code, comments, tests or docs. Fixtures added to tests are synthetic. Real values go in the private repo.
-3. **`static/data` is generated and ignored by git, all but `map.json`.** Never edit it by hand and never force-add it: it may hold real data. Real data is rebuilt into the private repo through `tools/`, and `pnpm test:private` is what can fail for a real reason. The sample comes from `e2e/fixtures/make-sample-data.mjs`: change that, rerun it, and update the specs' hand arithmetic.
+3. **`static/data` is generated and ignored by git.** Never edit it by hand and never force-add it: it may hold real data. Real data is rebuilt into the private repo through `tools/`, and `pnpm test:private` is what can fail for a real reason. The sample comes from `e2e/fixtures/make-sample-data.mjs`: change that, rerun it, and update the specs' hand arithmetic.
 4. **Numbers on screen come from `src/lib/ewr`,** never recomputed in a component. `parsers.ts` and `resolve.ts` stay pure: no DOM, no fetch.
 5. **Conventions in `docs/architecture.md` hold:** `#lib/...` imports with the extension (`$lib` is removed), paths with no leading slash, runes only, tabs and single quotes.
 

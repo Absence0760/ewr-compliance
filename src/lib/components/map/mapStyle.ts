@@ -13,10 +13,16 @@ export const RIVER_BLUE = '#3f86c9';
 export const QUAT_LINE = '#6f6e69';
 export const QUAT_TINT = '#f6f5ef';
 export const GAUGE_GREEN = '#0e7c5a';
+export const WMA_PURPLE = '#5b3a8c';
+export const RIVER_TEXT = '#0b4f80';
 
 export const QUAT_FILL = 'quat-fill';
 export const QUAT_LINES = 'quat-line';
 export const RIVERS = 'rivers';
+/** Strahler order 1 and 2, drawn from zoom 9 so the WMA view opens on the main rivers. */
+export const MINOR_RIVERS = 'rivers-minor';
+export const RIVER_LABELS = 'rivers-label';
+export const WMA_LINE = 'wma';
 export const BASINS = 'basins';
 export const GAUGES = 'gauges';
 export const GAUGES_CLOSED = 'gauges-closed';
@@ -30,7 +36,7 @@ export const GAUGE_ICON = 'gauge-triangle';
 export const GAUGE_CLOSED_ICON = 'gauge-triangle-closed';
 export const POINT_LAYERS: string[] = [GAUGES_CLOSED, GAUGES, NO_FILE, SITES, NODES];
 
-export const CREDIT = 'Catchments and basins: DWS · Rivers: DWS 1:500k · Flow gauges: University of Pretoria, SAHA';
+export const CREDIT = 'Catchments, WMAs and basins: DWS · Rivers: DWS 1:500k · Flow gauges: University of Pretoria, SAHA';
 export const BASEMAP_CREDIT = '© Protomaps © OpenStreetMap contributors';
 
 const LAND = { bg: '#eef0ea', earth: '#e4e7df', water: '#a9cfe0', green: '#d3e3c6', road: '#ffffff', roadCase: '#c9cdc4', border: '#9a9f97' };
@@ -101,8 +107,27 @@ export function baseStyle(tilesUrl: string | null, glyphs: string | null): Style
 /** IDs of the base map's layers, for the legend's switch. */
 export const basemapLayerIds = (style: StyleSpecification) => style.layers.filter((l) => l.id.startsWith('bm-')).map((l) => l.id);
 
+const riverWidth = ['min', 3, ['+', 0.6, ['*', 0.55, ['-', ['coalesce', ['get', 's'], 1], 1]]]];
+
+/** River names along the line once zoomed in. Needs the base map's glyphs, so it is added only with them. */
+export const RIVER_LABEL_LAYER = {
+	id: RIVER_LABELS,
+	type: 'symbol',
+	source: 'rivers',
+	minzoom: 10,
+	filter: ['!=', ['coalesce', ['get', 'n'], ''], ''],
+	layout: {
+		'symbol-placement': 'line',
+		'text-field': ['get', 'n'],
+		'text-font': [FONTS.italic],
+		'text-size': 12,
+		'symbol-spacing': 300
+	},
+	paint: { 'text-color': RIVER_TEXT, 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 }
+} as unknown as LayerSpecification;
+
 /** Bottom to top. Sites sit under nodes, and are larger, so a co-located pair shows both. */
-export const OVERLAY_LAYERS: LayerSpecification[] = [
+export const OVERLAY_LAYERS = [
 	{
 		id: QUAT_FILL,
 		type: 'fill',
@@ -116,15 +141,28 @@ export const OVERLAY_LAYERS: LayerSpecification[] = [
 		paint: { 'line-color': QUAT_LINE, 'line-width': 1 }
 	},
 	{
+		id: MINOR_RIVERS,
+		type: 'line',
+		source: 'rivers',
+		minzoom: 9,
+		filter: ['<', ['coalesce', ['get', 's'], 1], 3],
+		layout: { 'line-cap': 'round', 'line-join': 'round' },
+		paint: { 'line-color': RIVER_BLUE, 'line-opacity': 0.85, 'line-width': riverWidth }
+	},
+	{
 		id: RIVERS,
 		type: 'line',
 		source: 'rivers',
+		filter: ['>=', ['coalesce', ['get', 's'], 1], 3],
 		layout: { 'line-cap': 'round', 'line-join': 'round' },
-		paint: {
-			'line-color': RIVER_BLUE,
-			'line-opacity': 0.85,
-			'line-width': ['min', 3, ['+', 0.6, ['*', 0.55, ['-', ['coalesce', ['get', 's'], 1], 1]]]]
-		}
+		paint: { 'line-color': RIVER_BLUE, 'line-opacity': 0.85, 'line-width': riverWidth }
+	},
+	{
+		id: WMA_LINE,
+		type: 'line',
+		source: 'wma',
+		layout: { 'line-join': 'round' },
+		paint: { 'line-color': WMA_PURPLE, 'line-width': 2.5, 'line-dasharray': [4, 2] }
 	},
 	{
 		id: BASINS,
@@ -178,7 +216,7 @@ export const OVERLAY_LAYERS: LayerSpecification[] = [
 			'circle-stroke-width': ['case', ['get', 'approx'], 2, 1]
 		}
 	}
-];
+] as LayerSpecification[];
 
 /** The gauge symbol: a green triangle, or a hollow one for a closed gauge. */
 export function gaugeImage(closed: boolean, pixelRatio = 2): ImageData {

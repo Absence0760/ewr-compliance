@@ -32,7 +32,7 @@ Walk these in order. Stop at about five findings; quality over quantity.
 - A flow file a user loads is never sent anywhere. A new `fetch` needs a look: the only ones expected read `static/data` and the operator-configured real-time source. A new origin is Critical unless the task asked for it.
 
 **Data** (rule 3):
-- Any file under `static/data` but `map.json` in a diff is Critical: it is ignored by git and may be real data. So is a real client value, node code or file name anywhere in a diff.
+- Any file under `static/data` in a diff is Critical: it is ignored by git and may be real data. So is a real client value, node code or file name anywhere in a diff.
 
 **Numbers** (rule 4, domain rules):
 - A number on screen comes from `src/lib/ewr`, not from arithmetic in a component or in `app.svelte.ts`.
