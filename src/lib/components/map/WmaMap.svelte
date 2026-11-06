@@ -5,10 +5,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { resolve } from '$app/paths';
+	import { asset, resolve } from '$app/paths';
 	import type { GeoJSONSource, GeoJSONSourceSpecification, Map as MapLibreMap, Marker, Popup } from 'maplibre-gl';
 	import { loadWmas } from '#lib/components/map/catchments.ts';
-	import { CREDIT, FIRST_LABEL, WMA_PURPLE, baseStyle } from '#lib/components/map/mapStyle.ts';
+	import { CREDIT, FIRST_LABEL, WMA_PURPLE, baseStyle, tileUrl } from '#lib/components/map/mapStyle.ts';
 	import { NATIONAL_BOUNDS, NEIGHBOURS, WMAS } from '#lib/components/map/wma.ts';
 
 	/** The slug of the WMA under the pointer or in focus in the list, highlighted on both. */
@@ -26,13 +26,10 @@
 	let ready = $state(false);
 	let failure = $state('');
 
-	const absolute = (raw: string | undefined) => {
-		const v = raw?.trim();
-		if (!v) return null;
-		return /^https?:/.test(v) ? v : `${new URL('.', document.baseURI).href}${v}`;
-	};
-	const tilesUrl = absolute(import.meta.env.VITE_TILES_URL);
-	const glyphs = absolute(import.meta.env.VITE_TILES_GLYPHS_URL);
+	// The app's root as a full URL: a setting that is a path is beside the app, wherever the page is.
+	const root = new URL(asset('' as never), document.baseURI).href;
+	const tilesUrl = tileUrl(import.meta.env.VITE_TILES_URL, root);
+	const glyphs = tileUrl(import.meta.env.VITE_TILES_GLYPHS_URL, root);
 
 	onMount(() => {
 		let gone = false;

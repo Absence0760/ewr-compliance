@@ -27,8 +27,8 @@ Upload the contents of `build/`, not the folder itself. That is about 30 MB with
 | Build setting | Default | Purpose |
 |---|---|---|
 | `BASE_PATH` | empty | The sub-path, such as `/ewr`, with a leading slash and no trailing one. Must be in the shell's environment: a `.env` file does not reach it. |
-| `VITE_TILES_URL` | empty | The base map's `.pmtiles`: a path beside the app, or a full `https` URL. Empty gives a plain background. |
-| `VITE_TILES_GLYPHS_URL` | empty | Label fonts, with `{fontstack}` and `{range}` left in. Empty leaves the base map unlabelled. |
+| `VITE_TILES_URL` | empty | The base map's `.pmtiles`: a path beside the app, taken from the app's root on every page (`tileUrl`), or a full `https` URL. Empty gives a plain background. |
+| `VITE_TILES_GLYPHS_URL` | empty | Label fonts, with `{fontstack}` and `{range}` left in, a path or URL as for `VITE_TILES_URL`. Empty leaves the base map unlabelled. |
 
 These are read at build time, so changing one means building again. `.env.local` is read for the two `VITE_` settings, which is how `tools/fetch-tiles.sh` turns the base map on. No setting holds a secret, and everything built is readable by anyone who can load the site.
 

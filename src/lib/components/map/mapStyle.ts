@@ -16,6 +16,17 @@ export const GAUGE_GREEN = '#0e7c5a';
 export const WMA_PURPLE = '#5b3a8c';
 export const RIVER_TEXT = '#0b4f80';
 
+/**
+ * A tiles or glyphs setting as a full URL: a full `http(s)` URL as it is, a path against the app's root.
+ * The root, not the page, because a WMA page sits two folders down. Joined by hand: `new URL` would
+ * percent-encode the {fontstack} and {range} of a glyphs template.
+ */
+export function tileUrl(raw: string | undefined, root: string): string | null {
+	const v = raw?.trim();
+	if (!v) return null;
+	return /^https?:/.test(v) ? v : `${root.replace(/\/?$/, '/')}${v.replace(/^\//, '')}`;
+}
+
 export const QUAT_FILL = 'quat-fill';
 export const QUAT_LINES = 'quat-line';
 export const RIVERS = 'rivers';

@@ -29,7 +29,7 @@
 	import {
 		BASEMAP_SOURCE, BASINS, CREDIT, DIAMOND, FIRST_LABEL, GAUGE_CLOSED_ICON, GAUGE_ICON, GAUGES, GAUGES_CLOSED, MINOR_RIVERS, NO_FILE,
 		NODES, OVERLAY_LAYERS, POINT_LAYERS, QUAT_FILL, QUAT_LINES, RIVER_LABEL_LAYER, RIVER_LABELS, RIVERS, SITES, baseStyle, basemapLayerIds,
-		diamondImage, gaugeImage
+		diamondImage, gaugeImage, tileUrl
 	} from '#lib/components/map/mapStyle.ts';
 
 	let { wma }: { wma: Wma } = $props();
@@ -73,14 +73,10 @@
 	let gauges = $state.raw<FeatureCollection | null>(null);
 
 	// A file beside the app, or any host allowing cross-origin range requests.
-	const absolute = (raw: string | undefined) => {
-		const v = raw?.trim();
-		if (!v) return null;
-		// Joined by hand: `new URL` would percent-encode the {fontstack} and {range} of a glyphs template.
-		return /^https?:/.test(v) ? v : `${new URL('.', document.baseURI).href}${v}`;
-	};
-	const tilesUrl = absolute(import.meta.env.VITE_TILES_URL);
-	const glyphs = absolute(import.meta.env.VITE_TILES_GLYPHS_URL);
+	// The app's root as a full URL: a setting that is a path is beside the app, wherever the page is.
+	const root = new URL(asset('' as never), document.baseURI).href;
+	const tilesUrl = tileUrl(import.meta.env.VITE_TILES_URL, root);
+	const glyphs = tileUrl(import.meta.env.VITE_TILES_GLYPHS_URL, root);
 	const style = baseStyle(tilesUrl, glyphs);
 
 	/** The nodes and sites of this WMA. Every map is of one WMA, and the app's data may cover several. */
