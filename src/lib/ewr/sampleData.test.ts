@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { parseGaugeFlows, parseMon, parseTab } from './parsers.ts';
 import { buildNotices, resolveView } from './resolve.ts';
-import type { EwrNode, GaugeData, IndexData } from './types.ts';
+import type { EwrNode, GaugeData, IndexData, NodeInfoData } from './types.ts';
 import { wmaOfBasin } from '#lib/components/map/wma.ts';
 
 const DIR = new URL('../../../e2e/fixtures/sample-data/', import.meta.url);
@@ -24,7 +24,7 @@ test('it says it is the sample, so nothing mistakes it for real data', () => {
 
 test('it has the same files as a real build, and no more', () => {
 	const basins = ['berg', 'breede', 'gouritz', 'olifantsdoring'];
-	const want = ['index.json', 'gauges.json', 'flows-X0H997.json', 'flows-X0H998.json', 'flows-X0H999.json', ...basins.flatMap((b) => [`ewr-${b}.json`, `series-${b}.json`])];
+	const want = ['index.json', 'gauges.json', 'node-info.json', 'flows-X0H997.json', 'flows-X0H998.json', 'flows-X0H999.json', ...basins.flatMap((b) => [`ewr-${b}.json`, `series-${b}.json`])];
 	assert.deepEqual(readdirSync(DIR).sort(), want.sort());
 });
 
@@ -88,6 +88,21 @@ test('every gauge link joins a node to a record it can read, with a factor to ap
 	}
 	for (const [station, text] of Object.entries(records)) assert.equal(parseMon(text).station, station);
 	for (const station of flows) assert.ok(parseGaugeFlows(load(`flows-${station}.json`)).daily.length, station);
+});
+
+test('node info is keyed by nodes that exist, and covers a node with all of it and one with part', () => {
+	const info = load('node-info.json') as NodeInfoData;
+	for (const id of Object.keys(info)) get(id);
+	const counts = Object.values(info).map((i) => Object.keys(i).length);
+	assert.ok(counts.includes(5));
+	assert.ok(counts.some((c) => c > 0 && c < 5));
+});
+
+test('no node info looks like a real site or station', () => {
+	for (const [id, i] of Object.entries(load('node-info.json') as NodeInfoData)) {
+		for (const v of [i.remp, i.ewrSite].filter(Boolean)) assert.match(v!, /^SYN-/, id);
+		if (i.wqStation) assert.match(i.wqStation, /^Z\d\d 0+\d$/, id);
+	}
 });
 
 test('no node code, quaternary or file name looks like a real one', () => {

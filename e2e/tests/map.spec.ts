@@ -116,6 +116,22 @@ test.describe('map', () => {
 		await expect(map.getByText('Sample West, Z80D')).toBeVisible();
 	});
 
+	test('the popup lists what the RQO node workbook records at the node, and only that', async ({ page }) => {
+		await page.goto(MAP);
+		await findNode(page, 'syt1', 'syt1 / SYN-SITE1');
+		const popup = mapRegion(page).locator('.maplibregl-popup');
+		await expect(popup.getByText('REMP/BM site: SYN-REMP1')).toBeVisible();
+		await expect(popup.getByText('EWR site ID (Reserve Gazette): SYN-EWR1')).toBeVisible();
+		await expect(popup.getByText('WQ monitoring station: Z80 000001')).toBeVisible();
+		await expect(popup.getByText('SWSA, surface water: Sample Range')).toBeVisible();
+		await expect(popup.getByText('SWSA, groundwater: No')).toBeVisible();
+
+		await findNode(page, 'syq1');
+		await expect(popup.getByRole('heading', { name: 'syq1', exact: true })).toBeVisible();
+		await expect(popup.getByText('WQ monitoring station: Z20 000002')).toBeVisible();
+		await expect(popup.getByText(/REMP\/BM site|EWR site ID|SWSA/)).toHaveCount(0);
+	});
+
 	test('search finds a node by the site at it', async ({ page }) => {
 		await page.goto(MAP);
 		await findNode(page, 'SYN-SITE1', 'syt1 / SYN-SITE1');

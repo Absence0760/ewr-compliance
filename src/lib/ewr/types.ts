@@ -129,7 +129,23 @@ export interface GaugeData {
 	incomplete: Record<string, string[]>;
 }
 
-/** static/data/flows-<station>.json: the text of a DWS daily file and of the 12-minute readings. */
+/**
+ * What the RQO node workbook records at a node, beyond its EWR: the REMP/BM site, the EWR site ID of the
+ * Reserve Gazette, the water quality monitoring station, and the Strategic Water Source Areas, surface
+ * water and groundwater, the node is in. Each is the workbook's text. A field it records nothing for is absent.
+ */
+export interface NodeInfo {
+	remp?: string;
+	ewrSite?: string;
+	wqStation?: string;
+	swsaSw?: string;
+	swsaGw?: string;
+}
+
+/** static/data/node-info.json: NodeInfo by node id. A node the workbook records nothing for is absent. */
+export type NodeInfoData = Record<string, NodeInfo>;
+
+/** static/data/flows-<station>.json:the text of a DWS daily file and of the 12-minute readings. */
 export interface GaugeFlowFile {
 	daily: string;
 	readings: string;

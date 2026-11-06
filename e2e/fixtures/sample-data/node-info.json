@@ -1,0 +1,12 @@
+{
+	"Breede:syq1": {
+		"wqStation": "Z20 000002"
+	},
+	"Gouritz:syt1": {
+		"remp": "SYN-REMP1",
+		"ewrSite": "SYN-EWR1",
+		"wqStation": "Z80 000001",
+		"swsaSw": "Sample Range",
+		"swsaGw": "No"
+	}
+}

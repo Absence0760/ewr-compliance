@@ -6,7 +6,7 @@
 // Run it twice and the bytes are the same: nothing reads the clock or a random source. The specs do
 // not import this: they hold their expected numbers as hand arithmetic on these tables.
 //
-// It has the same shape as the real static/data: index.json, gauges.json, flows-<station>.json,
+// It has the same shape as the real static/data: index.json, gauges.json, node-info.json, flows-<station>.json,
 // and for each basin ewr-<slug>.json and series-<slug>.json, each mapping a file name to that file's text.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -320,6 +320,12 @@ const FLOWS = {
 	X0H999: { daily: dayFile('X0H999'), readings: READINGS }
 };
 
+// What the RQO node workbook records at a node: everything at syt1, one field at syq1, nothing elsewhere.
+const NODE_INFO = {
+	'Breede:syq1': { wqStation: 'Z20 000002' },
+	'Gouritz:syt1': { remp: 'SYN-REMP1', ewrSite: 'SYN-EWR1', wqStation: 'Z80 000001', swsaSw: 'Sample Range', swsaGw: 'No' }
+};
+
 const json = (value) => `${JSON.stringify(value, null, '\t')}\n`;
 
 mkdirSync(OUT, { recursive: true });
@@ -340,6 +346,7 @@ writeFileSync(`${OUT}index.json`, json({
 	}
 }));
 writeFileSync(`${OUT}gauges.json`, json(GAUGES));
+writeFileSync(`${OUT}node-info.json`, json(NODE_INFO));
 for (const [station, file] of Object.entries(FLOWS)) writeFileSync(`${OUT}flows-${station}.json`, json(file));
 for (const slug of Object.values(BASINS)) {
 	for (const group of ['ewr', 'series']) writeFileSync(`${OUT}${group}-${slug}.json`, json(STORES[`${group}-${slug}`]));

@@ -26,6 +26,10 @@ The app opens on South Africa's six Water Management Areas of 2023 (`/`): a bann
 - A WMA with no EWR data opens anyway, on its catchments, rivers and gauges, and says it has none.
 - Rivers are `static/geo/rivers-<slug>.json`, the DWS 1:500 000 rivers built by `tools/build-rivers.ts`, with name `n`, Strahler order `s` and flow class `c`. Orders 1 and 2 are drawn from zoom 9. Hovering names a river, clicking opens its popup, and from zoom 10 names run along the line when the base map's fonts are there.
 
+## Node information
+
+`static/data/node-info.json` holds, by node id, what the RQO node workbook records at a node beyond its EWR: `remp`, the REMP/BM site, `ewrSite`, the EWR site ID of the Reserve Gazette, `wqStation`, the water quality monitoring station, and `swsaSw` and `swsaGw`, the surface water and groundwater Strategic Water Source Areas the node is in. Each value is the workbook's text, and a field it records nothing for is absent, as is a node it records nothing at. The node's map popup lists what there is, in that order (`infoRows`). It loads with `index.json`, and the app does not start without it. It is built in the private repo by `tools/build_node_info.py`: README § Rebuild the data.
+
 ## Loading flow by hand
 
 Observed flow comes from a linked gauge, the DWS API once it exists, or a file. A file can be loaded in each comparison's Data source, or in the Load flow data window, opened from the compliance panel: monthly flow for the Historical Comparison, and 12-minute or daily flow for the Real Time Comparison, chosen or dropped. The window uses the same importer (`importFile`) and puts the file in use in its comparison, in place of a gauge or the API. Sheet, units and year are then set in the comparison. A file is read in the browser and never sent anywhere.
@@ -53,7 +57,7 @@ Observed flow comes from a linked gauge, the DWS API once it exists, or a file. 
 | `src/lib/ewr/format.ts` | Number format, series colours, file-kind labels. |
 | `src/lib/ewr/importFlow.ts` | Reads flow files and API responses, by `FlowWant`; `xlsx` loads only when needed. The DWS API is not published, so the API format is an assumption: README § DWS API. |
 | `src/lib/state/app.svelte.ts` | The single app state (`app`). Components read it and call its methods. |
-| `src/lib/components/map` | `WmaMap.svelte`, the national map of WMAs, and `EwrMap.svelte`, one WMA's map, with popup, legend, basin zoom and search. `wma.ts` holds the WMAs and the geometry tests, `mapData.ts` the map's other pure logic, `mapStyle.ts` the layers and base map style, `catchments.ts` the live DWS boundaries and flow gauges, paged, with a time limit. |
+| `src/lib/components/map` | `WmaMap.svelte`, the national map of WMAs, and `EwrMap.svelte`, one WMA's map, with popup (`NodePopup.svelte`), legend, basin zoom and search. `wma.ts` holds the WMAs and the geometry tests, `mapData.ts` the map's other pure logic, `mapStyle.ts` the layers and base map style, `catchments.ts` the live DWS boundaries and flow gauges, paged, with a time limit. |
 | `src/routes` | `/`, the WMA chooser. `wma/[wma]/`, one WMA's map and compliance panel. `nodes/`, `notes/`, and `+error.svelte`. |
 | `src/lib/components/compliance` | Node panel, Historical and Real Time Comparison, `GaugePanel.svelte`, a gauge's published monthly volumes, and `LoadFlowDialog.svelte`, the Load flow data window. `compare.ts` holds table rows and chart series. |
 | `src/lib/components/charts` | uPlot wrapper. |

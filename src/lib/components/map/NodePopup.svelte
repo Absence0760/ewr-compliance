@@ -14,7 +14,7 @@
 	import { app } from '#lib/state/app.svelte.ts';
 	import type { EwrNode, EwrSite } from '#lib/ewr/types.ts';
 	import type { Gauge } from '#lib/components/map/catchments.ts';
-	import { fileInUse, fileOption } from '#lib/components/map/mapData.ts';
+	import { fileInUse, fileOption, infoRows } from '#lib/components/map/mapData.ts';
 
 	let {
 		node = null, site = null, gauge = null, river = null
@@ -25,6 +25,7 @@
 	const inUse = $derived(view ? fileInUse(view, files) : undefined);
 	let chosen = $derived(inUse ?? files[0]?.name ?? '');
 	const link = $derived(node ? app.linkOf(node.id) : null);
+	const info = $derived(node ? infoRows(app.infoOf(node.id)) : []);
 	const linked = $derived(gauge ? app.links.filter((l) => l.station === gauge.station).map((l) => app.byId.get(l.node)?.label ?? l.node) : []);
 </script>
 
@@ -43,6 +44,9 @@
 		{#if link}
 			<div class="row">Measured at gauge {link.station}</div>
 		{/if}
+		{#each info as r (r.label)}
+			<div class="row">{r.label}: {r.value}</div>
+		{/each}
 		{#if files.length}
 			<label>
 				View a file

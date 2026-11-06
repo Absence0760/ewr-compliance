@@ -3,7 +3,7 @@ import { asset } from '$app/paths';
 import { ewrLines, gaugeFlow, gaugeSeries, parseGaugeFlows, parseMon, parseRevised, parseTab, ymKey } from '#lib/ewr/parsers.ts';
 import { allFiles, buildNotices, resolveView } from '#lib/ewr/resolve.ts';
 import type {
-	EcBasis, EwrNode, EwrSite, Flow, FlowSource, FlowUnit, FlowWant, GaugeData, GaugeFlowFile, GaugeFlows, GaugeLink, GaugeRecord, HistView, IndexData, Issue, NodeChoices, NodeFile, NodeView, Notice, ResolvedLines, RtView, Sheet, YearIs
+	EcBasis, EwrNode, EwrSite, Flow, FlowSource, FlowUnit, FlowWant, GaugeData, GaugeFlowFile, GaugeFlows, GaugeLink, GaugeRecord, HistView, IndexData, Issue, NodeChoices, NodeFile, NodeInfo, NodeInfoData, NodeView, Notice, ResolvedLines, RtView, Sheet, YearIs
 } from '#lib/ewr/types.ts';
 
 const slug = (b: string) => b.toLowerCase().replace(/-/g, '');
@@ -32,6 +32,8 @@ class AppState {
 	meta = $state.raw<IndexData['meta'] | null>(null);
 	byId = new Map<string, EwrNode>();
 	links = $state.raw<GaugeLink[]>([]);
+	/** What the RQO node workbook records at each node, by id. */
+	nodeInfo = $state.raw<NodeInfoData>({});
 	gaugeRecords = new Map<string, GaugeRecord>();
 	flowStations = new Set<string>();
 	/** Gauges' daily and 12-minute flow, by station, as each is first opened. */
@@ -92,6 +94,10 @@ class AppState {
 		return allFiles(n, this.uploads[n.id]);
 	}
 
+	infoOf(nodeId: string): NodeInfo {
+		return this.nodeInfo[nodeId] ?? {};
+	}
+
 	linkOf(nodeId: string): GaugeLink | null {
 		return this.links.find((l) => l.node === nodeId) ?? null;
 	}
@@ -99,10 +105,14 @@ class AppState {
 	async load(): Promise<void> {
 		this.restore();
 		try {
-			const [res, gaugeRes] = await Promise.all([fetch(asset('data/index.json')), fetch(asset('data/gauges.json'))]);
+			const [res, gaugeRes, infoRes] = await Promise.all([
+				fetch(asset('data/index.json')), fetch(asset('data/gauges.json')), fetch(asset('data/node-info.json'))
+			]);
 			if (!res.ok) throw new Error(`index.json: HTTP ${res.status}`);
 			if (!gaugeRes.ok) throw new Error(`gauges.json: HTTP ${gaugeRes.status}`);
-			const [d, g] = (await Promise.all([res.json(), gaugeRes.json()])) as [IndexData, GaugeData];
+			if (!infoRes.ok) throw new Error(`node-info.json: HTTP ${infoRes.status}`);
+			const [d, g, info] = (await Promise.all([res.json(), gaugeRes.json(), infoRes.json()])) as [IndexData, GaugeData, NodeInfoData];
+			this.nodeInfo = info;
 			this.gaugeRecords = new Map(Object.entries(g.records).map(([station, text]) => [station, parseMon(text, g.incomplete[station])]));
 			this.links = g.links;
 			this.flowStations = new Set(g.flows);

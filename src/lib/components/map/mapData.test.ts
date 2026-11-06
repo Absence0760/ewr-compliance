@@ -2,7 +2,7 @@ import type { FeatureCollection } from 'geojson';
 import { describe, expect, it } from 'vitest';
 import type { EwrNode, EwrSite, NodeFile, NodeView } from '#lib/ewr/types.ts';
 import {
-	boundsOf, fileInUse, fileOption, findEntry, gaugeLabels, labelPoints, nodeFeatures, nodeLabel, searchEntries, siteFeatures
+	boundsOf, fileInUse, fileOption, findEntry, gaugeLabels, infoRows, labelPoints, nodeFeatures, nodeLabel, searchEntries, siteFeatures
 } from './mapData.ts';
 
 const node = (over: Partial<EwrNode>): EwrNode => ({
@@ -186,5 +186,22 @@ describe('fileOption', () => {
 	it('names the file, its EC and its kind', () => {
 		expect(fileOption(file('a.tab', 'tab', 'C'))).toBe('a.tab (EC C) - .tab');
 		expect(fileOption(file('a.mrv', 'mrv'))).toBe('a.mrv - .mrv');
+	});
+});
+
+describe('infoRows', () => {
+	it('labels each field in a fixed order, whatever order the file has', () => {
+		expect(infoRows({ swsaGw: 'No', remp: 'R-1', wqStation: 'W 1', ewrSite: 'E-1', swsaSw: 'Area' })).toEqual([
+			{ label: 'REMP/BM site', value: 'R-1' },
+			{ label: 'EWR site ID (Reserve Gazette)', value: 'E-1' },
+			{ label: 'WQ monitoring station', value: 'W 1' },
+			{ label: 'SWSA, surface water', value: 'Area' },
+			{ label: 'SWSA, groundwater', value: 'No' }
+		]);
+	});
+
+	it('leaves out what the workbook does not record, and has no rows for a node it says nothing about', () => {
+		expect(infoRows({ wqStation: 'W 1' })).toEqual([{ label: 'WQ monitoring station', value: 'W 1' }]);
+		expect(infoRows({})).toEqual([]);
 	});
 });

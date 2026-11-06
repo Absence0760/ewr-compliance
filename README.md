@@ -67,6 +67,14 @@ python $P/tools/build_gauges.py $P/docs/gauge-links.csv $P/static/data <file> ..
 
 Give it every monthly `.mon` file, in either format, every DWS `.day` file and every workbook of 12-minute readings each time, because what it writes replaces what was there. A workbook needs `openpyxl`. `gauge-links.csv` holds a row for each linked node: its gauge, the factor on the gauge record, and a note shown beside the factor. The factor is worked out outside the app, and 1 means none is applied.
 
+What the RQO node workbook records at each node, shown in its map popup, has its own step too:
+
+```
+python $P/tools/build_node_info.py <RQO node workbook.xlsx> $P/static/data
+```
+
+It writes `node-info.json` from the workbook's sheet of all nodes: the REMP/BM site, the EWR site ID of the Reserve Gazette, the water quality monitoring station, and the surface water and groundwater Strategic Water Source Areas. It needs `openpyxl`, and the `index.json` already there, because a row whose node is not in it stops the build.
+
 A node with no KML point is placed inside its quaternary. Once `index.json` holds a point for that quaternary, a rebuild keeps it, so re-simplified polygons do not move those nodes. Build into the private repo's `static/data`, or a copy of it, to keep them.
 
 The rivers each WMA's map draws and names are public, and committed in `static/geo/rivers-<wma>.json`. Rebuild them with:

@@ -1,6 +1,6 @@
 // Pure logic for the map: what gets drawn, labelled and found. No MapLibre, no app state.
 import type { FeatureCollection } from 'geojson';
-import type { EwrNode, EwrSite, NodeFile, NodeView } from '#lib/ewr/types.ts';
+import type { EwrNode, EwrSite, NodeFile, NodeInfo, NodeView } from '#lib/ewr/types.ts';
 import { KIND_LABEL } from '#lib/ewr/format.ts';
 
 type Position = [number, number];
@@ -197,4 +197,17 @@ export function fileInUse(view: NodeView, files: NodeFile[]): string | undefined
 
 export function fileOption(f: NodeFile): string {
 	return `${f.name}${f.ec ? ` (EC ${f.ec})` : ''} - ${KIND_LABEL[f.kind]}`;
+}
+
+const INFO_LABEL: [keyof NodeInfo, string][] = [
+	['remp', 'REMP/BM site'],
+	['ewrSite', 'EWR site ID (Reserve Gazette)'],
+	['wqStation', 'WQ monitoring station'],
+	['swsaSw', 'SWSA, surface water'],
+	['swsaGw', 'SWSA, groundwater']
+];
+
+/** The popup's lines for what the RQO node workbook records at a node, in a fixed order, leaving out what it does not record. */
+export function infoRows(info: NodeInfo): { label: string; value: string }[] {
+	return INFO_LABEL.flatMap(([key, label]) => (info[key] ? [{ label, value: info[key] }] : []));
 }
