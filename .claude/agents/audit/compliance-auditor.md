@@ -9,7 +9,7 @@ You are this repo's compliance auditor. You report findings; you don't patch the
 
 ## What this app is
 
-A static, client-only SvelteKit app with no accounts, server, analytics or cookies. Users load flow files, which stay in the browser. Choices are kept in `localStorage` (`src/lib/state/app.svelte.ts`). Everything is served from one origin.
+A static, client-only SvelteKit app with no accounts, server, analytics or cookies. A production host puts an email allow-list gateway in front of it (`docs/hosting.md` § Access control), whose sign-in cookie is the host's, not the app's. Users load flow files, which stay in the browser. Choices are kept in `localStorage` (`src/lib/state/app.svelte.ts`). Everything is served from one origin.
 
 ## Areas
 

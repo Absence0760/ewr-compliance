@@ -10,6 +10,31 @@ A real deployment must run `pnpm data:private` before `pnpm build`, on a machine
 
 CI builds the sample only and has no access to the private repo, so a real build cannot come from it as things stand.
 
+## Access control
+
+The decision: a site with the real data is open only to people on an allow-list of email addresses. Nobody else can load any of its files.
+
+The access is checked by the host, in front of the files, and not by the app:
+
+- A login in the app would not protect anything. Every file in `data/` can be fetched directly, so the check has to cover each request, `data/` included, and only the host sees each request.
+- The app has nothing a person owns on a server. Choices are kept in the browser's `localStorage`, and a loaded flow file stays in the browser. An account would only decide who can open the site.
+- Accounts in the app need a server, for passwords and sessions, and the app has none (CLAUDE.md, hard rule 1).
+
+What the host needs:
+
+- An access gateway in front of the whole site, with a policy that allows the listed email addresses and refuses everyone else.
+- Sign-in with a one-time code sent to the address, so nobody has a password to keep and none is stored. Signing in through an organisation's Microsoft or Google account can come later, through the same gateway.
+- The list kept by the host's operator, in the gateway's settings. It names people, so it is not kept in this repo.
+- A session of a working day or so, after which the person signs in again.
+
+Cloudflare Access does all of this, free for up to 50 people, with no change to the app. On AWS, CloudFront with a Lambda@Edge check against Cognito does the same, with more to maintain. Any host whose gateway checks every request is fine. A password page that only hides `index.html` is not.
+
+The gateway is on the site's own address, so the content security policy is unchanged. It sets a sign-in cookie of its own. That cookie is strictly necessary to reach the site, so it needs no consent banner. The app itself still sets no cookie.
+
+Before going live, check from a browser that is not signed in that `data/index.json` gets the sign-in page and not the data, and that someone off the list cannot get past the sign-in.
+
+Accounts in the app, kept on a server, would be needed only for features the brief does not ask for: choices that follow a person between machines, a record of who did what, or different rights for different people. Any of them means adding a server, and changing hard rule 1 first.
+
 ## Build
 
 Needs Node 24 and pnpm 10.

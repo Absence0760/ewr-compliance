@@ -2,7 +2,7 @@
 description: Check that the app still sets no cookies and loads no third-party script, font or tracker, so no consent banner is needed — via compliance-auditor
 ---
 
-The recorded position is no cookies, no analytics and no third-party origins, with the app's own preferences in `localStorage` (`src/lib/state/app.svelte.ts`), so no banner. A finding is anything that changes that.
+The recorded position is no cookies, no analytics and no third-party origins, with the app's own preferences in `localStorage` (`src/lib/state/app.svelte.ts`), so no banner. The host's access gateway sets a strictly necessary sign-in cookie (`docs/hosting.md` § Access control); that is expected and not a finding. A finding is anything the app itself adds.
 
 ## Procedure
 
