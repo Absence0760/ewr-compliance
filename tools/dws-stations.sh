@@ -9,9 +9,11 @@
 #
 # The gauges.json is the private repo's static/data/gauges.json (EWR_PRIVATE_DIR, or
 # ../ewr-compliance-private), unless --gauges names another. The bucket comes from `terraform output
-# dws_bucket` in infra/, or EWR_DWS_BUCKET; with no store (dws_enabled off) it says so and does
-# nothing. AWS access is the operator's SSO profile, ewr-compliance by default (AWS_PROFILE overrides).
-# The pipeline reads the new list on its next run.
+# dws_bucket` in infra/, or EWR_DWS_BUCKET. When the output reads null (dws_enabled off) it says so
+# and does nothing; when terraform itself fails (an expired SSO session, no `terraform init`) it stops
+# with an error, so a real deploy never skips the list without saying so. AWS access is the
+# operator's SSO profile, ewr-compliance by default (AWS_PROFILE overrides). The pipeline reads the
+# new list on its next run.
 set -euo pipefail
 
 PROJECT=ewr-compliance
@@ -39,19 +41,38 @@ if [ ! -f "$gauges" ]; then
 	exit 1
 fi
 
-bucket=${EWR_DWS_BUCKET:-$(AWS_PROFILE=$PROFILE terraform -chdir="$root/infra" output -raw dws_bucket 2>/dev/null || true)}
-if [ -z "$bucket" ] || [ "$bucket" = null ]; then
-	echo "No DWS store (dws_enabled is off, or 'terraform -chdir=infra output dws_bucket' is empty): no station list uploaded."
-	exit 0
+umask 077
+work=$(mktemp -d "${TMPDIR:-/tmp}/ewr-dws-stations.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+
+if [ -n "${EWR_DWS_BUCKET:-}" ]; then
+	bucket=$EWR_DWS_BUCKET
+else
+	# -json, not -raw: null (the store is off) is then told apart from terraform failing, which is
+	# never taken to mean "no store".
+	if ! out=$(AWS_PROFILE=$PROFILE terraform -chdir="$root/infra" output -json dws_bucket 2>"$work/err"); then
+		echo "Can't read 'terraform -chdir=infra output dws_bucket' with the $PROFILE profile, so the station list was not uploaded:" >&2
+		sed 's/^/  /' "$work/err" >&2
+		echo "Sign in again (aws sso login --profile $PROFILE), or run 'terraform init' in infra/, then run tools/dws-stations.sh again." >&2
+		exit 1
+	fi
+	if [ "$out" = null ]; then
+		echo "No DWS store (dws_enabled is off): no station list uploaded."
+		exit 0
+	fi
+	bucket=${out#\"}
+	bucket=${bucket%\"}
+fi
+if [ -z "$bucket" ]; then
+	echo "'terraform -chdir=infra output dws_bucket' is empty: no station list uploaded." >&2
+	exit 1
 fi
 case $bucket in
 	"$PROJECT"-dws-*) ;;
 	*) echo "Refusing bucket '$bucket': not this project's DWS store ($PROJECT-dws-<account>)." >&2; exit 1 ;;
 esac
 
-umask 077
-list=$(mktemp "${TMPDIR:-/tmp}/ewr-dws-stations.XXXXXX")
-trap 'rm -f "$list"' EXIT
+list=$work/stations.json
 node "$here/dws-stations.mjs" "$gauges" >"$list"
 count=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).stations.length)' "$list")
 
