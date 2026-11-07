@@ -5,21 +5,78 @@ import { buildFlow, dayRows, detectLayout, isDay, isMon, monRows, parseDay, pars
 import type { FlowSlot } from '#lib/state/app.svelte.ts';
 import type { Cell, FlowUnit, FlowWant, Sheet } from './types.ts';
 
-type FlowFile = Pick<File, 'name' | 'arrayBuffer' | 'text'>;
+type FlowFile = Pick<File, 'name' | 'size' | 'arrayBuffer' | 'text'>;
 
 export const looksLikeBook = (name: string) => /\.(xlsx|xlsm|xlsb|xls|ods)$/i.test(name);
 
-/** Serials stay numbers, so a date reads the same in every browser timezone. */
-export async function readBook(file: Pick<File, 'arrayBuffer'>): Promise<Sheet[]> {
+// Limits on what a loaded file can make the browser do. The longest flow this app reads is 12-minute
+// readings, 120 a day, so a decade of them is 438 300 rows in a few columns: tens of MB as text, less
+// as a workbook. Each limit leaves that with room to spare, and stops a small crafted file from
+// claiming a sheet of 17 billion cells (A1:XFD1048576) that reading it would fill in, cell by cell.
+export const MAX_FILE_BYTES = 100 * 1024 * 1024;
+export const MAX_SHEET_ROWS = 500_000;
+export const MAX_SHEET_CELLS = 5_000_000;
+
+const mb = (n: number) => `${Math.round(n / (1024 * 1024))} MB`;
+
+/** Refuse a file too large to be a flow file before any of it is read. */
+export function checkSize(file: Pick<File, 'name' | 'size'>): void {
+	if (file.size > MAX_FILE_BYTES) {
+		throw new Error(`the file is ${mb(file.size)}, more than the ${mb(MAX_FILE_BYTES)} a flow file can be. Split it into shorter periods.`);
+	}
+}
+
+type Range = { s: { r: number; c: number }; e: { r: number; c: number } };
+
+/** The range a sheet's cells actually fill. A file's own dimension can claim far more than it holds. */
+export function usedRange(sheet: Record<string, unknown>, decode: (a: string) => { r: number; c: number }): Range | null {
+	let range: Range | null = null;
+	for (const key of Object.keys(sheet)) {
+		if (key[0] === '!') continue;
+		const { r, c } = decode(key);
+		if (!range) range = { s: { r, c }, e: { r, c } };
+		else {
+			range.s.r = Math.min(range.s.r, r);
+			range.s.c = Math.min(range.s.c, c);
+			range.e.r = Math.max(range.e.r, r);
+			range.e.c = Math.max(range.e.c, c);
+		}
+	}
+	return range;
+}
+
+/**
+ * Serials stay numbers, so a date reads the same in every browser timezone.
+ * This runs on the main thread rather than in a Worker: the limits above keep the work in proportion to
+ * the file's size, so a crafted file can no longer hang the tab, and a Worker would be a second code path
+ * that Vitest's Node environment cannot run.
+ */
+export async function readBook(file: Pick<File, 'name' | 'size' | 'arrayBuffer'>): Promise<Sheet[]> {
+	checkSize(file);
 	const [XLSX, buf] = await Promise.all([import('xlsx'), file.arrayBuffer()]);
-	const wb = XLSX.read(buf, { type: 'array', cellDates: false });
+	// One row past the limit is read, so a table that runs past it is refused rather than cut short.
+	const wb = XLSX.read(buf, { type: 'array', cellDates: false, sheetRows: MAX_SHEET_ROWS + 1 });
 	return wb.SheetNames.map((name) => {
-		const rows = XLSX.utils.sheet_to_json<Cell[]>(wb.Sheets[name], { header: 1, raw: true, defval: null });
-		return { name, rows, widths: null, layout: detectLayout(rows) };
+		const ws = wb.Sheets[name];
+		const used = usedRange(ws, XLSX.utils.decode_cell);
+		if (!used) return { name, rows: [], widths: null, layout: detectLayout([]) };
+		// The file's own start is kept, so row and column numbers keep their places; only its end is cut back.
+		const claimed = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : used;
+		const start = { r: Math.min(claimed.s.r, used.s.r), c: Math.min(claimed.s.c, used.s.c) };
+		const rows = used.e.r + 1;
+		const cells = (used.e.r - start.r + 1) * (used.e.c - start.c + 1);
+		if (rows > MAX_SHEET_ROWS) throw new Error(`sheet "${name}" has more than ${MAX_SHEET_ROWS.toLocaleString('en-ZA')} rows. Split it into shorter periods.`);
+		if (cells > MAX_SHEET_CELLS) {
+			throw new Error(`sheet "${name}" spans ${cells.toLocaleString('en-ZA')} cells, more than the ${MAX_SHEET_CELLS.toLocaleString('en-ZA')} a flow table can. Remove the cells far from the table.`);
+		}
+		ws['!ref'] = XLSX.utils.encode_range({ s: start, e: used.e });
+		const data = XLSX.utils.sheet_to_json<Cell[]>(ws, { header: 1, raw: true, defval: null });
+		return { name, rows: data, widths: null, layout: detectLayout(data) };
 	});
 }
 
-export async function readText(file: Pick<File, 'name' | 'text'>): Promise<Sheet[]> {
+export async function readText(file: Pick<File, 'name' | 'size' | 'text'>): Promise<Sheet[]> {
+	checkSize(file);
 	const text = await file.text();
 	if (isMon(text) || isDay(text)) {
 		const rows = isMon(text) ? monRows(parseMon(text)) : dayRows(parseDay(text));

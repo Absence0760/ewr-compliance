@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
-import { applyImport, bestSheet, importFile, looksLikeBook, pickSheet, readBook } from './importFlow.ts';
+import { applyImport, bestSheet, importFile, looksLikeBook, MAX_FILE_BYTES, MAX_SHEET_ROWS, pickSheet, readBook, readText } from './importFlow.ts';
 import type { Cell } from './types.ts';
 
 const MM3_REFUSED = 'This data is in Mm³. The Real Time Comparison needs flow in m³/s, so it was not loaded.';
@@ -39,6 +39,71 @@ describe('readBook', () => {
 		const sheets = await readBook(book({ 'Raw Data': rawSheet() }));
 		expect(sheets[0].rows[2][0]).toBe(45976);
 		expect(sheets[0].layout?.kind).toBe('series');
+	});
+});
+
+// A small workbook whose sheet XML is rewritten after writing, as a crafted file would be: a claimed
+// dimension, or cells placed far from the table, that SheetJS's writer could not produce in reasonable time.
+function crafted(edit: (xml: string) => string): File {
+	const wb = XLSX.utils.book_new();
+	XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(monthly as unknown[][]), 'Flow');
+	const zip = XLSX.CFB.read(new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' })), { type: 'array' });
+	const i = zip.FullPaths.findIndex((p: string) => p.endsWith('worksheets/sheet1.xml'));
+	const entry = zip.FileIndex[i];
+	entry.content = new TextEncoder().encode(edit(new TextDecoder().decode(entry.content as Uint8Array)));
+	return new File([XLSX.CFB.write(zip, { fileType: 'zip', type: 'array' }) as Uint8Array<ArrayBuffer>], 'flow.xlsx');
+}
+
+async function timed<T>(run: () => Promise<T>): Promise<{ ms: number; result: T | Error }> {
+	const t = performance.now();
+	const result = await run().catch((e: Error) => e);
+	return { ms: performance.now() - t, result };
+}
+
+describe('readBook limits', () => {
+	it('reads only the cells a sheet holds when its dimension claims the whole grid', async () => {
+		const file = crafted((x) => x.replace(/<dimension ref="[^"]*"\/>/, '<dimension ref="A1:XFD1048576"/>'));
+		const { ms, result } = await timed(() => readBook(file));
+		expect(ms).toBeLessThan(1000);
+		expect(result).not.toBeInstanceOf(Error);
+		const sheets = result as Awaited<ReturnType<typeof readBook>>;
+		expect(sheets[0].rows).toHaveLength(monthly.length);
+		expect(sheets[0].rows[1]).toHaveLength(13);
+		expect(sheets[0].rows[2]).toEqual(monthly[2]);
+	});
+
+	it('refuses a sheet with a cell placed far from the table, quickly', async () => {
+		const far = '<row r="400000"><c r="XFD400000"><v>1</v></c></row></sheetData>';
+		const file = crafted((x) => x.replace('</sheetData>', far));
+		const { ms, result } = await timed(() => readBook(file));
+		expect(ms).toBeLessThan(1000);
+		expect(result).toBeInstanceOf(Error);
+		expect((result as Error).message).toMatch(/^sheet "Flow" spans [\d\s,]+ cells, more than the/);
+	});
+
+	it('refuses a sheet with more rows than a flow table has, rather than cutting it short', async () => {
+		// A table that runs past the limit has a row just past it, which is read so the sheet can be refused.
+		const row = (r: number) => `<row r="${r}"><c r="A${r}"><v>1</v></c></row>`;
+		const last = `${row(MAX_SHEET_ROWS)}${row(MAX_SHEET_ROWS + 1)}${row(MAX_SHEET_ROWS + 2)}</sheetData>`;
+		const { ms, result } = await timed(() => readBook(crafted((x) => x.replace('</sheetData>', last))));
+		expect(ms).toBeLessThan(1000);
+		expect((result as Error).message).toMatch(/^sheet "Flow" has more than [\d\s,]+ rows/);
+	});
+
+	it('keeps the file\'s own start, so a table that starts at B2 keeps its blank first row and column', async () => {
+		const ws = XLSX.utils.aoa_to_sheet([[null, null], [null, 'Year']]);
+		const wb = XLSX.utils.book_new();
+		XLSX.utils.book_append_sheet(wb, ws, 'S');
+		const sheets = await readBook(new File([XLSX.write(wb, { type: 'array', bookType: 'xlsx' })], 'f.xlsx'));
+		expect(sheets[0].rows).toEqual([[null, null], [null, 'Year']]);
+	});
+
+	it('refuses a file too large to be a flow file before reading it', async () => {
+		let read = false;
+		const huge = { name: 'big.xlsx', size: MAX_FILE_BYTES + 1, arrayBuffer: async () => ((read = true), new ArrayBuffer(0)), text: async () => '' };
+		await expect(readBook(huge)).rejects.toThrow(/^the file is \d+ MB, more than the 100 MB a flow file can be/);
+		await expect(readText({ ...huge, name: 'big.txt' })).rejects.toThrow(/more than the 100 MB/);
+		expect(read).toBe(false);
 	});
 });
 
@@ -184,7 +249,7 @@ describe('a DWS monthly volume file', () => {
 	const cell = (v: string, flag = ' ') => ` ${v.padStart(6)} ${flag}`;
 	const rest = Array.from({ length: 10 }, () => cell('1.00'));
 	const text = ['MONTHLY VOLUMES X0H001', `2000/2001${[cell('2.00'), cell('4.00', '#'), ...rest].join('')}    #`, `2001/2002${[cell('', '#'), cell('6.00'), ...rest].join('')}    #`].join('\r\n');
-	const file = { name: 'X0H001.mon', text: async () => text, arrayBuffer: async () => new ArrayBuffer(0) };
+	const file = { name: 'X0H001.mon', size: text.length, text: async () => text, arrayBuffer: async () => new ArrayBuffer(0) };
 
 	it('loads with hydrological years and every # month missing', async () => {
 		const slot = await importFile(file, 'monthly');
@@ -201,7 +266,7 @@ describe('a DWS monthly volume file', () => {
 describe('a DWS daily flow file', () => {
 	const row = (date: string, v: string, code: string) => `${date}${v.padStart(10)}${code.padStart(6)}`;
 	const text = ['DATE     D AVG F/R  QUAL', row('20030101', '1.000', '1'), row('20030102', '', '170'), row('20030103', '3.000', '91')].join('\r\n');
-	const file = { name: 'X0H001.day', text: async () => text, arrayBuffer: async () => new ArrayBuffer(0) };
+	const file = { name: 'X0H001.day', size: text.length, text: async () => text, arrayBuffer: async () => new ArrayBuffer(0) };
 
 	it('loads for the Real Time Comparison in m³/s, with missing days and codes kept', async () => {
 		const slot = await importFile(file, 'instant');
@@ -213,7 +278,7 @@ describe('a DWS daily flow file', () => {
 describe('a monthly table worked up from a daily file', () => {
 	const row = (y: number, first: string) => `${y}${[first, ...Array.from({ length: 11 }, () => '1.000')].map((c) => c.padStart(9)).join('')}`;
 	const text = ['File Name : x0h001.mon   (from daily file : x0h001.day, dated: )', 'Units     : M.m3', 'Year      Oct      Nov      Dec', row(2000, '3.890+'), row(2001, '2.000')].join('\r\n');
-	const file = { name: 'X0H001.MON', text: async () => text, arrayBuffer: async () => new ArrayBuffer(0) };
+	const file = { name: 'X0H001.MON', size: text.length, text: async () => text, arrayBuffer: async () => new ArrayBuffer(0) };
 
 	it('counts a patched + month, and reads the table by its own format', async () => {
 		const slot = await importFile(file, 'monthly');
