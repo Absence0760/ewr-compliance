@@ -117,6 +117,22 @@ describe('sign-in', () => {
 		expect(slept).toEqual([1000]);
 	});
 
+	it('takes the same total time for listed and unlisted when the send is within the floor, and logs auth.slow when it is not', async () => {
+		const timed = async (email: string) => {
+			const start = now;
+			await call('/api/auth/code', { body: { email } });
+			return now - start;
+		};
+		setup({ sendMail: async () => void (now += 400) });
+		expect(await timed('admin@example.test')).toBe(await timed('stranger@example.test'));
+		expect(logs.some((l) => l.event === 'auth.slow')).toBe(false);
+
+		now += 61_000;
+		setup({ sendMail: async () => void (now += 1500) });
+		expect(await timed('admin@example.test')).toBe(1500);
+		expect(logs.at(-1)).toEqual({ event: 'auth.slow', fields: { route: 'code', ms: 1500 } });
+	});
+
 	it('still answers 202 when the mail fails, and logs the failure by user id', async () => {
 		setup({ sendMail: async () => Promise.reject(Object.assign(new Error('admin@example.test refused'), { name: 'MessageRejected' })) });
 		const r = await call('/api/auth/code', { body: { email: 'admin@example.test' } });
@@ -313,6 +329,16 @@ describe('users', () => {
 		expect((await call('/api/me', { cookie: member })).json).toEqual({ id: added.json.id, email: 'member@example.test', admin: false });
 	});
 
+	it('a demoted admin loses the admin routes at their next call, and refresh says so', async () => {
+		const added = await call('/api/users', { body: { email: 'second@example.test', admin: true }, cookie: admin });
+		now += 61_000;
+		const second = await signIn('second@example.test');
+		expect((await call('/api/users', { cookie: second })).status).toBe(200);
+		expect((await call(`/api/users/${added.json.id}`, { method: 'PATCH', body: { admin: false }, cookie: admin })).status).toBe(200);
+		expect((await call('/api/users', { cookie: second })).status).toBe(404);
+		expect((await call('/api/auth/refresh', { body: {}, cookie: second })).json).toMatchObject({ admin: false });
+	});
+
 	it('answers an unknown or malformed id with 404', async () => {
 		expect((await call('/api/users/00000000-0000-4000-8000-000000000000', { method: 'DELETE', cookie: admin })).status).toBe(404);
 		expect((await call('/api/users/not-a-uuid', { method: 'DELETE', cookie: admin })).status).toBe(404);
@@ -333,14 +359,29 @@ describe('requests', () => {
 		admin = await signIn('admin@example.test');
 	});
 
-	it('refuses a change from another site, or with no Origin, with 400', async () => {
+	it('refuses a change from another site, or with no Origin, with 400, on every write route', async () => {
+		const id = (await call('/api/me', { cookie: admin })).json.id;
+		const writes: [string, Init][] = [
+			['/api/users', { body: { email: 'x@example.test', admin: false } }],
+			[`/api/users/${id}`, { method: 'PATCH', body: { admin: true } }],
+			[`/api/users/${id}`, { method: 'DELETE' }],
+			['/api/auth/code', { body: { email: 'admin@example.test' } }],
+			['/api/auth/verify', { body: { email: 'admin@example.test', code: '000000' } }],
+			['/api/auth/refresh', { body: {} }],
+			['/api/auth/logout', { body: {} }],
+			['/api/auth/logout-everywhere', { body: {} }]
+		];
 		for (const headers of [{ origin: 'https://evil.example' }, { origin: undefined }, { 'sec-fetch-site': 'cross-site' }, { origin: `http://${DOMAIN}` }]) {
-			const r = await call('/api/users', { body: { email: 'x@example.test', admin: false }, cookie: admin, headers });
-			expect(r.status).toBe(400);
-			expect(r.json.error).toBe('A change must be made from this site.');
-			const code = await call('/api/auth/code', { body: { email: 'admin@example.test' }, headers });
-			expect(code.status).toBe(400);
+			for (const [path, init] of writes) {
+				const r = await call(path, { ...init, cookie: admin, headers });
+				expect(r.status, `${path} ${JSON.stringify(headers)}`).toBe(400);
+				expect(r.json.error).toBe('A change must be made from this site.');
+				expect(r.cookies).toEqual([]);
+			}
 		}
+		// Nothing happened: still signed in, still the only user.
+		expect((await call('/api/me', { cookie: admin })).status).toBe(200);
+		expect((await call('/api/users', { cookie: admin })).json).toHaveLength(1);
 	});
 
 	it('takes JSON only: 415 for a form post, 400 for bad JSON, 413 past 8 KiB', async () => {

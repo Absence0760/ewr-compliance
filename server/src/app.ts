@@ -109,7 +109,24 @@ export function createApi(d: ApiDeps) {
 	const origin = `https://${d.domain}`;
 	const clock = d.clock ?? { now: () => Date.now() };
 	const minLatency = d.minLatencyMs ?? DEFAULT_MIN_LATENCY_MS;
-	const pad = <T>(fn: () => Promise<T>) => withMinimumLatency(minLatency, fn, { clock, ...(d.sleep ? { sleep: d.sleep } : {}) });
+	/**
+	 * Pads a sign-in step to the floor. Work that takes longer than the floor shows in the timing, and
+	 * could say whether an address is listed (a send is slower than no send), so it is logged as
+	 * auth.slow, which has an alarm (infra/auth.tf): raise the floor if it fires.
+	 */
+	const pad = <T>(route: string, fn: () => Promise<T>) =>
+		withMinimumLatency(
+			minLatency,
+			async () => {
+				const start = clock.now();
+				try {
+					return await fn();
+				} finally {
+					if (clock.now() - start > minLatency) d.log('auth.slow', { route, ms: clock.now() - start });
+				}
+			},
+			{ clock, ...(d.sleep ? { sleep: d.sleep } : {}) }
+		);
 	const nowSeconds = () => Math.floor(clock.now() / 1000);
 
 	const clearAll = () => [clearSessionCookie(SESSION_COOKIE), ...clearSignedCookies()];
@@ -154,7 +171,7 @@ export function createApi(d: ApiDeps) {
 
 	async function requestCode(req: ApiRequest): Promise<ApiResponse> {
 		const { email } = body(req);
-		const r = await pad(async () => {
+		const r = await pad('code', async () => {
 			const r = await d.auth.requestCode(email);
 			if (r.status === 'accepted' && r.delivery) {
 				// A failed send must look like any other accepted request, or it would say who is listed.
@@ -183,7 +200,7 @@ export function createApi(d: ApiDeps) {
 		const { email, code } = body(req);
 		// Before the code is checked, so a missing key can't spend someone's code.
 		const signer = await d.signer();
-		const v = await pad(() => d.auth.verifyCode(email, code));
+		const v = await pad('verify', () => d.auth.verifyCode(email, code));
 		if (v.status === 'ok') {
 			const { token, session } = await d.auth.issueSession(v.user);
 			const files = fileCookies(signer, session)!;

@@ -141,7 +141,13 @@ jobs:
 
       - name: Install
         working-directory: ${{ env.PKG }}
-        run: pnpm install --frozen-lockfile
+        # The auth-kit token (if this package set one) leaves git's config as soon as the install
+        # is done, so nothing run later (tests, the bundle) can read it, whatever happens.
+        env:
+          TOKEN: ${{ secrets.AUTH_KIT_READ_TOKEN }}
+        run: |
+          trap 'git config --global --remove-section "url.https://x-access-token:${TOKEN}@github.com/Absence0760/auth-kit" 2>/dev/null || true' EXIT
+          pnpm install --frozen-lockfile
 
       - name: Typecheck
         working-directory: ${{ env.PKG }}

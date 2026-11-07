@@ -13,6 +13,8 @@ import { refresh, signinUrl, whenSignedOut, whoAmI, type Me } from '#lib/users/a
 export const REFRESH_MS = 10 * 60_000;
 /** A tab that comes back after this long refreshes at once. */
 export const STALE_MS = 5 * 60_000;
+/** After a refresh that got no answer (a WAF limit, a 5xx, no network), try again this soon. */
+export const RETRY_MS = 60_000;
 
 class Session {
 	me = $state<Me | null>(null);
@@ -21,6 +23,7 @@ class Session {
 	leaving = $state(false);
 	#last = 0;
 	#timer: ReturnType<typeof setInterval> | null = null;
+	#retry: ReturnType<typeof setTimeout> | null = null;
 
 	async check() {
 		const who = await whoAmI();
@@ -30,11 +33,18 @@ class Session {
 		if (who) this.#keepAlive();
 	}
 
-	/** Renews the file cookies; false (and on to sign-in) when the session is over. */
+	/**
+	 * Renews the file cookies; false when the session is over (and on to sign-in), or when no answer
+	 * came (and another try in RETRY_MS: the cookies are not renewed, so this is not a success).
+	 */
 	async refresh(): Promise<boolean> {
 		const who = await refresh();
 		if (who === 'signed-out') {
 			this.signIn();
+			return false;
+		}
+		if (who === 'error') {
+			if (!this.#retry && !this.leaving) this.#retry = setTimeout(() => ((this.#retry = null), void this.refresh()), RETRY_MS);
 			return false;
 		}
 		this.#last = Date.now();
@@ -47,11 +57,12 @@ class Session {
 		return this.me ? this.refresh() : Promise.resolve(this.signIn());
 	}
 
-	signIn(): false {
+	/** `signedOut`: the person chose to sign out, so the sign-in page must not sign them straight back in. */
+	signIn(signedOut = false): false {
 		if (!this.leaving) {
 			this.leaving = true;
 			this.#stop();
-			location.assign(signinUrl());
+			location.assign(signinUrl(location, signedOut));
 		}
 		return false;
 	}
@@ -68,7 +79,9 @@ class Session {
 
 	#stop() {
 		if (this.#timer) clearInterval(this.#timer);
+		if (this.#retry) clearTimeout(this.#retry);
 		this.#timer = null;
+		this.#retry = null;
 		document.removeEventListener('visibilitychange', this.#onVisible);
 	}
 }

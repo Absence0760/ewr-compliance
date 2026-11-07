@@ -30,10 +30,18 @@
 	const wmaName = $derived(inWma ? wmaBySlug(page.params.wma ?? '')?.name : undefined);
 	/** The home page's banner carries the title, as its h1, so the bar leaves it out there. */
 	const isHome = $derived(page.url.pathname.replace(/\/$/, '') === home.replace(/\/$/, '') && !page.error);
+	/** Set when the API did not confirm a sign-out: the session may still be live, so say so and stay. */
+	let signOutError = $state('');
 	/** Ends the session on the API, then leaves for the sign-in page, which the cookies no longer pass. */
 	async function leave() {
-		await signOut().catch(() => {});
-		session.signIn();
+		signOutError = '';
+		try {
+			await signOut();
+		} catch (e) {
+			signOutError = `You are still signed in: ${(e as Error).message} Try again.`;
+			return;
+		}
+		session.signIn(true);
 	}
 	onMount(() => {
 		void app.load();
@@ -58,6 +66,7 @@
 	{#if session.me}
 		<span class="muted signed">Signed in as {session.me.email}</span>
 		<button type="button" class="signout" onclick={leave}>Sign out</button>
+		{#if signOutError}<span class="signed error" role="alert">{signOutError}</span>{/if}
 	{/if}
 	<label class="inline">
 		EC to use

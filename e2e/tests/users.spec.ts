@@ -102,13 +102,40 @@ test.describe('users', () => {
 		await expect(page).toHaveURL(/\/signin\/\?next=/);
 	});
 
-	test('Sign out ends the session and opens the sign-in page', async ({ page }) => {
+	test('Sign out ends the session and opens the sign-in page, which does not sign straight back in', async ({ page }) => {
 		const calls = await host(page, me(MEMBER));
 		await page.goto(MAP);
 		await page.getByRole('button', { name: 'Sign out' }).click();
-		await expect(page).toHaveURL(/\/signin\/\?next=/);
+		await expect(page).toHaveURL(/\/signin\/\?next=.*&signedout=1$/);
+		await expect(page.getByRole('textbox', { name: 'Email address' })).toBeFocused();
 		const out = calls.find((c) => c.url().endsWith('/api/auth/logout'))!;
 		expect(out.method()).toBe('POST');
+		expect(calls.filter((c) => c.url().endsWith('/api/auth/refresh'))).toHaveLength(0);
+	});
+
+	test('a sign-out the API did not confirm says so, and stays', async ({ page }) => {
+		await host(page, me(MEMBER));
+		await page.route(/\/api\/auth\/logout$/, (route) => route.fulfill({ status: 503, json: { error: 'Sign-in is not set up yet. Try again later.' } }));
+		await page.goto(MAP);
+		await page.getByRole('button', { name: 'Sign out' }).click();
+		await expect(page.getByRole('alert')).toHaveText('You are still signed in: Sign-in is not set up yet. Try again later. Try again.');
+		await expect(page).toHaveURL(new RegExp(`${MAP}$`));
+	});
+
+	test('a refresh refused by a rate limit is not taken as renewed: it is tried again a minute later', async ({ page }) => {
+		await page.clock.install();
+		let limited = true;
+		const calls = await host(page, me(MEMBER));
+		await page.route(/\/api\/auth\/refresh$/, (route) =>
+			limited ? route.fulfill({ status: 429, json: { error: 'Too many requests from your network.' } }) : route.fallback()
+		);
+		await page.goto(MAP);
+		await expect(page.getByText('Signed in as member@example.com')).toBeVisible();
+		await page.clock.runFor('10:00');
+		await expect(page).toHaveURL(new RegExp(`${MAP}$`));
+		limited = false;
+		await page.clock.runFor('01:00');
+		await expect.poll(() => calls.filter((c) => c.url().endsWith('/api/auth/refresh')).length).toBe(1);
 	});
 
 	test.describe('an admin', () => {

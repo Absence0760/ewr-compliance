@@ -107,14 +107,19 @@ test.describe('sign-in', () => {
 	});
 
 	for (const next of ['https%3A%2F%2Fevil.example%2F', '%2F%2Fevil.example%2F', '%2F%5Cevil.example', '%2Fsignin%2F', 'javascript%3Aalert(1)']) {
-		test(`goes home, not to next=${next}`, async ({ page }) => {
+		test(`goes home, not to next=${next}`, async ({ page, baseURL }) => {
 			await api(page);
+			const left: string[] = [];
+			page.on('request', (r) => {
+				if (!r.url().startsWith(baseURL!)) left.push(r.url());
+			});
 			await page.goto(`signin/?next=${next}`);
 			await email(page).fill('admin@example.com');
 			await page.getByRole('button', { name: 'Send me a code' }).click();
 			await code(page).fill(CODE);
 			await page.getByRole('button', { name: 'Sign in' }).click();
-			await expect(page).toHaveURL((u) => u.origin === new URL(page.url()).origin && u.pathname === '/');
+			await expect(page).toHaveURL(new URL('/', baseURL).href);
+			expect(left).toEqual([]);
 		});
 	}
 
@@ -123,6 +128,14 @@ test.describe('sign-in', () => {
 		await page.goto('signin/?next=%2Fnotes%2F');
 		await expect(page).toHaveURL(/\/notes\/$/);
 		expect(calls.some((c) => c.url().endsWith('/auth/code'))).toBe(false);
+	});
+
+	test('just after a sign-out, asks for a code even if the session is still live', async ({ page }) => {
+		const calls = await api(page, { live: true });
+		await page.goto('signin/?next=%2Fnotes%2F&signedout=1');
+		await expect(page.getByRole('status')).toHaveText('You are signed out.');
+		await expect(email(page)).toBeFocused();
+		expect(calls.some((c) => c.url().endsWith('/auth/refresh'))).toBe(false);
 	});
 
 	test('loads nothing from the app, which is behind the sign-in', async ({ page }) => {

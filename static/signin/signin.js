@@ -122,7 +122,16 @@ $('other').addEventListener('click', () => {
 });
 
 // Someone whose session is still live (a link from elsewhere, or files that ran out) needs no code:
-// the refresh re-checks the list and renews the file cookies.
-post('/api/auth/refresh', {})
-	.then((r) => (r.status === 200 ? go() : showEmail()))
-	.catch(() => showEmail());
+// the refresh re-checks the list and renews the file cookies. Only at /signin/ itself: served by
+// CloudFront for a 403 at another address, going back there could 403 again, in a loop. And not
+// straight after a sign-out, which would undo it if the session outlived the sign-out.
+const params = new URLSearchParams(location.search);
+const atSignin = location.pathname === '/signin/' || location.pathname === '/signin/index.html';
+if (atSignin && !params.has('signedout')) {
+	post('/api/auth/refresh', {})
+		.then((r) => (r.status === 200 ? go() : showEmail()))
+		.catch(() => showEmail());
+} else {
+	if (params.has('signedout')) say('You are signed out.');
+	showEmail();
+}

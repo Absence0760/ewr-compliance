@@ -18,10 +18,13 @@ export interface UserRow extends Me {
 const root = () => new URL(resolve('/'), location.href);
 const url = (path: string) => new URL(`api/${path}`, root());
 
-/** The sign-in page, told to come back here afterwards (only a same-origin path is followed). */
-export function signinUrl(here: Location | URL = location): string {
+/**
+ * The sign-in page, told to come back here afterwards (only a same-origin path is followed).
+ * `signedOut` tells it not to sign the person straight back in with a session that is still live.
+ */
+export function signinUrl(here: Location | URL = location, signedOut = false): string {
 	const next = `${here.pathname}${here.search}${here.hash}`;
-	return `${new URL('signin/', root()).href}?next=${encodeURIComponent(next)}`;
+	return `${new URL('signin/', root()).href}?next=${encodeURIComponent(next)}${signedOut ? '&signedout=1' : ''}`;
 }
 
 /**
@@ -69,10 +72,11 @@ const asMe = (data: unknown): Me | null => {
 };
 
 /**
- * Who is signed in; 'signed-out' when the API answers 401; or null where the site has no user list
- * (404, a body that is not the expected JSON, or a fetch that fails).
+ * Who is signed in; 'signed-out' when the API answers 401; 'error' for any other refusal (a WAF
+ * limit's 429, a 5xx) or no answer at all; or null where the site has no user list (404, or a body
+ * that is not the expected JSON).
  */
-async function ask(path: string, method: string): Promise<Me | 'signed-out' | null> {
+async function ask(path: string, method: string): Promise<Me | 'signed-out' | 'error' | null> {
 	try {
 		const res = await fetch(url(path), {
 			method,
@@ -81,19 +85,25 @@ async function ask(path: string, method: string): Promise<Me | 'signed-out' | nu
 			body: method === 'GET' ? undefined : '{}'
 		});
 		if (res.status === 401) return 'signed-out';
-		return res.ok ? asMe(await readJson(res)) : null;
+		if (res.status === 404) return null;
+		return res.ok ? asMe(await readJson(res)) : 'error';
 	} catch {
-		return null;
+		return 'error';
 	}
 }
 
-export const whoAmI = () => ask('me', 'GET');
+/** At start: a copy that can't answer is treated as having no list. */
+export const whoAmI = async () => {
+	const who = await ask('me', 'GET');
+	return who === 'error' ? null : who;
+};
 /** Re-checks the session and the list, and renews the 15-minute file cookies. */
 export const refresh = () => ask('auth/refresh', 'POST');
 
-/** Ends this session and clears its cookies. */
+/** Ends this session and clears its cookies. Throws when the API didn't confirm it. */
 export async function signOut(): Promise<void> {
-	await fetch(url('auth/logout'), { method: 'POST', credentials: 'same-origin', headers: { ...XHR, 'Content-Type': 'application/json' }, body: '{}' });
+	const res = await fetch(url('auth/logout'), { method: 'POST', credentials: 'same-origin', headers: { ...XHR, 'Content-Type': 'application/json' }, body: '{}' });
+	if (!res.ok) throw new Error(errorOf(await readJson(res)) ?? `Sign-out failed: HTTP ${res.status}.`);
 }
 
 export const listUsers = () => call<UserRow[]>('users');
