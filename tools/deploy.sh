@@ -116,6 +116,12 @@ if [ "$dry_run" = 1 ]; then
 	exit 0
 fi
 
+echo
+echo "Before uploading, the project's settings must hold (docs/hosting.md § Access control):"
+echo "  Settings > Runtime > Fail open / closed is Fail closed, in Production and in Preview."
+echo "  After this deploy, if it changed functions/, the data or a setting, delete the superseded"
+echo "  deployments: each stays live at its <hash>.$PROJECT.pages.dev URL with its own copy."
+
 if [ "$mode" = real ] && [ "$yes" = 0 ]; then
 	echo
 	echo "This publishes the real data to everyone the site's list lets in."
@@ -140,7 +146,10 @@ if grep -q 'Uploading Functions bundle' "$work/deploy.log"; then
 	echo "Wrangler uploaded the Functions bundle with this deployment."
 else
 	echo "WARNING: wrangler did not report uploading the Functions bundle. This deployment may have no list check." >&2
-	echo "Check its Functions tab now, and roll back to the previous deployment in the dashboard if _middleware is not listed." >&2
+	echo "Check its Functions tab now. If _middleware is not listed, roll production back to the previous" >&2
+	echo "deployment in the dashboard, then DELETE this one: a rollback leaves it live at its <hash> URL." >&2
+	echo "Its id is in the deployment list (pnpm wrangler pages deployment list --project-name $PROJECT):" >&2
+	echo "  pnpm wrangler pages deployment delete <id> --project-name $PROJECT" >&2
 	exit 1
 fi
 echo "Now, in the dashboard, check that this deployment's Functions tab lists _middleware,"

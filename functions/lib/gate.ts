@@ -9,15 +9,24 @@ export interface Env {
 	USERS_DB?: D1Database;
 }
 
+/**
+ * static/_headers reaches only the files the middleware passes on, never a response a Function makes
+ * itself, so these carry their own.
+ */
+const SECURITY = { 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "frame-ancestors 'none'" };
+
+/** The refusal page loads nothing and has only inline style attributes. */
+export const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'";
+
 export const json = (body: unknown, status = 200) =>
-	new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
+	new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...SECURITY } });
 
 const escape = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 /** A plain page, for a person who opened the site in a browser. */
 function page(status: number, title: string, text: string) {
 	const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escape(title)}</title><body style="font:16px system-ui,sans-serif;max-width:36em;margin:3em auto;padding:0 1em"><h1 style="font-size:1.4em">${escape(title)}</h1><p>${escape(text)}</p></body></html>`;
-	return new Response(html, { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+	return new Response(html, { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...SECURITY, 'Content-Security-Policy': PAGE_CSP } });
 }
 
 /** The app's own requests ask for JSON, and so does anything under api/. */

@@ -10,6 +10,10 @@ coverage/
 static/tiles/
 __pycache__/
 
+# Wrangler's local state. A local D1 run writes a SQLite file here that can hold email addresses.
+.wrangler/
+.dev.vars*
+
 # Generated, and real data stays in the private repo. `pnpm data:sample` or `pnpm data:private` fills it.
 static/data/
 

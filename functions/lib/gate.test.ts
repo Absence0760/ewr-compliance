@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { d1Store } from './d1.ts';
 import { KeysUnavailable } from './access.ts';
-import { config, gate } from './gate.ts';
+import { config, gate, json, PAGE_CSP } from './gate.ts';
 import { testDb } from './sqlite-d1.ts';
 import type { Store } from './users.ts';
 
@@ -77,5 +77,17 @@ describe('the gate', () => {
 		expect(((await gate(post('https://evil.example'), cfg, store, verify)) as Response).status).toBe(403);
 		expect(((await gate(post(), cfg, store, verify)) as Response).status).toBe(403);
 		expect(await gate(post(SITE), cfg, store, verify)).toMatchObject({ email: 'member@example.com' });
+	});
+
+	it('sets its own security headers, which static/_headers does not reach', async () => {
+		const page = (await gate(req('/'), cfg, store, verify)) as Response;
+		expect(page.headers.get('X-Content-Type-Options')).toBe('nosniff');
+		expect(page.headers.get('Content-Security-Policy')).toBe(PAGE_CSP);
+		expect(PAGE_CSP).toContain("frame-ancestors 'none'");
+		expect(PAGE_CSP).toContain("default-src 'none'");
+		for (const r of [(await gate(req('/api/me'), cfg, store, verify)) as Response, json({ ok: true })]) {
+			expect(r.headers.get('X-Content-Type-Options')).toBe('nosniff');
+			expect(r.headers.get('Content-Security-Policy')).toBe("frame-ancestors 'none'");
+		}
 	});
 });

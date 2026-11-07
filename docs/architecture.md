@@ -54,7 +54,7 @@ On the host, Cloudflare Pages, nobody reaches any file of the site, `data/` incl
 
 | Path | Role |
 |---|---|
-| `functions/_middleware.ts` | Runs before every request. Verifies the Access token (`lib/access.ts`: RS256 with Access's published keys, cached for an hour and fetched again for an unknown key id at most once a minute) and looks the address up in the list (`lib/gate.ts`). Refuses with a page, or JSON for the app's own calls. A change (POST, PATCH, DELETE) must come from the site's own origin. |
+| `functions/_middleware.ts` | Runs before every request. Verifies the Access token (`lib/access.ts`: RS256 with Access's published keys, cached for an hour and fetched again for an unknown key id at most once a minute) and looks the address up in the list (`lib/gate.ts`). Refuses with a page, or JSON for the app's own calls, each carrying its own `nosniff` and `frame-ancestors` headers, since `_headers` does not reach a response a Function makes. A change (POST, PATCH, DELETE) must come from the site's own origin. |
 | `functions/lib/users.ts` | The rules. Only an admin lists, adds, removes, or makes and unmakes admins. Nobody removes themself or their own admin rights. Addresses are kept trimmed and lowercase. Every change is logged in `audit`. |
 | `functions/lib/d1.ts`, `migrations/` | The list in Cloudflare D1. The last-admin rule is in each SQL statement, so two admins acting at once cannot leave the site with none. A change and its audit row go in one batch, a transaction. The table refuses an address that is not lowercase and trimmed. |
 | `functions/api/` | `me` (who is signed in), `users` (list, add) and `users/<email>` (make or unmake admin, remove), JSON over `fetch`. |
