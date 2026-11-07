@@ -31,7 +31,9 @@
 # -backend-config=backend.config` done there), or from EWR_SITE_BUCKET and EWR_DISTRIBUTION_ID.
 # AWS access is the operator's SSO profile, ewr-compliance by default (AWS_PROFILE overrides): this
 # script never reads, prints or passes a credential. --dry-run does everything but the upload and the
-# invalidation, and needs no AWS login when both values are given in the environment.
+# invalidation, and needs no AWS login for the site when both values are given in the environment;
+# in real mode its last step, the station list's check, still reads `terraform output` and fails the
+# dry run without it (before H6 there is none), as the real run would.
 #
 # A real deploy then uploads the DWS store's station list (tools/dws-stations.sh), built from the same
 # private repo's gauge links; with no store (dws_enabled off) that step says so and does nothing.
