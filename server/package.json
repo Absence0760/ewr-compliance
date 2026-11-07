@@ -15,7 +15,7 @@
 		"build": "node scripts/build.mjs"
 	},
 	"dependencies": {
-		"@absence0760/auth-kit": "github:Absence0760/auth-kit#v0.1.2",
+		"@absence0760/auth-kit": "github:Absence0760/auth-kit#v0.2.0",
 		"@aws-sdk/client-dynamodb": "3.1164.0",
 		"@aws-sdk/client-secrets-manager": "3.1164.0",
 		"@aws-sdk/client-sesv2": "3.1164.0",
