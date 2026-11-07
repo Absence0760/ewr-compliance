@@ -300,6 +300,26 @@ variable "api_reserved_concurrency" {
     condition     = var.api_reserved_concurrency == null ? true : (var.api_reserved_concurrency >= 1 && var.api_reserved_concurrency <= 50)
     error_message = "null, or between 1 and 50."
   }
+
+  # Lambda keeps 100 of the account's concurrency unreserved, for every
+  # function without a reservation, the DWS pipeline among them; an apply that
+  # reserves into it fails. Checked here, at plan, against the limit the
+  # operator read and set below.
+  validation {
+    condition     = var.api_reserved_concurrency == null ? true : var.lambda_account_concurrency_limit - var.api_reserved_concurrency >= 100
+    error_message = "api_reserved_concurrency leaves the account fewer than the 100 unreserved executions Lambda keeps for the other functions (the DWS pipeline). Raise the account's Lambda concurrency limit (Service Quotas, \"Concurrent executions\"), set lambda_account_concurrency_limit to the new value (aws lambda get-account-settings), then set api_reserved_concurrency = 5."
+  }
+}
+
+variable "lambda_account_concurrency_limit" {
+  description = "The account's Lambda concurrent-executions limit in the workload region, as `aws lambda get-account-settings --query AccountLimit.ConcurrentExecutions` reads it. Only checked against api_reserved_concurrency. 10, a new account's limit, until it is raised."
+  type        = number
+  default     = 10
+
+  validation {
+    condition     = var.lambda_account_concurrency_limit >= 10 && floor(var.lambda_account_concurrency_limit) == var.lambda_account_concurrency_limit
+    error_message = "A whole number, at least 10."
+  }
 }
 
 # --- DWS store (dws.tf, dws_backfill.tf) -------------------------------------

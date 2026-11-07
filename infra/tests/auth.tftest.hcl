@@ -513,3 +513,54 @@ run "rejects_an_unknown_signer" {
   }
   expect_failures = [var.cloudfront_signing_key]
 }
+
+# --- Reserved concurrency leaves the pipeline its headroom ---------------------
+# Lambda keeps 100 executions unreserved for the functions without a
+# reservation, the DWS pipeline among them; a new account's limit is 10.
+
+run "no_reservation_by_default" {
+  command = plan
+  variables {
+    site_enabled = true
+    auth_enabled = true
+  }
+  assert {
+    condition     = aws_lambda_function.api[0].reserved_concurrent_executions == null || aws_lambda_function.api[0].reserved_concurrent_executions == -1
+    error_message = "The API reserves no concurrency unless api_reserved_concurrency is set."
+  }
+}
+
+run "refuses_a_reservation_on_a_new_accounts_limit" {
+  command = plan
+  variables {
+    site_enabled             = true
+    auth_enabled             = true
+    api_reserved_concurrency = 5
+  }
+  expect_failures = [var.api_reserved_concurrency]
+}
+
+run "refuses_a_reservation_into_the_unreserved_100" {
+  command = plan
+  variables {
+    site_enabled                     = true
+    auth_enabled                     = true
+    lambda_account_concurrency_limit = 104
+    api_reserved_concurrency         = 5
+  }
+  expect_failures = [var.api_reserved_concurrency]
+}
+
+run "reserves_once_the_limit_is_raised" {
+  command = plan
+  variables {
+    site_enabled                     = true
+    auth_enabled                     = true
+    lambda_account_concurrency_limit = 1000
+    api_reserved_concurrency         = 5
+  }
+  assert {
+    condition     = aws_lambda_function.api[0].reserved_concurrent_executions == 5
+    error_message = "With the account's limit raised, the API reserves what api_reserved_concurrency says."
+  }
+}
