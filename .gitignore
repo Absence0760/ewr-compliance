@@ -20,3 +20,16 @@ static/data/
 # Copied in by `pnpm data:private`.
 src/private/
 e2e/tests/private/
+
+# Terraform (infra/). backend.config holds the account ID; tfvars live in infra-secrets.
+infra/.terraform/
+infra/backend.config
+infra/*.tfvars
+!infra/*.tfvars.example
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+infra/*_override.tf
+infra/*_override.tf.json

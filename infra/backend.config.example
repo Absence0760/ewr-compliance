@@ -1,0 +1,12 @@
+# Partial backend config for `terraform init -backend-config=backend.config`.
+# Copy to backend.config (gitignored) and fill in the bucket.
+#
+# The estate bootstrap (~/github/templates/scripts/new-project-account.sh
+# ewr-compliance) created the bucket as `ewr-compliance-tfstate-<account-id>`
+# in us-east-1. Only the bucket lives here (key, region, locking and
+# encryption are committed in main.tf), so the account ID stays out of this
+# public repo. Generate the file rather than typing the ID:
+#
+#   printf 'bucket = "ewr-compliance-tfstate-%s"\n' "$(aws sts get-caller-identity --profile ewr-compliance --query Account --output text)" > backend.config
+
+bucket = "ewr-compliance-tfstate-PLACEHOLDER_ACCOUNT_ID"

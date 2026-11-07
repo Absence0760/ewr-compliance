@@ -1,0 +1,36 @@
+# The shape of infra-secrets/ewr-compliance/prod.tfvars. The real file lives
+# there, never in this public repo: it names the domain, the zone and the
+# alert mailbox. Every value below is a placeholder.
+#
+#   terraform plan -var-file=../../infra-secrets/ewr-compliance/prod.tfvars
+
+aws_region  = "af-south-1"
+github_repo = "OWNER/ewr-compliance"
+
+# The delegated child zone the bootstrap made (create_subdomain = true):
+#   aws route53 list-hosted-zones-by-name --dns-name <domain> --profile ewr-compliance
+domain_name     = "ewr.example.org"
+route53_zone_id = "Z0000000000000000000"
+
+# A real mailbox: reserved example domains are refused.
+budget_alert_email = "alerts@example.org"
+
+# 0 until IAM access to billing is on in the account (H5), then 20.
+budget_monthly_usd = 0
+
+# P2. Off until the CloudFront key pair exists (H7).
+site_enabled = false
+
+# The public half only (openssl rsa -pubout). The private half goes into the
+# signing-key secret from a file, never into a tfvars file.
+# cloudfront_public_keys = {
+#   "2026-11" = <<-EOT
+#     -----BEGIN PUBLIC KEY-----
+#     ...
+#     -----END PUBLIC KEY-----
+#   EOT
+# }
+
+# P3 / P4.
+# api_origin_host         = "<url-id>.lambda-url.af-south-1.on.aws"
+# deploy_lambda_functions = ["ewr-compliance-api"]
