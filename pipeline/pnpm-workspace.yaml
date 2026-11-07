@@ -1,0 +1,4 @@
+# pipeline/ is its own pnpm project, not a member of the root app's: its AWS SDK never reaches the
+# app's install, and the app's never reaches the Lambda. This file holds only settings.
+onlyBuiltDependencies:
+  - esbuild

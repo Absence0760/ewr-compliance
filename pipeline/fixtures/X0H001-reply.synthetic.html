@@ -1,0 +1,111 @@
+<!-- SYNTHETIC fixture for pipeline/src (hydata.ts, run.ts). Invented station X0H001 and invented values.
+     The layout follows an archived DWS HyData.aspx daily page (web.archive.org, 2024-05), as project-water-management's
+     backend/fixtures/feeds/dws-sample.html does: a <pre> whose format block declares fixed columns (date 1-8, flow in
+     m3/s 10-18, quality code 20-24), the header "DATE     D AVG F/R  QUAL", a row of Z's after the last day, and the
+     ASP.NET document after the </pre>. Covers 2010-01-01 to 2010-03-31, with a day with no row (2010-02-10), a gap row
+     with a blank flow and code 170 (2010-02-20), a value coded 50 (2010-03-05) and a -999 placeholder coded 152
+     (2010-03-12). -->
+<p><pre>Data are continuously updated and reviewed.
+The format of this file is as follows:
+POS.  1-8   = Date of daily flow  CCYYMMDD
+POS. 10-18  = Daily avg flow rate in cubic metres/sec 99999.999
+POS. 20-24  = Quality code
+
+X0H001 (SYNTHETIC WEIR)
+Variable 100.00 Surface Water Level
+
+DATE     D AVG F/R  QUAL
+20100101     1.500     1
+20100102     1.655     1
+20100103     1.809     1
+20100104     1.958     1
+20100105     2.102     1
+20100106     2.238     1
+20100107     2.366     1
+20100108     2.482     1
+20100109     2.587     1
+20100110     2.678     1
+20100111     2.755     1
+20100112     2.816     1
+20100113     2.861     1
+20100114     2.889     1
+20100115     2.900     1
+20100116     2.894     1
+20100117     2.870     1
+20100118     2.830     1
+20100119     2.773     1
+20100120     2.701     1
+20100121     2.613     1
+20100122     2.512     1
+20100123     2.399     1
+20100124     2.274     1
+20100125     2.140     1
+20100126     1.998     1
+20100127     1.850     1
+20100128     1.698     1
+20100129     1.543     1
+20100130     1.387     1
+20100131     1.233     1
+20100201     1.082     1
+20100202     0.937     1
+20100203     0.798     1
+20100204     0.668     1
+20100205     0.548     1
+20100206     0.440     1
+20100207     0.346     1
+20100208     0.265     1
+20100209     0.199     1
+20100211     0.117     1
+20100212     0.101     1
+20100213     0.103     1
+20100214     0.122     1
+20100215     0.158     1
+20100216     0.210     1
+20100217     0.278     1
+20100218     0.361     1
+20100219     0.459     1
+20100220             170
+20100221     0.691     1
+20100222     0.822     1
+20100223     0.962     1
+20100224     1.109     1
+20100225     1.260     1
+20100226     1.415     1
+20100227     1.570     1
+20100228     1.725     1
+20100301     1.877     1
+20100302     2.024     1
+20100303     2.165     1
+20100304     2.297     1
+20100305     2.420    50
+20100306     2.531     1
+20100307     2.630     1
+20100308     2.714     1
+20100309     2.784     1
+20100310     2.838     1
+20100311     2.876     1
+20100312  -999.000   152
+20100313     2.899     1
+20100314     2.885     1
+20100315     2.854     1
+20100316     2.806     1
+20100317     2.742     1
+20100318     2.663     1
+20100319     2.569     1
+20100320     2.463     1
+20100321     2.344     1
+20100322     2.215     1
+20100323     2.077     1
+20100324     1.932     1
+20100325     1.782     1
+20100326     1.628     1
+20100327     1.472     1
+20100328     1.317     1
+20100329     1.165     1
+20100330     1.016     1
+20100331     0.873     1
+ZZZZZZZZZZZZ
+</pre></p>
+<!DOCTYPE html>
+<html><head><title>Hydrological Services - Verified Data</title></head>
+<body><form method="post" action="./HyData.aspx"><input type="hidden" name="__VIEWSTATE" value="synthetic" /></form></body></html>
