@@ -50,6 +50,8 @@ Observed flow comes from a linked gauge, the DWS API once it exists, or a file. 
 
 ## Users and access
 
+> **Superseded.** The Cloudflare design described here is being replaced by hosting on AWS af-south-1, with sign-in and user management from the shared private package `auth-kit`, per the private hosting plan (phases P1–P6). Nothing is live. This section stays as it is until P6 rewrites it; don't extend the Cloudflare code.
+
 On the host, Cloudflare Pages, nobody reaches any file of the site, `data/` included, unless two things hold. Cloudflare Access has signed them in, with a one-time code sent to their email address, and that address is on the site's list of users. Access proves who someone is; the list, which the site's admins keep, decides whether they may come in. The list in D1 is the source of truth. Access's policy includes only an Access group the site keeps in step with it, so Access sends a code to no one else, and the middleware checks the list again on every request. Hosting and setting it up: `docs/hosting.md` § Access control.
 
 | Path | Role |

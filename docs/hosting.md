@@ -1,5 +1,7 @@
 # Hosting
 
+> **Superseded.** The Cloudflare design described here is being replaced by hosting on AWS af-south-1, with sign-in and user management from the shared private package `auth-kit`, per the private hosting plan (phases P1–P6). Nothing is live. This document stays as it is until P6 rewrites it; don't extend the Cloudflare code.
+
 The app is a folder of static files, plus `functions/`, the access check that Cloudflare Pages runs in front of them. `tools/deploy.sh` deploys it there: § Build.
 
 ## The data is the decision
@@ -11,6 +13,8 @@ A real deployment must run `pnpm data:private` before `pnpm build`, on a machine
 CI builds the sample only and has no access to the private repo, so a real build cannot come from it as things stand.
 
 ## Access control
+
+> **Superseded,** as noted at the top: on AWS, sign-in and the user list come from `auth-kit`, and the Cloudflare Access, D1 and Functions setup below goes in P3.
 
 The decision: only people on the site's list of users can load any of its files. The list is kept by the site's admins, in the app. The operator adds the first admin once; after that, admins add and remove users and make other admins. Design: `docs/architecture.md` § Users and access.
 

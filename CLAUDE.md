@@ -2,7 +2,9 @@
 
 Guidance for Claude Code working in this repository. Keep this file short — it loads into every conversation.
 
-EWR Compliance Measurement compares observed river flows with Environmental Water Requirements at the EWR nodes and sites of the Berg, Breede-Overberg, Gouritz and Olifants-Doorn basins. It opens on South Africa's Water Management Areas of 2023, each with its own map. It is a static SvelteKit 3 app (`adapter-static`, `ssr = false`) with Svelte 5 runes and TypeScript. Its one server part is `functions/`, Cloudflare Pages Functions that check every request against a list of users kept in Cloudflare D1, which the site's admins manage. The deploy target is Cloudflare Pages, deployed from the workstation by `tools/deploy.sh` (not yet live). Layout and conventions: `docs/architecture.md`.
+EWR Compliance Measurement compares observed river flows with Environmental Water Requirements at the EWR nodes and sites of the Berg, Breede-Overberg, Gouritz and Olifants-Doorn basins. It opens on South Africa's Water Management Areas of 2023, each with its own map. It is a static SvelteKit 3 app (`adapter-static`, `ssr = false`) with Svelte 5 runes and TypeScript. Layout and conventions: `docs/architecture.md`.
+
+**Hosting is moving to AWS af-south-1,** per the private hosting plan, in phases P1–P6; nothing is live yet. The Cloudflare design (`functions/`, `migrations/`, D1, the Access sync, wrangler, `static/_headers`) stays until P3 replaces it: don't extend it. **Sign-in, sessions and user management come from `auth-kit`,** a private package installed at a pinned tag, from P3 on. Don't write auth code here: fix it in `auth-kit`, tag it, and take the Dependabot PR.
 
 This repo is public and holds the code. The real data, the client's brief and the tests pinned to them are in the private repo `ewr-compliance-private`, a sibling folder. This repo runs on a synthetic sample.
 
