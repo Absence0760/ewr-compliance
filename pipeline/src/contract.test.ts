@@ -31,7 +31,7 @@ describe('the store the pipeline writes, read by the app', () => {
 		const state: DwsState = { status: 'ready', index };
 		const link = { node: 'Synthetic:n1', station: 'X0H001', factor: 1, note: '' };
 		expect(dwsOffer(state, link, 'instant').ok).toBe(true);
-		// No monthly file yet (the plan's Q1): the Historical Comparison keeps the gauge's own record.
+		// No monthly file: the store holds verified daily flow only (the plan's Q1), so the Historical Comparison keeps the gauge's own record.
 		expect(dwsOffer(state, link, 'monthly').ok).toBe(false);
 		expect(dwsStatus('X0H001', index.stations.X0H001!)).toEqual({ stale: false, text: 'Fetched 1 Apr 2010, 06:00 SAST, with daily flow from 2010-01-01 to 2010-03-31.' });
 	});

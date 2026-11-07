@@ -72,7 +72,7 @@ aws sts get-caller-identity --profile mgmt --query Account --output text && aws 
 aws sso login --profile mgmt && aws sso login --profile dns-parent
 ```
 
-**H3. Create the account** (Runbook A in `project-mgmt`). The plan first, then the real run. Its last stage (`4-github-guardrails`) also changes this repo on GitHub (the plan's Q5): it creates the `production` environment with you as its required reviewer, which H10 needs, and it locks `main` (a pull request for every change, enforced on admins, the "CI gate" check required, linear history).
+**H3. Create the account** (Runbook A in `project-mgmt`). The plan first, then the real run. Its last stage (`4-github-guardrails`) also changes this repo on GitHub: it creates the `production` environment with you as its required reviewer, which H10 needs, and it locks `main` (a pull request for every change, enforced on admins, the "CI gate" check required, linear history).
 
 ```
 cd ~/github/templates && ./scripts/new-project-account.sh ewr-compliance --plan
@@ -84,13 +84,13 @@ cd ~/github/templates && ./scripts/new-project-account.sh ewr-compliance
 
 The account's details are in the summary it prints at the end: keep the account ID (H4) and the deploy role's ARN (H10) to hand, and record nothing from it in this repo.
 
-Then decide how `main` is changed, and record the choice in the private plan: it is yours. This repo goes straight to `main` for now (`CLAUDE.md`, and issue 1 for bringing the gate back). To stay that way, remove the branch protection stage 4 made, and keep the `production` environment:
+Keep the branch protection stage 4 made (the plan's Q5): production deploys `origin/main`, so a change should pass CI before it reaches `main`, not after. Straight after, close issue 1 by its checklist: turn the hook's main-push gate back on (`MAIN_PUSH_GATE = True` in `.claude/hooks/git-scope-guard.py`, `MAIN = "deny"` in its test, and run the test), and put back `CLAUDE.md`'s rule that every change reaches `main` through a PR, in one PR, the first through the gate. Check the lock is there:
 
 ```
-gh api -X DELETE repos/Absence0760/ewr-compliance/branches/main/protection
+gh api repos/Absence0760/ewr-compliance/branches/main/protection --jq '.required_status_checks.contexts, .enforce_admins.enabled'
 ```
 
-To work through pull requests from now on instead, keep it, and change `CLAUDE.md`'s "Working alongside other Claude sessions" to match.
+It should list `CI gate`, then `true`.
 
 **H4. Enable af-south-1** for the new account, from the management account, then check it reads `ENABLED` (it takes a few minutes). The management account can change another account's regions only once trusted access for AWS Account Management is on in the organisation. Turn it on once (it is harmless if it already is):
 
@@ -274,6 +274,8 @@ Sign in at `https://<domain>/` with that address, open Users, and add a second a
 
 **H11. The DWS store (P4).** One at a time, each when the last is done. What each part does, and what its alarms mean: `docs/hosting.md` § The DWS store.
 
+Before step 1: DWS's written permission to store its verified daily flow for this tool, through the client's hydrologist (`docs/hosting.md` § The DWS store). Record it in the private plan, and keep the letter with the client's records, never in this repo. Without it, stop here: the site works without the store, which the app then shows as unavailable.
+
 1. Set `dws_enabled = true` in `prod.tfvars` (and `dws_contact`, a mailbox DWS can write to before blocking us, if you want one in the user agent), then plan and apply as in H6. That makes the bucket, the pipeline (which fails until its code is deployed), the backfill and the empty DWS API key secret. The daily rule is made disabled.
 2. Deploy the pipeline as in H10: add the tag rule `pipeline@*` to the `production` environment's deployment branches and tags, set the variable, and publish a release and approve it.
 
@@ -291,7 +293,7 @@ gh release create pipeline@0.1.0 --target main --generate-notes --repo Absence07
 cd ~/github/ewr-compliance && tools/dws-stations.sh
 ```
 
-4. One pull by hand, from af-south-1: the test request the plan's Q1 asks for. It prints counts only (`pulled`, `failed`, `stopped`), never a station. `stopped` = `done` with `failed` = 0 means DWS answered and every page read; `refused` means DWS answered 403, so stop and don't try again until that is understood. After any stop the pipeline itself asks nothing for a while (after a 403 until a run with `"ignoreStop":true` gets through; an hour after the others) and answers `cooling`; adding `"ignoreStop":true` to the payload overrides that, for when you know why.
+4. One pull by hand, from af-south-1, to check DWS answers it with the daily table. It prints counts only (`pulled`, `failed`, `stopped`), never a station. `stopped` = `done` with `failed` = 0 means DWS answered and every page read; `refused` means DWS answered 403, so stop and don't try again until that is understood. After any stop the pipeline itself asks nothing for a while (after a 403 until a run with `"ignoreStop":true` gets through; an hour after the others) and answers `cooling`; adding `"ignoreStop":true` to the payload overrides that, for when you know why.
 
 ```
 aws lambda invoke --function-name ewr-compliance-dws --cli-binary-format raw-in-base64-out --payload '{"mode":"daily"}' --region af-south-1 --profile ewr-compliance /dev/stdout
