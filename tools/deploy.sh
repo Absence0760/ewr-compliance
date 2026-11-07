@@ -2,8 +2,17 @@
 # Deploys the site to its private S3 bucket behind CloudFront (infra/site.tf), from this workstation.
 # Never from CI: CI has no access to the real data, and its deploy role cannot write the bucket.
 #
-#   tools/deploy.sh sample [--dry-run]          the synthetic sample, to test the site and its gate
-#   tools/deploy.sh real   [--dry-run] [--yes]  the real data, from ../ewr-compliance-private or EWR_PRIVATE_DIR
+#   tools/deploy.sh sample [--dry-run] [--skip-ci-check]
+#       the synthetic sample, to test the site and its gate
+#   tools/deploy.sh real   [--dry-run] [--yes] [--allow-dirty] [--skip-ci-check]
+#       the real data, from ../ewr-compliance-private or EWR_PRIVATE_DIR
+#
+# Before it builds it refuses (tools/deploy-check.mjs, checkSources):
+#   - an origin/main whose `CI gate` check has not passed, asked of GitHub with gh. --skip-ci-check
+#     publishes it anyway, saying so.
+#   - for real, a private repo that is not exactly what its upstream holds, once fetched: uncommitted
+#     changes, commits not pushed, or commits not pulled. --allow-dirty publishes it as it stands.
+# --dry-run reports what a real run would refuse and goes on.
 #
 # It builds from a clean, temporary git worktree of freshly fetched origin/main, never from this
 # working tree, which may hold uncommitted work or the wrong static/data. The build has no base map
@@ -32,18 +41,22 @@ PROJECT=ewr-compliance
 PROFILE=${AWS_PROFILE:-ewr-compliance}
 
 usage() {
-	echo "Usage: tools/deploy.sh sample|real [--dry-run] [--yes]" >&2
+	echo "Usage: tools/deploy.sh sample|real [--dry-run] [--yes] [--allow-dirty] [--skip-ci-check]" >&2
 	exit 2
 }
 
 mode=
 dry_run=0
 yes=0
+allow_dirty=0
+skip_ci_check=0
 for arg in "$@"; do
 	case $arg in
 		sample | real) [ -z "$mode" ] || usage; mode=$arg ;;
 		--dry-run) dry_run=1 ;;
 		--yes) yes=1 ;;
+		--allow-dirty) allow_dirty=1 ;;
+		--skip-ci-check) skip_ci_check=1 ;;
 		-h | --help) usage ;;
 		*) echo "Unknown argument: $arg" >&2; usage ;;
 	esac
@@ -84,6 +97,39 @@ git -C "$root" fetch --quiet origin main
 sha=$(git -C "$root" rev-parse origin/main)
 subject=$(git -C "$root" log -1 --format=%s "$sha")
 
+# What is about to be published, judged before anything is built: CI on that commit, and for real
+# the private repo against its upstream.
+ci=unknown
+if command -v gh >/dev/null; then
+	if runs=$(gh api "repos/Absence0760/$PROJECT/commits/$sha/check-runs?check_name=CI%20gate" \
+		--jq '[.check_runs[] | .conclusion // "pending"] | if length == 0 then "none" elif any(. == "success") then "success" elif any(. == "pending") then "pending" else "failure" end' 2>/dev/null); then
+		ci=$runs
+	fi
+fi
+private_json=null
+if [ "$mode" = real ]; then
+	fetched=false
+	git -C "$private" fetch --quiet 2>/dev/null && fetched=true
+	head=$(git -C "$private" rev-parse HEAD)
+	dirty=false
+	[ -z "$(git -C "$private" status --porcelain)" ] || dirty=true
+	upstream=$(git -C "$private" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)
+	upstream_sha=
+	ahead=0
+	behind=0
+	if [ -n "$upstream" ]; then
+		upstream_sha=$(git -C "$private" rev-parse '@{u}')
+		read -r ahead behind < <(git -C "$private" rev-list --left-right --count 'HEAD...@{u}')
+	fi
+	private_json=$(printf '{"fetched":%s,"dirty":%s,"head":"%s","upstream":%s,"upstreamSha":%s,"ahead":%d,"behind":%d}' \
+		"$fetched" "$dirty" "$head" "$([ -n "$upstream" ] && printf '"%s"' "$upstream" || echo null)" \
+		"$([ -n "$upstream_sha" ] && printf '"%s"' "$upstream_sha" || echo null)" "$ahead" "$behind")
+fi
+bool() { [ "$1" = 1 ] && echo true || echo false; }
+echo "Sources:"
+node "$check" sources "$(printf '{"mode":"%s","dryRun":%s,"allowDirty":%s,"skipCiCheck":%s,"sha":"%s","ci":"%s","private":%s}' \
+	"$mode" "$(bool "$dry_run")" "$(bool "$allow_dirty")" "$(bool "$skip_ci_check")" "$sha" "$ci" "$private_json")"
+
 work=$(mktemp -d "${TMPDIR:-/tmp}/ewr-deploy.XXXXXX")
 tree="$work/tree"
 cleanup() {
@@ -102,9 +148,7 @@ pnpm install --frozen-lockfile --silent
 if [ "$mode" = real ]; then
 	EWR_PRIVATE_DIR=$private pnpm --silent data:private
 	private_sha=$(git -C "$private" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
-	if [ -n "$(git -C "$private" status --porcelain 2>/dev/null)" ]; then
-		echo "Warning: $private has uncommitted changes, and they are in this build." >&2
-	fi
+	private_upstream=$(git -C "$private" rev-parse --short=12 '@{u}' 2>/dev/null || echo none)
 else
 	pnpm --silent data:sample
 fi
@@ -138,7 +182,7 @@ echo
 echo "Going up to s3://$bucket, distribution $distribution:"
 echo "  Mode:    $mode"
 echo "  Commit:  $sha  $subject"
-[ "$mode" = real ] && echo "  Data:    $private at $private_sha"
+[ "$mode" = real ] && echo "  Data:    $private at $private_sha (upstream at $private_upstream)"
 echo "  Profile: $PROFILE"
 echo "  Pass 1:  ${immutable[*]}"
 echo "           ${immutable_mjs[*]}"
