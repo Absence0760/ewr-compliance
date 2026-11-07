@@ -1,17 +1,18 @@
 // The operator's actions, run from the workstation with the operator's own AWS profile, never
-// through the site (tools/first-admin, tools/recover-admin, tools/erase-user):
+// through the site (tools/first-admin, tools/recover-admin, tools/clear-lock, tools/erase-user):
 //
 //   first-admin    auth-kit bootstrapAdmin: the first admin, once, as one conditional transaction
 //   recover-admin  auth-kit recoverAdmin: make a listed address an admin again and clear its lockout
+//   clear-lock     auth-kit clearLock: clear an address's sign-in lockout, changing no role
 //   erase-user     auth-kit eraseAddress: remove the address everywhere (POPIA)
 //
 // The address is asked for at a prompt, never taken as an argument, so it stays out of shell
 // history. The table and the runtime secret's ARN come from the environment (the tools/ script
 // reads them from `terraform output`); the keys are read from the runtime secret with the
-// operator's credentials, because recover and erase must find the address's code and throttle,
+// operator's credentials, because recover, clear-lock and erase must find the address's code and throttle,
 // which are keyed by an HMAC under the code key. Nothing read is printed.
 //
-//   node src/operator.ts first-admin|recover-admin|erase-user
+//   node src/operator.ts first-admin|recover-admin|clear-lock|erase-user
 import { createInterface } from 'node:readline/promises';
 import { createAuthKit, type AuthKit } from '@absence0760/auth-kit';
 import { dynamoStore } from '@absence0760/auth-kit/dynamodb';
@@ -34,6 +35,17 @@ export const COMMANDS = {
 		run: async (auth: AuthKit, email: string) => {
 			const r = await auth.recoverAdmin(email);
 			return r.ok ? `${r.value.email} is an admin, and can ask for a code now. This is in the audit log.` : r;
+		}
+	},
+	'clear-lock': {
+		ask: 'The address to clear the sign-in lockout of: ',
+		confirm: (email: string) => `Clear the sign-in lockout and send limits of ${email}? Their role doesn't change.`,
+		run: async (auth: AuthKit, email: string) => {
+			const r = await auth.clearLock(email);
+			if (!r.ok) return r;
+			return r.value.listed
+				? 'Cleared. They can ask for a code now; their role is unchanged. This is in the audit log.'
+				: 'That address is not on the list. Its lockout, if any, is cleared, and the audit log records it only as an HMAC.';
 		}
 	},
 	'erase-user': {

@@ -220,7 +220,7 @@ cd ~/github/ewr-compliance/server && pnpm install --frozen-lockfile
 cd ~/github/ewr-compliance && tools/first-admin
 ```
 
-Sign in at `https://<domain>/` with that address, open Users, and add a second admin, so one locked out can't leave the site without one. `tools/recover-admin` is the break-glass and `tools/erase-user` the erasure: `docs/hosting.md` § Access control.
+Sign in at `https://<domain>/` with that address, open Users, and add a second admin, so one locked out can't leave the site without one. `tools/recover-admin` is the break-glass, `tools/clear-lock` clears a sign-in lockout without changing anyone's role, and `tools/erase-user` is the erasure: `docs/hosting.md` § Access control.
 
 **H11. The DWS store (P4).** One at a time, each when the last is done. What each part does, and what its alarms mean: `docs/hosting.md` § The DWS store.
 

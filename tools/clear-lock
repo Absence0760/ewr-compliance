@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Clear an address's sign-in lockout and send limits, changing no role (auth-kit clearLock).
+# Asks for the address; uses the operator's AWS profile. docs/hosting.md, Access control.
+exec "$(dirname "${BASH_SOURCE[0]}")/auth-operator.sh" clear-lock "$@"

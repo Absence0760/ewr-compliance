@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Runs one of the operator's sign-in actions (server/src/operator.ts) against the live user table, with
-# the operator's own AWS profile. Called by tools/first-admin, tools/recover-admin and tools/erase-user.
+# the operator's own AWS profile. Called by tools/first-admin, tools/recover-admin, tools/clear-lock and
+# tools/erase-user.
 #
-#   tools/auth-operator.sh first-admin|recover-admin|erase-user
+#   tools/auth-operator.sh first-admin|recover-admin|clear-lock|erase-user
 #
 # The address is typed at the prompt, never passed as an argument (shell history), and never printed
 # back except in the confirmation. The table and the runtime secret's ARN come from `terraform output`
@@ -12,8 +13,8 @@
 set -euo pipefail
 
 case ${1:-} in
-	first-admin | recover-admin | erase-user) command=$1 ;;
-	*) echo "Usage: tools/auth-operator.sh first-admin|recover-admin|erase-user" >&2; exit 2 ;;
+	first-admin | recover-admin | clear-lock | erase-user) command=$1 ;;
+	*) echo "Usage: tools/auth-operator.sh first-admin|recover-admin|clear-lock|erase-user" >&2; exit 2 ;;
 esac
 [ "$#" -eq 1 ] || { echo "No other arguments: the address is asked for at the prompt." >&2; exit 2; }
 

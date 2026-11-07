@@ -38,7 +38,7 @@ CI builds the sample only and has no access to the private repo, so a real build
 Nobody reaches a file of the site, `data/` included, without CloudFront signed cookies, and only the API (`server/`, on the private package `auth-kit`) issues them: to an address on the site's list, after a 6-digit code sent to it. How it works: `docs/architecture.md` § Users and access. What Terraform makes: `infra/auth.tf`.
 
 - **The list** is one DynamoDB table in af-south-1 (`ewr-compliance-users`): users, the admin count, codes and throttles (keyed by an HMAC of the address, so a stranger's address is never stored), revoked sessions, and the audit log. Admins keep it on the Users page; every change is one transaction with its audit row, and the site always keeps an admin.
-- **Codes** are valid 10 minutes, spent after 3 wrong tries, at most one a minute and 10 a day an address; 5 wrong codes in a row lock the address for a while (`auth.locked` alarms). Nothing says whether an address is listed, by answer or by timing.
+- **Codes** are valid 10 minutes, spent after 3 wrong tries, at most one a minute and 10 a day an address; 5 wrong codes in a row lock the address for a while (`auth.locked` alarms). Anyone can set off a lock against an address they know, so the operator can clear one (below). A lock stops only signing in by code: it never ends a live session or blocks a signed-in admin. Nothing says whether an address is listed, by answer or by timing.
 - **Sessions** are an HttpOnly `__Host-` cookie for 7 days. The files' cookies last 15 minutes and the app renews them while it is open. Every API call re-reads the user: a removed user is refused by the API at once, and the files close to them within 15 minutes (Q3 in the plan accepts that).
 - **Mail** goes from `no-reply@<domain>` through SES in af-south-1, DKIM-signed, over TLS only.
 - **Keys.** The code key, the session key and the CloudFront origin secret are Terraform `random_password`s in the API's runtime secret (state holds them, encrypted, as the estate standard allows); the CloudFront private key is the operator's, put in by hand (H7). None is in the Lambda's environment, which the CI deploy role can read.
@@ -57,6 +57,12 @@ If no admin can sign in (an admin locked out by someone failing codes against th
 
 ```
 tools/recover-admin
+```
+
+If someone is locked out, or has run out of sends, by someone else's attempts against their address, clear it without changing their role. Use this, not the break-glass, for anyone who shouldn't become an admin. It clears the address's lockout, live code and send limits, and is audited as `clear-lock`. For an address that isn't listed it does the same and records only an HMAC:
+
+```
+tools/clear-lock
 ```
 
 They need `server/` installed (`cd server && pnpm install --frozen-lockfile`, which needs read access to `auth-kit`) and `terraform -chdir=infra output users_table` to work.

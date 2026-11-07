@@ -32,6 +32,35 @@ describe('the operator commands', () => {
 		expect(await COMMANDS['recover-admin'].run(auth, 'nobody@example.test')).toMatchObject({ ok: false, status: 404 });
 	});
 
+	it('clear-lock is a known command, and stops before any AWS call when stdin is not a terminal', async () => {
+		const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+		expect(await main(['clear-lock'], { EWR_USERS_TABLE: 'ewr-compliance-users', EWR_RUNTIME_SECRET_ARN: 'arn:aws:secretsmanager:af-south-1:000000000000:secret:x' })).toBe(2);
+		expect(String(err.mock.calls.at(-1)?.[0])).toContain('Run it from a terminal');
+	});
+
+	it('clear-lock clears a locked member, who stays a member; an unlisted address is cleared without being listed', async () => {
+		const auth = kit();
+		await auth.bootstrapAdmin('admin@example.test');
+		const admin = (await auth.deps.store.getUserByEmail('admin@example.test'))!;
+		await auth.addUser(admin, 'member@example.test', false);
+		for (const email of ['member@example.test', 'stranger@example.test']) {
+			for (let i = 0; i < 5; i++) await auth.verifyCode(email, '000000');
+			expect(await auth.requestCode(email)).toMatchObject({ status: 'locked' });
+		}
+		expect(await COMMANDS['clear-lock'].run(auth, 'member@example.test')).toMatch(/^Cleared\. .*role is unchanged/);
+		expect(await auth.requestCode('member@example.test')).toMatchObject({ status: 'accepted' });
+		expect(await auth.deps.store.getUserByEmail('member@example.test')).toMatchObject({ isAdmin: false });
+		expect(await auth.deps.store.adminCount()).toBe(1);
+		expect(await COMMANDS['clear-lock'].run(auth, 'stranger@example.test')).toMatch(/^That address is not on the list/);
+		expect(await auth.requestCode('stranger@example.test')).toMatchObject({ status: 'accepted' });
+		// Filtered, not the newest two: rows written in one millisecond sort by their random id.
+		const cleared = (await auth.deps.store.listAudit()).filter((a) => a.action === 'clear-lock').map((a) => a.target);
+		expect(cleared).toHaveLength(2);
+		expect(cleared).toContain('member@example.test');
+		expect(cleared.find((t) => t !== 'member@example.test')).toMatch(/^unlisted:/);
+		expect(await COMMANDS['clear-lock'].run(auth, 'not an address')).toMatchObject({ ok: false, status: 400 });
+	});
+
 	it('erase-user removes the user and rewrites the audit, and refuses the last admin', async () => {
 		const auth = kit();
 		await auth.bootstrapAdmin('admin@example.test');
