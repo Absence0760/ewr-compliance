@@ -17,6 +17,9 @@ export function isSampleIndex(text) {
 	return JSON.parse(text).sample === true;
 }
 
+/** The sign-in page: served unsigned, so it is self-contained (static/signin/). */
+export const SIGNIN_FILES = ['signin/index.html', 'signin/signin.js', 'signin/next.js', 'signin/signin.css'];
+
 export function summarize(files) {
 	return { count: files.length, bytes: files.reduce((sum, f) => sum + f.size, 0) };
 }
@@ -54,9 +57,10 @@ export function checkBuild({ files, indexJson, mode }) {
 	// Cloudflare Pages' header file means nothing to S3, and would be served as a file.
 	if (files.some((f) => f.path === '_headers')) errors.push('The build has a _headers file. Headers come from the CloudFront policy (infra/security_headers.tf): remove static/_headers.');
 
-	// The edge function sends everyone not signed in to /signin/ (infra/edge_functions.tf). Until the
-	// sign-in page exists (P3), that is a 404, and the site can be reached by nobody.
-	if (!files.some((f) => f.path === 'signin/index.html')) warnings.push('The build has no signin/index.html, so a visitor not signed in is sent to a page that is not there.');
+	// The edge function sends everyone not signed in to /signin/ (infra/edge_functions.tf), and
+	// CloudFront shows its page for any 403. Without it nobody can sign in, or reach anything.
+	const missing = SIGNIN_FILES.filter((p) => !files.some((f) => f.path === p));
+	if (missing.length) errors.push(`The build has no ${missing.join(', ')}: the sign-in page (static/signin/) must go up with the site, or nobody can sign in.`);
 
 	return { errors, warnings };
 }

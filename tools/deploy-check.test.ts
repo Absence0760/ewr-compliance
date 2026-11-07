@@ -2,10 +2,10 @@
 // throwaway build.
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkBuild, isSampleIndex, listFiles, summarize } from './deploy-check.mjs';
+import { SIGNIN_FILES, checkBuild, isSampleIndex, listFiles, summarize } from './deploy-check.mjs';
 
 const SAMPLE = JSON.stringify({ sample: true, nodes: [] });
 const REAL = JSON.stringify({ nodes: [] });
@@ -13,6 +13,9 @@ const REAL = JSON.stringify({ nodes: [] });
 const ok = [
 	{ path: 'index.html', size: 1000 },
 	{ path: 'signin/index.html', size: 200 },
+	{ path: 'signin/signin.js', size: 200 },
+	{ path: 'signin/next.js', size: 200 },
+	{ path: 'signin/signin.css', size: 200 },
 	{ path: 'data/index.json', size: 500 }
 ];
 
@@ -46,10 +49,14 @@ describe('checkBuild', () => {
 		expect(check({ files: [...ok, { path: '_headers', size: 10 }] }).errors[0]).toMatch(/_headers file/);
 	});
 
-	it('only warns when the sign-in page is absent', () => {
-		const r = check({ files: ok.filter((f) => f.path !== 'signin/index.html') });
-		expect(r.errors).toEqual([]);
-		expect(r.warnings).toEqual([expect.stringContaining('no signin/index.html')]);
+	it('refuses a build without the whole sign-in page, naming what is missing', () => {
+		const r = check({ files: ok.filter((f) => f.path !== 'signin/index.html' && f.path !== 'signin/next.js') });
+		expect(r.errors).toEqual([expect.stringContaining('no signin/index.html, signin/next.js:')]);
+	});
+
+	it('requires what static/signin/ holds', () => {
+		const shipped = readdirSync(join(import.meta.dirname, '../static/signin')).map((f) => `signin/${f}`).sort();
+		expect([...SIGNIN_FILES].sort()).toEqual(shipped);
 	});
 
 	it('takes no size or file-count limit from Cloudflare Pages any more', () => {
@@ -59,7 +66,7 @@ describe('checkBuild', () => {
 
 	it('reports every problem at once', () => {
 		const r = checkBuild({ files: [{ path: 'tiles/x', size: 1 }, { path: '_headers', size: 1 }], indexJson: null, mode: 'real' });
-		expect(r.errors).toHaveLength(3);
+		expect(r.errors).toHaveLength(4);
 	});
 });
 
@@ -71,7 +78,7 @@ describe('isSampleIndex and summarize', () => {
 	});
 
 	it('counts files and bytes', () => {
-		expect(summarize(ok)).toEqual({ count: 3, bytes: 1700 });
+		expect(summarize(ok)).toEqual({ count: 6, bytes: 2300 });
 	});
 });
 
@@ -87,6 +94,8 @@ describe('the command line', () => {
 		mkdirSync(join(root, 'build/data'), { recursive: true });
 		writeFileSync(join(root, 'build/index.html'), 'x');
 		writeFileSync(join(root, 'build/data/index.json'), index);
+		mkdirSync(join(root, 'build/signin'));
+		for (const f of SIGNIN_FILES) writeFileSync(join(root, 'build', f), 'x');
 		return root;
 	}
 	const run = (root: string, mode: string) => {
@@ -96,14 +105,21 @@ describe('the command line', () => {
 
 	it('lists nested files with forward slashes', () => {
 		const root = tree(SAMPLE);
-		expect(listFiles(join(root, 'build')).map((f) => f.path).sort()).toEqual(['data/index.json', 'index.html']);
+		expect(listFiles(join(root, 'build')).map((f) => f.path).sort()).toEqual(['data/index.json', 'index.html', ...[...SIGNIN_FILES].sort()]);
 	});
 
-	it('passes a matching build with a summary and the sign-in warning', () => {
+	it('passes a matching build with a summary', () => {
 		const r = run(tree(SAMPLE), 'sample');
 		expect(r.status).toBe(0);
-		expect(r.out).toContain('Build: 2 files');
-		expect(r.out).toContain('Warning: The build has no signin/index.html');
+		expect(r.out).toContain('Build: 6 files');
+	});
+
+	it('refuses a build with no sign-in page', () => {
+		const root = tree(SAMPLE);
+		rmSync(join(root, 'build/signin'), { recursive: true });
+		const r = run(root, 'sample');
+		expect(r.status).toBe(1);
+		expect(r.out).toContain('Refused: The build has no signin/index.html');
 	});
 
 	it('exits 1 on a mismatch, saying why', () => {

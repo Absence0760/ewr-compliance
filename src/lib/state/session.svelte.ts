@@ -1,18 +1,77 @@
-// Who is signed in, asked of the host once when the app starts. Null where the site has no user list,
-// and `expired` when the host says the sign-in has run out.
-import { whoAmI, type Me } from '#lib/users/api.ts';
+// Who is signed in, asked of the API once when the app starts. Null where the site has no user list
+// (a copy served without the API).
+//
+// On the hosted site every file needs the CloudFront cookies the API issues for 15 minutes, so while
+// the app is open the session renews them: every REFRESH_MS, and when the tab comes back after a
+// while (a laptop asleep past the 15 minutes). A refresh also re-checks the list, so a removed user
+// is sent to sign in. A 401 from the API means the session is over: the person goes to
+// signin/?next=<here>. A 401 for a file (the edge's answer when only the file cookies ran out) gets one
+// refresh first, through unauthorized().
+import { refresh, signinUrl, whenSignedOut, whoAmI, type Me } from '#lib/users/api.ts';
+
+/** Well inside the cookies' 15 minutes. */
+export const REFRESH_MS = 10 * 60_000;
+/** A tab that comes back after this long refreshes at once. */
+export const STALE_MS = 5 * 60_000;
 
 class Session {
 	me = $state<Me | null>(null);
-	expired = $state(false);
 	checked = $state(false);
+	/** Set once the person is being sent to sign in. */
+	leaving = $state(false);
+	#last = 0;
+	#timer: ReturnType<typeof setInterval> | null = null;
 
 	async check() {
 		const who = await whoAmI();
-		this.expired = who === 'expired';
-		this.me = who === 'expired' ? null : who;
+		if (who === 'signed-out') return this.signIn();
+		this.me = who;
 		this.checked = true;
+		if (who) this.#keepAlive();
+	}
+
+	/** Renews the file cookies; false (and on to sign-in) when the session is over. */
+	async refresh(): Promise<boolean> {
+		const who = await refresh();
+		if (who === 'signed-out') {
+			this.signIn();
+			return false;
+		}
+		this.#last = Date.now();
+		if (who) this.me = who;
+		return true;
+	}
+
+	/** For a fetch that got 401: one refresh, then sign-in. True when the caller may try again. */
+	unauthorized(): Promise<boolean> {
+		return this.me ? this.refresh() : Promise.resolve(this.signIn());
+	}
+
+	signIn(): false {
+		if (!this.leaving) {
+			this.leaving = true;
+			this.#stop();
+			location.assign(signinUrl());
+		}
+		return false;
+	}
+
+	#keepAlive() {
+		this.#last = Date.now();
+		this.#timer ??= setInterval(() => void this.refresh(), REFRESH_MS);
+		document.addEventListener('visibilitychange', this.#onVisible);
+	}
+
+	#onVisible = () => {
+		if (document.visibilityState === 'visible' && Date.now() - this.#last > STALE_MS) void this.refresh();
+	};
+
+	#stop() {
+		if (this.#timer) clearInterval(this.#timer);
+		this.#timer = null;
+		document.removeEventListener('visibilitychange', this.#onVisible);
 	}
 }
 
 export const session = new Session();
+whenSignedOut(() => session.signIn());

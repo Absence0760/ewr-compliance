@@ -36,7 +36,7 @@ export default defineConfig(({ command, mode }) => ({
 		})
 	],
 	test: {
-		include: ['src/**/*.test.ts', 'functions/**/*.test.ts', 'tools/**/*.test.ts'],
+		include: ['src/**/*.test.ts', 'tools/**/*.test.ts'],
 		// src/private is real-data tests, copied in by `pnpm data:private`. Only `pnpm test:private` runs them.
 		exclude: process.env.EWR_TIER === 'private' ? configDefaults.exclude : [...configDefaults.exclude, 'src/private/**'],
 		environment: 'node'

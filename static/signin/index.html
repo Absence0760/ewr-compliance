@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<!--
+			Served unsigned (infra/site.tf, /signin/*), and also as the page CloudFront shows for any 403,
+			at whatever path was asked for: so every path here is absolute, and nothing loads from _app/,
+			which is behind the sign-in. Its own policy, which the response headers add frame-ancestors to.
+		-->
+		<meta
+			http-equiv="Content-Security-Policy"
+			content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'"
+		/>
+		<meta name="referrer" content="no-referrer" />
+		<title>Sign in · EWR Compliance Measurement</title>
+		<link rel="stylesheet" href="/signin/signin.css" />
+		<script type="module" src="/signin/signin.js"></script>
+	</head>
+	<body>
+		<main id="main">
+			<h1>EWR Compliance Measurement</h1>
+			<p class="lead">Only people on the site's list can open it. Sign in with a one-time code sent to your email address.</p>
+
+			<div id="status" class="notice" role="status" aria-live="polite" tabindex="-1"></div>
+			<div id="error" class="notice error" role="alert" tabindex="-1"></div>
+
+			<form id="email-step" novalidate>
+				<label for="email">Email address</label>
+				<input id="email" name="email" type="email" autocomplete="email" spellcheck="false" required maxlength="320" aria-describedby="email-hint" />
+				<p id="email-hint" class="hint">The address an admin added to the site's list.</p>
+				<button type="submit">Send me a code</button>
+			</form>
+
+			<form id="code-step" novalidate hidden>
+				<label for="code">Sign-in code</label>
+				<input
+					id="code"
+					name="code"
+					type="text"
+					inputmode="numeric"
+					autocomplete="one-time-code"
+					pattern="[0-9]{6}"
+					maxlength="6"
+					required
+					aria-describedby="code-hint"
+				/>
+				<p id="code-hint" class="hint">The 6 digits in the email. A code works once, for 10 minutes.</p>
+				<button type="submit">Sign in</button>
+				<p class="actions">
+					<button type="button" id="resend" class="link">Send a new code</button>
+					<button type="button" id="other" class="link">Use another address</button>
+				</p>
+			</form>
+
+			<noscript><p class="notice error">Signing in needs JavaScript.</p></noscript>
+			<p class="small">The privacy notice, which says what the site keeps about you, is on the site once you are signed in.</p>
+		</main>
+	</body>
+</html>

@@ -5,6 +5,7 @@
 	import { onMount } from 'svelte';
 	import { app } from '#lib/state/app.svelte.ts';
 	import { session } from '#lib/state/session.svelte.ts';
+	import { signOut } from '#lib/users/api.ts';
 	import FileViewer from '#lib/components/viewer/FileViewer.svelte';
 	import { wmaBySlug } from '#lib/components/map/wma.ts';
 	import type { EcBasis } from '#lib/ewr/types.ts';
@@ -29,6 +30,11 @@
 	const wmaName = $derived(inWma ? wmaBySlug(page.params.wma ?? '')?.name : undefined);
 	/** The home page's banner carries the title, as its h1, so the bar leaves it out there. */
 	const isHome = $derived(page.url.pathname.replace(/\/$/, '') === home.replace(/\/$/, '') && !page.error);
+	/** Ends the session on the API, then leaves for the sign-in page, which the cookies no longer pass. */
+	async function leave() {
+		await signOut().catch(() => {});
+		session.signIn();
+	}
 	onMount(() => {
 		void app.load();
 		void session.check();
@@ -51,6 +57,7 @@
 	</nav>
 	{#if session.me}
 		<span class="muted signed">Signed in as {session.me.email}</span>
+		<button type="button" class="signout" onclick={leave}>Sign out</button>
 	{/if}
 	<label class="inline">
 		EC to use

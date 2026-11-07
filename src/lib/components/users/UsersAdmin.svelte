@@ -1,50 +1,51 @@
 <script lang="ts">
-	// The site's users, for its admins: add someone, make or unmake an admin, remove someone. The host
-	// checks every change again (functions/lib/users.ts), so this page only saves a round trip. After
-	// an add or a removal the host brings the Cloudflare Access group in step with the list; when it
-	// cannot, the change is still saved and the page says so, offering Sync with Access.
+	// The site's users, for its admins: add someone, make or unmake an admin, remove someone. The API
+	// checks every change again (server/, on auth-kit), so this page only saves a round trip. A removed
+	// user's next call to the API is refused at once, and the files close to them within 15 minutes,
+	// when the cookies the API issued run out.
 	import { tick } from 'svelte';
-	import { accessStatus, addUser, listUsers, removeUser, setAdmin, syncAccess, type AccessSync, type UserRow } from '#lib/users/api.ts';
+	import { addUser, listUsers, removeUser, setAdmin, SignedOut, type UserRow } from '#lib/users/api.ts';
 	import { session } from '#lib/state/session.svelte.ts';
 
-	type Message = { level: 'info' | 'warning' | 'error'; text: string };
+	type Message = { level: 'info' | 'error'; text: string };
 
 	let users = $state<UserRow[] | null>(null);
 	let message = $state<Message | null>(null);
 	let email = $state('');
 	let asAdmin = $state(false);
 	let busy = $state(false);
-	/** The user whose removal is waiting to be confirmed. */
+	/** The id of the user whose removal is waiting to be confirmed. */
 	let removing = $state<string | null>(null);
 	/** The user whose Remove button takes focus back when it reappears, after Cancel. Not reactive. */
 	let returnTo: string | null = null;
 	let notice = $state<HTMLElement>();
-	/** Whether the host keeps the Access group in step: null until known, or when it could not be asked. */
-	let accessConfigured = $state<boolean | null>(null);
 
 	const focus = (el: HTMLElement) => el.focus();
-	const focusIfReturning = (email: string) => (el: HTMLElement) => {
-		if (returnTo !== email) return;
+	const focusIfReturning = (id: string) => (el: HTMLElement) => {
+		if (returnTo !== id) return;
 		returnTo = null;
 		el.focus();
 	};
 
-	function cancel(email: string) {
-		returnTo = email;
+	function cancel(id: string) {
+		returnTo = id;
 		removing = null;
 	}
 
 	const me = $derived(session.me);
 	const date = (iso: string) => iso.slice(0, 10);
 
-	async function act<T>(work: () => Promise<T>, done: string | ((r: T) => Message)) {
+	/** A signed-out answer is already on its way to the sign-in page: say nothing over it. */
+	const problem = (e: unknown): Message | null => (e instanceof SignedOut ? null : { level: 'error', text: (e as Error).message });
+
+	async function act<T>(work: () => Promise<T>, done: string) {
 		busy = true;
 		try {
-			const r = await work();
+			await work();
 			users = await listUsers();
-			message = typeof done === 'string' ? { level: 'info', text: done } : done(r);
+			message = { level: 'info', text: done };
 		} catch (e) {
-			message = { level: 'error', text: (e as Error).message };
+			message = problem(e);
 		} finally {
 			busy = false;
 		}
@@ -54,41 +55,15 @@
 		if (me?.admin) {
 			listUsers().then(
 				(u) => (users = u),
-				(e: Error) => (message = { level: 'error', text: e.message })
-			);
-			// Unknown stays null: Sync with Access is still offered, and says what is wrong if pressed.
-			accessStatus().then(
-				(s) => (accessConfigured = s.configured),
-				() => (accessConfigured = null)
+				(e) => (message = problem(e))
 			);
 		}
 	});
 
-	/** The outcome of an add or a removal, which is saved whatever Access said. */
-	function afterChange(access: AccessSync, text: string): Message {
-		if (access.state === 'failed') {
-			return { level: 'warning', text: `Saved, but Cloudflare Access was not updated: ${access.reason}. Press Sync with Access.` };
-		}
-		accessConfigured = access.state === 'synced';
-		return { level: 'info', text };
-	}
-
-	const sync = () =>
-		act(syncAccess, ({ access, count }): Message => {
-			if (access.state === 'failed') return { level: 'warning', text: `Cloudflare Access was not updated: ${access.reason}.` };
-			accessConfigured = access.state === 'synced';
-			return access.state === 'synced'
-				? { level: 'info', text: `Cloudflare Access now sends a sign-in code to the ${count} ${count === 1 ? 'address' : 'addresses'} listed, and no one else.` }
-				: { level: 'warning', text: 'Cloudflare Access is not set up to be kept in step with this list.' };
-		});
-
 	async function add(e: SubmitEvent) {
 		e.preventDefault();
 		const who = email.trim();
-		await act(
-			() => addUser(who, asAdmin),
-			(r) => afterChange(r.access, `Added ${who.toLowerCase()}${asAdmin ? ' as an admin' : ''}. They can sign in now.`)
-		);
+		await act(() => addUser(who, asAdmin), `Added ${who.toLowerCase()}${asAdmin ? ' as an admin' : ''}. They can sign in now.`);
 		if (message?.level === 'info') {
 			email = '';
 			asAdmin = false;
@@ -96,20 +71,11 @@
 	}
 
 	const toggleAdmin = (u: UserRow) =>
-		act(() => setAdmin(u.email, !u.admin), u.admin ? `${u.email} is no longer an admin.` : `${u.email} is now an admin.`);
+		act(() => setAdmin(u.id, !u.admin), u.admin ? `${u.email} is no longer an admin.` : `${u.email} is now an admin.`);
 
 	async function remove(u: UserRow) {
 		removing = null;
-		await act(
-			() => removeUser(u.email),
-			({ access, sessions }): Message =>
-				sessions?.state === 'failed'
-					? {
-							level: 'warning',
-							text: `Removed ${u.email}. Cloudflare Access sends them no new sign-in code, but their open sessions could not be ended: ${sessions.reason}. The site refuses them on their next request all the same.`
-						}
-					: afterChange(access, `Removed ${u.email}. They can no longer open the site.`)
-		);
+		await act(() => removeUser(u.id), `Removed ${u.email}. They are signed out now, and the site's files close to them within 15 minutes.`);
 		// The row, or at least its confirm, is gone: land on the outcome rather than the page body.
 		await tick();
 		notice?.focus();
@@ -120,8 +86,8 @@
 	<h2>Users</h2>
 	{#if !session.checked}
 		<p class="muted" role="status">Loading…</p>
-	{:else if session.expired}
-		<div class="notice error" role="alert">Your sign-in has expired. Reload the page to sign in again.</div>
+	{:else if session.leaving}
+		<p class="muted" role="status">Your sign-in has ended. Opening the sign-in page…</p>
 	{:else if !me}
 		<p>This copy of the site has no user list. Users are managed on the hosted site, by its admins.</p>
 	{:else if !me.admin}
@@ -139,17 +105,7 @@
 			</label>
 			<label class="check"><input type="checkbox" bind:checked={asAdmin} /> Admin</label>
 			<button type="submit" disabled={busy}>Add user</button>
-			{#if accessConfigured !== false}
-				<button type="button" disabled={busy} onclick={sync}>Sync with Access</button>
-			{/if}
 		</form>
-
-		{#if accessConfigured === false}
-			<p class="notice">
-				Cloudflare Access is not being kept in step with this list, because the host's Access group settings are missing. The site still
-				lets in only the people listed here, but Access may send a sign-in code to anyone who asks.
-			</p>
-		{/if}
 
 		{#if message}
 			<div class="notice {message.level}" tabindex="-1" bind:this={notice} role={message.level === 'info' ? 'status' : 'alert'}>{message.text}</div>
@@ -162,8 +118,8 @@
 						<tr><th>Email address</th><th>Role</th><th>Added by</th><th>Added</th><th><span class="sr">Actions</span></th></tr>
 					</thead>
 					<tbody>
-						{#each users as u (u.email)}
-							{@const self = u.email === me.email}
+						{#each users as u (u.id)}
+							{@const self = u.id === me.id}
 							<tr>
 								<td>{u.email}{self ? ' (you)' : ''}</td>
 								<td>{u.admin ? 'Admin' : 'User'}</td>
@@ -172,15 +128,15 @@
 								<td class="actions">
 									{#if self}
 										<span class="muted">Another admin can change your account.</span>
-									{:else if removing === u.email}
+									{:else if removing === u.id}
 										<span>Remove {u.email}?</span>
 										<button type="button" disabled={busy} onclick={() => remove(u)}>Yes, remove</button>
-										<button type="button" onclick={() => cancel(u.email)} {@attach focus}>Cancel</button>
+										<button type="button" onclick={() => cancel(u.id)} {@attach focus}>Cancel</button>
 									{:else}
 										<button type="button" disabled={busy} onclick={() => toggleAdmin(u)} aria-label="{u.admin ? 'Remove admin rights from' : 'Make admin'} {u.email}">
 											{u.admin ? 'Remove admin rights' : 'Make admin'}
 										</button>
-										<button type="button" disabled={busy} onclick={() => (removing = u.email)} aria-label="Remove {u.email}" {@attach focusIfReturning(u.email)}>Remove</button>
+										<button type="button" disabled={busy} onclick={() => (removing = u.id)} aria-label="Remove {u.email}" {@attach focusIfReturning(u.id)}>Remove</button>
 									{/if}
 								</td>
 							</tr>
