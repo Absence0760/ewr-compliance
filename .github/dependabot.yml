@@ -4,9 +4,21 @@ version: 2
 # security updates are exempt and still arrive at once): most malicious package
 # releases are found and pulled within days.
 #
+# server/ is its own npm (pnpm) project, on the private auth-kit, which Dependabot reaches through
+# the `auth-kit` git registry below: the AUTH_KIT_READ_TOKEN *Dependabot* secret (Absence0760/auth-kit#2).
+# auth-kit is exempt from the cooldown, so its security fixes arrive at once. Its tag bumps also need
+# the onlyBuiltDependencies line in server/pnpm-workspace.yaml updated by hand, with the new commit.
+#
 # Not covered: SheetJS `xlsx` is pinned to a CDN tarball URL in package.json,
 # which Dependabot can't read (/audit/deps checks it by hand), and tools/ has no
 # requirements file to watch.
+registries:
+  auth-kit:
+    type: git
+    url: https://github.com
+    username: x-access-token
+    password: ${{secrets.AUTH_KIT_READ_TOKEN}}
+
 updates:
   - package-ecosystem: github-actions
     directory: "/"
@@ -51,5 +63,27 @@ updates:
         versions: [">=25"]
       # svelte-check and @sveltejs/kit set the TypeScript major this repo can
       # use, so majors are bumped by hand when they allow it.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: npm
+    directory: "/server"
+    registries:
+      - auth-kit
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+      exclude: ["@absence0760/auth-kit"]
+    open-pull-requests-limit: 5
+    groups:
+      aws-sdk:
+        patterns: ["@aws-sdk/*"]
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+        exclude-patterns: ["@absence0760/auth-kit"]
+    ignore:
+      - dependency-name: "@types/node"
+        versions: [">=25"]
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]

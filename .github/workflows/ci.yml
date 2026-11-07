@@ -137,6 +137,76 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # server/: the sign-in API, its own pnpm package on the private auth-kit. Installing it needs the
+  # AUTH_KIT_READ_TOKEN secret (Absence0760/auth-kit#2). Until that secret exists, and on fork PRs,
+  # which never get secrets, this job says so in a warning and the job summary and passes: the
+  # follow-up is H0 in the private plan (issue 12). deploy-lambdas.yml, which ships the code, fails
+  # outright without it.
+  server:
+    name: Server (typecheck, tests, bundle)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # pnpm fetches auth-kit from git@github.com:Absence0760/auth-kit (the lockfile's form); this
+      # rewrites that one repo, and only it, to HTTPS with the read-only token.
+      - name: Read access to auth-kit
+        id: token
+        env:
+          TOKEN: ${{ secrets.AUTH_KIT_READ_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            msg="server/ was not checked: the AUTH_KIT_READ_TOKEN secret is not available (not set yet, or a fork PR), so the private auth-kit can't be installed. Set it up as Absence0760/auth-kit#2 says (H0 in the private plan, issue 12)."
+            echo "::warning::$msg"
+            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          for from in "git@github.com:Absence0760/auth-kit" "ssh://git@github.com/Absence0760/auth-kit" "https://github.com/Absence0760/auth-kit"; do
+            git config --global --add url."https://x-access-token:${TOKEN}@github.com/Absence0760/auth-kit".insteadOf "$from"
+          done
+          echo "available=true" >> "$GITHUB_OUTPUT"
+
+      - name: Set up pnpm
+        if: steps.token.outputs.available == 'true'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: server/package.json
+
+      - name: Set up Node
+        if: steps.token.outputs.available == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: server/pnpm-lock.yaml
+
+      - name: Install
+        if: steps.token.outputs.available == 'true'
+        working-directory: server
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        if: steps.token.outputs.available == 'true'
+        working-directory: server
+        run: pnpm check
+
+      - name: Test
+        if: steps.token.outputs.available == 'true'
+        working-directory: server
+        run: pnpm test
+
+      - name: Bundle
+        if: steps.token.outputs.available == 'true'
+        working-directory: server
+        run: pnpm build
+
   # Runs on docs-only PRs too: a change under .claude/ counts as docs above,
   # and this is the only check on the hook. The test also pins the hook's PR
   # title rule to pr-title-lint.yml.
@@ -183,7 +253,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [changes, test, e2e, terraform, claude-tooling, gitleaks]
+    needs: [changes, test, e2e, server, terraform, claude-tooling, gitleaks]
     steps:
       - name: Require every upstream job to have passed
         env:
