@@ -1,0 +1,8 @@
+# The app is one package, and this workspace is only it. server/ and pipeline/ are pnpm projects of
+# their own, with their own lockfiles and workspace files, never members of this one (CLAUDE.md).
+#
+# Without this file `pnpm -r` run here takes every package below as in scope: Dependabot's update of
+# the root runs `pnpm update -r`, which then re-resolved server/'s and pipeline/'s lockfiles too, and
+# failed whenever either held a release younger than the cooldown.
+packages:
+  - '.'

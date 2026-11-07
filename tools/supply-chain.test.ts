@@ -93,3 +93,11 @@ describe('vendored SheetJS', () => {
 		expect(JSON.parse(read('package.json')).dependencies.xlsx).toBe(`file:${TGZ}`);
 	});
 });
+
+describe('the root workspace', () => {
+	it("is the app alone, so `pnpm -r` here never touches server/'s or pipeline/'s lockfiles", () => {
+		const yaml = read('pnpm-workspace.yaml');
+		const packages = yaml.split(/^packages:\s*$/m)[1]?.match(/^\s+-\s*'([^']*)'\s*$/gm)?.map((l) => l.replace(/^\s+-\s*'|'\s*$/g, ''));
+		expect(packages).toEqual(['.']);
+	});
+});

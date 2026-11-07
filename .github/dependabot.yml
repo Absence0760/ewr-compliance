@@ -46,6 +46,8 @@ updates:
 
   # npm is also Dependabot's ecosystem name for pnpm: it finds pnpm-lock.yaml
   # beside package.json and updates that.
+  # Its `pnpm update -r` stays in the root because pnpm-workspace.yaml lists only
+  # the app; server/ and pipeline/ have their own entries below.
   - package-ecosystem: npm
     directory: "/"
     schedule:
