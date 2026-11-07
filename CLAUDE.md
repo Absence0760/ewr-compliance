@@ -2,7 +2,7 @@
 
 Guidance for Claude Code working in this repository. Keep this file short — it loads into every conversation.
 
-EWR Compliance Measurement compares observed river flows with Environmental Water Requirements at the EWR nodes and sites of the Berg, Breede-Overberg, Gouritz and Olifants-Doorn basins. It opens on South Africa's Water Management Areas of 2023, each with its own map. It is a static SvelteKit 3 app (`adapter-static`, `ssr = false`) with Svelte 5 runes and TypeScript. Its one server part is `functions/`, Cloudflare Pages Functions that check every request against a list of users kept in Cloudflare D1, which the site's admins manage. There is no deploy target yet. Layout and conventions: `docs/architecture.md`.
+EWR Compliance Measurement compares observed river flows with Environmental Water Requirements at the EWR nodes and sites of the Berg, Breede-Overberg, Gouritz and Olifants-Doorn basins. It opens on South Africa's Water Management Areas of 2023, each with its own map. It is a static SvelteKit 3 app (`adapter-static`, `ssr = false`) with Svelte 5 runes and TypeScript. Its one server part is `functions/`, Cloudflare Pages Functions that check every request against a list of users kept in Cloudflare D1, which the site's admins manage. The deploy target is Cloudflare Pages, deployed from the workstation by `tools/deploy.sh` (not yet live). Layout and conventions: `docs/architecture.md`.
 
 This repo is public and holds the code. The real data, the client's brief and the tests pinned to them are in the private repo `ewr-compliance-private`, a sibling folder. This repo runs on a synthetic sample.
 
@@ -55,7 +55,7 @@ The numbers are checked against the brief and a reference compliance workbook, b
 
 Several Claude sessions may share this checkout, its working tree and its git index. `.claude/hooks/git-scope-guard.py` enforces these rules; if it denies a command, use the scoped alternative its message names.
 
-- **The PR gate is off for now: changes may go straight to `main`.** Run `pnpm check`, `pnpm test` and `pnpm test:e2e` before pushing. Restoring the gate is tracked in issue 9. No `Co-Authored-By` or generated-by trailer in commits or PR bodies.
+- **The PR gate is off for now: changes may go straight to `main`.** Run `pnpm check`, `pnpm test` and `pnpm test:e2e` before pushing. Restoring the gate is tracked in issue 1. No `Co-Authored-By` or generated-by trailer in commits or PR bodies.
 - **PR titles are conventional commits:** `<type>(<scope>): <subject>`, type one of feat, fix, chore, docs, refactor, test, perf, ci, build, revert; the subject starts lowercase and doesn't end with a period. CI's `pr-title-lint` fails anything else, and the hook refuses such a `gh pr create/edit --title`.
 - **Commit path-scoped, always:** `git commit -m "…" -- <paths>`. Bare `git commit`, `git add -u/-A/.`, `git commit -a` and `--amend` with staged changes are blocked.
 - **Only touch what your task owns**, and never whole-tree: no `git add .`, `checkout/restore .`, `reset --hard`, `git rm .`, `git stash`, `git clean -f`.

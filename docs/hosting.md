@@ -27,9 +27,11 @@ Settings the Pages project needs (dashboard, Settings):
 | Variable `ACCESS_TEAM_DOMAIN` | The Zero Trust team domain, `<team>.cloudflareaccess.com` |
 | Variable `ACCESS_AUD` | The Application Audience (AUD) tags of the site's two Access applications, the site and its deployment previews, separated by a comma |
 | D1 binding `USERS_DB` | The user database, with `migrations/0001_users.sql` applied |
-| Functions failure mode | **Fail closed.** Fail open serves the files without the check once the free daily limit is used up |
+| Functions failure mode | **Fail closed** (Settings > Runtime > Fail open / closed). Fail open serves the files without the check once the free daily limit is used up |
 
-Set the variables and the binding for both of the project's environments, Production and Preview: Pages keeps them apart, and a preview without them refuses everyone. Without either variable, or the binding, every request is refused with "not set up". If Access's keys cannot be fetched, requests are refused with "Sign-in unavailable" until they can. The first admin, once, by the operator:
+Set the variables, the binding and the failure mode for both of the project's environments, Production and Preview: Pages keeps them apart, and a preview without the variables or binding refuses everyone. They reach only deployments made after the change: Cloudflare says to redeploy for a binding to take effect, so deploy again after changing any of them.
+
+The failure mode matters because the daily limit of 100,000 Functions requests is the account's, shared with every Worker and Pages project on it, and resets at midnight UTC. With the Access policy open to everyone, anyone can complete the code and send requests until it is used up. Fail open would then serve every file, `data/` included, with no check at all. Cloudflare's docs do not say which mode a new project starts with, so check it reads Fail closed in both environments rather than assume it. Without either variable, or the binding, every request is refused with "not set up". If Access's keys cannot be fetched, requests are refused with "Sign-in unavailable" until they can. The first admin, once, by the operator:
 
 ```
 pnpm wrangler d1 execute ewr-compliance-users --remote --command "INSERT INTO users (email, admin, added_by, added_at) VALUES ('<address>', 1, 'operator', datetime('now'))"
@@ -37,9 +39,57 @@ pnpm wrangler d1 execute ewr-compliance-users --remote --command "INSERT INTO us
 
 The address in lowercase: the table refuses any other, because a mixed-case address would never match a sign-in. A typo there locks nobody in or out for good: run it again with the right address.
 
+### Setting up, in this order
+
+1. Create the Pages project as Direct Upload, `pnpm wrangler pages project create ewr-compliance --production-branch main`, and never connect it to Git. A Git-connected project builds a preview of every commit to every branch by default, Dependabot's included, and each would run that branch's `functions/` against the same `USERS_DB`.
+2. Create the two Access applications (§ Access, as built) and note both AUD tags.
+3. Create the database and apply the schema: `pnpm wrangler d1 create ewr-compliance-users`, then `pnpm wrangler d1 execute ewr-compliance-users --remote --file migrations/0001_users.sql`.
+4. Set the variables, the `USERS_DB` binding and Fail closed, in Production and in Preview.
+5. Add the first admin, with the command above.
+6. Only then deploy, starting with `tools/deploy.sh sample`.
+
+### Access, as built
+
+In the dashboard, by the route Cloudflare's Pages known-issues page gives:
+
+- Pages project > Settings > General > Enable access policy. Edit the application it makes and delete the `*` from its hostname, so it covers `ewr-compliance.pages.dev`. Enable the setting again, so a second application covers `*.ewr-compliance.pages.dev`, the hash and preview URLs.
+- Both applications: policy Allow, Include Everyone; One-time PIN as the only login method; session 24 hours. Note each one's Application Audience (AUD) tag for `ACCESS_AUD`.
+- Zero Trust > Settings > Admin controls > Remove inactive users from seats: set a period (one month is the shortest). Off by default, so a seat is otherwise held for good.
+
+It is set in the dashboard, not Terraform, because the provider's `cloudflare_pages_project` has open bugs that break a Direct Upload project's plans: cloudflare/terraform-provider-cloudflare #7303, #7449 and #7288.
+
+### Every deployment stays live
+
+Each deployment stays reachable at its own `<hash>.ewr-compliance.pages.dev` URL, with its own `functions/`, its own data, and the settings it was deployed with, after a newer one or a rollback replaces it at the main address. Access covers those URLs too, but an old deployment keeps whatever it had: an older gate, data since withdrawn. After any deploy that changes `functions/`, the data or a setting, delete the superseded deployments, in the dashboard (Deployments, the deployment's menu) or with `pnpm wrangler pages deployment list --project-name ewr-compliance` and `pnpm wrangler pages deployment delete <id> --project-name ewr-compliance`.
+
+### Admins, the log and backups
+
+If no admin can reach the site, the operator makes one again, straight in D1:
+
+```
+pnpm wrangler d1 execute ewr-compliance-users --remote --command "UPDATE users SET admin = 1 WHERE email = '<address>'"
+```
+
+The log of changes, newest first:
+
+```
+pnpm wrangler d1 execute ewr-compliance-users --remote --command "SELECT * FROM audit ORDER BY id DESC LIMIT 50"
+```
+
+Both print email addresses into the terminal, so run them only when needed.
+
+D1 Time Travel is the backup, always on: it can restore the database to any point in the last 7 days on Workers Free, or 30 on Workers Paid, with `pnpm wrangler d1 time-travel restore ewr-compliance-users --timestamp=<unix seconds or RFC 3339>`. `wrangler d1 export` writes the list, which is personal data, to the workstation: don't, unless it is needed, and delete the file after.
+
 The sign-in cookie is Access's and strictly necessary to reach the site, so it needs no consent banner. The app itself still sets no cookie. The list is personal data the operator keeps for the client: email addresses, who added whom and when.
 
-Before going live, check from a browser that is not signed in that `data/index.json` gets the sign-in page, that an address not on the list gets "Not on the list" after signing in, for `data/index.json` as well as the home page, and that removing a user shuts them out on their next request.
+Before going live, check:
+
+- From a browser that is not signed in, `data/index.json` gets the sign-in page.
+- An address not on the list gets "Not on the list" after signing in, for `data/index.json` as well as the home page.
+- Removing a user shuts them out on their next request.
+- A `<hash>.ewr-compliance.pages.dev` URL and a preview URL behave the same, signed out and as an address not on the list.
+- The failure mode reads Fail closed in both Production and Preview.
+- The deployment list holds only the deployments meant to be there.
 
 ### Cost
 
@@ -54,7 +104,7 @@ At this scale it is free: checked on 2026-11-06 against Cloudflare's pricing pag
 
 The first cost, if one ever comes, is Workers Paid at US$5 a month for the account, which lifts the daily request limit to 10 million a month. More than 50 people signing in moves Zero Trust to US$7 a user a month. A custom domain needs its zone on Cloudflare, free on the Free plan, plus the domain's own registration.
 
-Because Access lets in any address that completes the code, someone off the list can use up a seat by signing in. They see only "Not on the list". If seats ever run short, shorten the seat expiry, or keep the Access policy in step with the list.
+**A risk, not yet closed.** Because the Access policy lets in any address that completes the code, a stranger takes a seat by signing in, though they see only "Not on the list". Someone doing it on purpose with 50 throwaway addresses fills every seat and locks out each user who does not already hold one, until the seats expire. The same stranger, signed in, can send requests until the account's daily Functions limit is used up, which Fail closed turns into the site being down for everyone until midnight UTC. The operator is deciding how to close this: private issue 11.
 
 ## Build
 
@@ -70,7 +120,7 @@ Use `pnpm data:sample` in place of `pnpm data:private` for a trial build. With n
 
 On Cloudflare Pages, deploy with `tools/deploy.sh sample` (the synthetic sample, to test the site and its gate) or `tools/deploy.sh real` (the real data, from the private repo beside this one or `EWR_PRIVATE_DIR`), from the operator's workstation and never from CI. It uses wrangler's own login, `pnpm wrangler login`, and never handles a token. It builds a clean, temporary worktree of freshly fetched `origin/main`, never the working tree, with no base map and no `BASE_PATH`. Before uploading, `tools/deploy-check.mjs` refuses a build with a file over 25 MiB, more than 20,000 files, data that does not match the mode, a `tiles/` folder, a `_worker.js` or `_routes.json`, or no `functions/_middleware.ts`, and compiles `functions/` to check that `_middleware` runs on every path. It warns when `_headers` is missing. `--dry-run` stops there and says what would go up; it needs no login. A `real` deploy asks for the project name to be typed before uploading, unless given `--yes`.
 
-The script runs `pnpm wrangler pages deploy build --project-name ewr-compliance --branch main` from the worktree's root, which is how `functions/` goes up with the files. **A deploy without `functions/` has no list check, and anyone who completes Access's code gets in.** The script fails if wrangler does not report uploading the Functions bundle. After each deploy, check that its Functions tab lists `_middleware`, and run the checks at the end of § Access control.
+The script runs `pnpm wrangler pages deploy build --project-name ewr-compliance --branch main` from the worktree's root, which is how `functions/` goes up with the files. **A deploy without `functions/` has no list check, and anyone who completes Access's code gets in.** Before uploading, the script reminds the operator that Fail closed must be set in both environments and that superseded deployments should be deleted (§ Every deployment stays live). It fails if wrangler does not report uploading the Functions bundle, and says to roll back and then delete that deployment, since a rollback leaves it live at its `<hash>` URL. After each deploy, check that its Functions tab lists `_middleware`, and run the checks at the end of § Access control.
 
 Elsewhere, upload the contents of `build/`, not the folder itself. That is about 30 MB with the real data and the rivers, or about 295 MB with the base map.
 
@@ -119,7 +169,7 @@ None are required. These matter when the host allows them:
 
 A page is a folder's address, such as `/nodes/`, so a rule for `*.html` alone misses every page but `404.html`.
 
-On Cloudflare Pages, `static/_headers` sets all but the first two rows, which Pages does itself: it serves `.mjs` as JavaScript and compresses text. `pnpm build` copies it to `build/_headers`, and `src/headers.test.ts` pins its rules. Pages applies it to the files `functions/_middleware.ts` passes on with `ctx.next()`, but not to a response a Function makes itself, such as the sign-in refusal or `api/`. Its paths are from the domain root, so a build with `BASE_PATH` needs them prefixed. Elsewhere, take the file as the list to set.
+On Cloudflare Pages, `static/_headers` sets all but the first two rows, which Pages does itself: it serves `.mjs` as JavaScript and compresses text. `pnpm build` copies it to `build/_headers`, and `src/headers.test.ts` pins its rules. Pages applies it to the files `functions/_middleware.ts` passes on with `ctx.next()`, but not to a response a Function makes itself, such as the sign-in refusal or `api/`. Those set `X-Content-Type-Options` and `frame-ancestors` themselves, in `functions/lib/gate.ts`, and the refusal page carries its own policy, `default-src 'none'; style-src 'unsafe-inline'`. Its paths are from the domain root, so a build with `BASE_PATH` needs them prefixed. Elsewhere, take the file as the list to set.
 
 Pages keeps every uploaded file in its own cache until the next deploy, behind the middleware, which still checks each request. A cache rule on the domain sits in front of the middleware, and could serve a page or data file to someone it never checked: add none. Cloudflare does not cache HTML or JSON unless a rule tells it to, and does not store a `private` response.
 
