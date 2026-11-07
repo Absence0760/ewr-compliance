@@ -37,7 +37,7 @@ pnpm test
 pnpm test:e2e
 ```
 
-Unit tests and the Playwright suite in `e2e/` run on the sample, and their expected numbers are hand arithmetic on it. The specs use a production build with synthetic flow files, the live boundaries and gauges stubbed, and no base map. `hosting.spec.ts` runs a second build for `/ewr/` on a plain static host. CI does the same.
+Unit tests and the Playwright suite in `e2e/` run on the sample, and their expected numbers are hand arithmetic on it. The specs use a production build with synthetic flow files, the live boundaries and gauges stubbed, and no base map. `hosting.spec.ts` runs a second build for `/ewr/` on a plain static host. CI does the same. The servers are built fresh on ports 7795 and 7796 every run, never reused, so a run refuses to start while another holds them: run one suite at a time on a machine.
 
 With the private repo to hand, `pnpm test:private` copies it in and runs the suites pinned to the real data: the parsers over every supplied file, and the same behaviour as the specs here at real nodes. The public specs pin the sample, so they do not run on real data and will refuse to. `pnpm data:sample --force` goes back.
 
