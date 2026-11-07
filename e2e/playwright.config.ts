@@ -59,6 +59,8 @@ if (process.env.TEST_WORKER_INDEX === undefined) requireFreePorts();
 
 export default defineConfig({
 	testDir: './tests',
+	// Beside this file, where CI's failure upload looks (ci.yml); the default is the working directory.
+	outputDir: './test-results',
 	testMatch: PRIVATE ? ['private/**/*.spec.ts', 'console-clean.spec.ts'] : '*.spec.ts',
 	testIgnore: PRIVATE ? [] : 'private/**',
 	fullyParallel: true,
@@ -66,7 +68,7 @@ export default defineConfig({
 	retries: 0,
 	// Software WebGL is all CPU, so a map on every worker needs a limit.
 	workers: CI ? 2 : 4,
-	reporter: CI ? [['list'], ['html', { open: 'never' }]] : 'list',
+	reporter: CI ? [['list'], ['html', { open: 'never', outputFolder: './playwright-report' }]] : 'list',
 	use: {
 		baseURL: `http://localhost:${PORT}`,
 		// Where the app is used, and two hours off UTC, so a date that slips a timezone fails here.

@@ -114,3 +114,16 @@ describe('the weekly dependency audit', () => {
 		expect(code).not.toMatch(/pnpm install|AUTH_KIT_READ_TOKEN|cache:/);
 	});
 });
+
+describe('the e2e failure upload', () => {
+	it("uploads the folders Playwright writes to, so a failed run's traces are kept", () => {
+		const config = readFileSync(new URL('../e2e/playwright.config.ts', import.meta.url), 'utf8');
+		const out = /outputDir:\s*'\.\/([\w-]+)'/.exec(config)?.[1];
+		const report = /outputFolder:\s*'\.\/([\w-]+)'/.exec(config)?.[1];
+		expect([out, report]).toEqual(['test-results', 'playwright-report']);
+		const e2e = jobs(readFileSync(new URL('ci.yml', DIR), 'utf8')).find((j) => j.name === 'e2e')?.text ?? '';
+		const upload = e2e.split(/^\s+- /m).find((step) => /uses:\s*actions\/upload-artifact@/.test(step)) ?? '';
+		expect(upload).toContain(`e2e/${out}/`);
+		expect(upload).toContain(`e2e/${report}/`);
+	});
+});
