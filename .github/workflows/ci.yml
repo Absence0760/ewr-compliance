@@ -153,6 +153,18 @@ jobs:
       - name: Hook tests
         run: python3 .claude/hooks/git-scope-guard.test.py
 
+  # infra/: fmt, validate and the mocked-provider tests (bin/check-infra.sh),
+  # plus the Trivy IaC scan. Credential-free; called so a failure fails the
+  # gate. Gated like the other heavy jobs: a docs-only PR skips it.
+  terraform:
+    name: Terraform
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/terraform.yml
+
   # Secret scan, called so a detection fails the gate. Ungated on purpose: a
   # pasted credential arrives in a markdown file as easily as in code, and a
   # docs-only diff skips every code-gated job.
@@ -171,7 +183,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [changes, test, e2e, claude-tooling, gitleaks]
+    needs: [changes, test, e2e, terraform, claude-tooling, gitleaks]
     steps:
       - name: Require every upstream job to have passed
         env:

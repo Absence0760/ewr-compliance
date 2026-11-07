@@ -19,6 +19,19 @@ updates:
       actions:
         patterns: ["*"]
 
+  # infra/'s providers (main.tf's constraints, .terraform.lock.hcl). The
+  # Terraform version itself is infra/.terraform-version, bumped by hand.
+  - package-ecosystem: terraform
+    directory: "/infra"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      providers:
+        patterns: ["*"]
+
   # npm is also Dependabot's ecosystem name for pnpm: it finds pnpm-lock.yaml
   # beside package.json and updates that.
   - package-ecosystem: npm
