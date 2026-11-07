@@ -3,7 +3,7 @@
 // restored by any run here, a fork PR's included. So no job that installs server/ caches its pnpm store
 // or uploads an artifact, and no workflow uploads anything from server/. It sits in tools/ because
 // vitest collects tests there; it reads files only.
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const DIR = new URL('../.github/workflows/', import.meta.url);
@@ -90,5 +90,27 @@ describe('workflows keep auth-kit out of artifacts and caches', () => {
 
 	it('splits a workflow into its jobs', () => {
 		expect(jobs('on: push\njobs:\n  a:\n    runs-on: x\n  b-c:\n    runs-on: y\n').map((j) => j.name)).toEqual(['a', 'b-c']);
+	});
+});
+
+describe('the weekly dependency audit', () => {
+	const audit = readFileSync(new URL('audit.yml', DIR), 'utf8');
+	// Every package with its own lockfile, found rather than listed, so a new one can't be missed.
+	const packages = ['.', ...readdirSync(new URL('../', import.meta.url), { withFileTypes: true })
+		.filter((d) => d.isDirectory() && !d.name.startsWith('.') && d.name !== 'node_modules')
+		.filter((d) => existsSync(new URL(`../${d.name}/pnpm-lock.yaml`, import.meta.url)))
+		.map((d) => d.name)];
+
+	it('audits every package with a lockfile', () => {
+		expect(packages).toEqual(expect.arrayContaining(['.', 'server', 'pipeline']));
+		const loop = /for pkg in ([^;]+); do/.exec(audit)?.[1].trim().split(/\s+/) ?? [];
+		expect(loop.sort()).toEqual([...packages].sort());
+	});
+
+	it('audits server/ and pipeline/ for what ships, from their lockfiles, with nothing installed', () => {
+		expect(audit).toMatch(/\*\) name=\$pkg; prod=--prod ;;/);
+		expect(audit).toContain('(cd "$pkg" && pnpm audit $prod --audit-level=moderate --json)');
+		const code = audit.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+		expect(code).not.toMatch(/pnpm install|AUTH_KIT_READ_TOKEN|cache:/);
 	});
 });

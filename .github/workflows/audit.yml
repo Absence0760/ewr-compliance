@@ -1,7 +1,10 @@
 name: Dependency audit
 
-# Weekly scheduled audit + manual trigger. Runs `pnpm audit` and opens an
-# issue if any vulnerabilities at moderate or higher severity are found.
+# Weekly scheduled audit + manual trigger. Runs `pnpm audit` in each of the
+# three packages, each with its own lockfile: the app at the root, and the
+# production dependencies (`--prod`) of the sign-in API in server/ and the DWS
+# pipeline in pipeline/, the two that ship as Lambdas. It opens an issue if any
+# vulnerabilities at moderate or higher severity are found.
 # Closes the issue automatically when the next clean run completes.
 on:
   schedule:
@@ -38,7 +41,10 @@ jobs:
       # pnpm-lock.yaml, not node_modules (checked on a clean checkout), so
       # installing would only run every package's lifecycle scripts next to
       # an issues-write token, and write a main-scope cache entry for others
-      # to restore.
+      # to restore. That holds for server/ too: its lockfile lists auth-kit's
+      # own dependencies, so it is audited without the AUTH_KIT_READ_TOKEN
+      # (checked on a copy of server/ with no access to auth-kit). auth-kit
+      # itself is a git dependency, which no advisory database covers.
 
       - name: Run pnpm audit
         id: audit
@@ -47,18 +53,26 @@ jobs:
           # --audit-level=moderate ignores low/info findings (typically
           # noise from dev-only deps with no real exposure). The exit
           # code is non-zero when issues are found at >= the level.
-          pnpm audit --audit-level=moderate --json > audit.json
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
-          if [ -s audit.json ]; then
-            echo "## pnpm audit findings (moderate or higher)" > audit-summary.md
+          status=0
+          : > audit-summary.md
+          for pkg in . server pipeline; do
+            case $pkg in .) name=app; prod= ;; *) name=$pkg; prod=--prod ;; esac
+            (cd "$pkg" && pnpm audit $prod --audit-level=moderate --json) > "audit-$name.json"
+            code=$?
+            [ "$code" = 0 ] || status=$code
+            echo "## $name: pnpm audit $prod (moderate or higher), exit $code" >> audit-summary.md
             echo "" >> audit-summary.md
-            echo '```json' >> audit-summary.md
-            head -c 60000 audit.json >> audit-summary.md
-            echo '' >> audit-summary.md
-            echo '```' >> audit-summary.md
-          else
-            echo "No findings." > audit-summary.md
-          fi
+            if [ "$code" != 0 ] && [ -s "audit-$name.json" ]; then
+              echo '```json' >> audit-summary.md
+              head -c 20000 "audit-$name.json" >> audit-summary.md
+              echo '' >> audit-summary.md
+              echo '```' >> audit-summary.md
+            else
+              echo "No findings." >> audit-summary.md
+            fi
+            echo "" >> audit-summary.md
+          done
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
           cat audit-summary.md
 
       - name: Open or update tracking issue on findings
