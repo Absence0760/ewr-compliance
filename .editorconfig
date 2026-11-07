@@ -1,0 +1,22 @@
+# Editor defaults matching docs/architecture.md § Conventions: tabs, LF, a final newline.
+root = true
+
+[*]
+indent_style = tab
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# YAML can't hold tabs; Terraform's fmt and Python's style use spaces.
+[*.{yml,yaml,tf,tftest.hcl,hcl}]
+indent_style = space
+indent_size = 2
+
+[*.py]
+indent_style = space
+indent_size = 4
+
+# A trailing double space is a Markdown line break.
+[*.md]
+trim_trailing_whitespace = false

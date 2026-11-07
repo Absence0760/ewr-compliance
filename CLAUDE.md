@@ -34,6 +34,7 @@ pnpm 10 and Node 24. The app is one package. `server/`, the sign-in API, is a se
 | `tools/deploy.sh sample\|real [--dry-run] [--yes]` | Build a clean worktree of `origin/main`, check it (`tools/deploy-check.mjs`), `aws s3 sync` it to the site bucket in two cache passes and invalidate CloudFront. Operator's workstation only, with the `ewr-compliance` SSO profile. Details: `docs/hosting.md` § Build |
 | `bin/check-infra.sh` | Terraform fmt, validate and the mocked-provider tests of `infra/` (`infra/tests/`), in a temporary copy, with no AWS credentials. CI's `Terraform` job. Never plan or apply against AWS from a session: that is the operator's (`infra/README.md`) |
 | `node tools/check-live-services.ts` | Check the live ArcGIS layers against what the app assumes. Network, by hand |
+| `pnpm check:terms`, `pnpm check:claude`, `pnpm check:bundle` | Repo guards: no client term in a tracked file (the list is the private repo's `client-terms.txt`; `.githooks/` run it on every commit, `SECURITY.md` § Public repo hygiene), the agents and commands cite only real paths (CI's `Claude tooling`), and the build's gzipped code stays under its ceilings with maplibre and SheetJS lazy (after `pnpm build`; ceilings in `tools/check-bundle-budget.mjs`) |
 
 ## Hard rules
 
@@ -51,7 +52,7 @@ The numbers are checked against the brief and a reference compliance workbook, b
 - **`DAYS` uses 28 for February** (`src/lib/ewr/parsers.ts`), the same as the reference workbook, in every Mm3 to m3/s conversion of an EWR. Don't correct it for leap years. Observed m3/s converts over real calendar days (`daysIn`).
 - **The `.tab` columns used** are Low Flows Drought (the 5th data column, the `Drought EWR` line) and Total Flows Maint. (the last column, the `EWR Monthly Requirement` line).
 - **Revised `.rul` reading uses the Present Day section,** the one headed "EWR (low and total Flows) are constrained to be below Present Day Flows", not the Natural one. The header text is the same in both, so the section decides.
-- **File name vs header EC conflicts are resolved by `tools/build_data.py` in the private repo** (`resolve_ec_conflicts`), by comparing values with the sibling run. Never by trusting the name or the header alone, and never in the app.
+- **File name vs header EC conflicts are resolved by `../ewr-compliance-private/tools/build_data.py`** (`resolve_ec_conflicts`), by comparing values with the sibling run. Never by trusting the name or the header alone, and never in the app.
 - **A month flagged `#` in DWS data is left out of every mean,** whatever figure it carries, as the client specified. It is still shown, marked, in a gauge's record. A blank month counts the same.
 - **A monthly table worked up from a daily file can hide gaps.** `+` is a patched value and counts. `-99.999`, and every unpatched month the daily record shows is not whole (`incomplete` in `gauges.json`), are left out. Its `0.000` can mean no data.
 - **In daily flow, code 170 or a blank is missing and is never drawn.** Codes 1 and 2 are clean. Any other code is a real value, patched or unreliable, and is drawn in its own colour (`isCoded`).
@@ -103,4 +104,4 @@ Agents live in `.claude/agents/` by team, commands in `.claude/commands/`. The i
 
 ## Where to look
 
-`docs/architecture.md` for the layout, `README.md` for the sample, the data rebuild and the data sources, `docs/hosting.md` for what a deployment needs. In the private repo: `docs/requirements.md` for what was asked, `docs/data-review.csv` for every join and correction a person should check.
+`docs/architecture.md` for the layout, `README.md` for the sample, the data rebuild and the data sources, `docs/hosting.md` for what a deployment needs. In the private repo: `../ewr-compliance-private/docs/requirements.md` for what was asked, `../ewr-compliance-private/docs/data-review.csv` for every join and correction a person should check.

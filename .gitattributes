@@ -1,0 +1,17 @@
+# Every text file is stored and checked out with LF (shell scripts break on CRLF).
+* text=auto eol=lf
+
+# Reserve Desktop files are read byte for byte by src/lib/ewr/parsers.ts, which must cope with the
+# CRLF the real ones carry: a fixture keeps whatever line ends it was written with.
+*.rul -text
+*.tab -text
+
+*.xlsx binary
+*.tgz binary
+*.png binary
+*.ico binary
+*.pmtiles binary
+
+# Generated, and noise in a review diff: `git diff <file>` still shows them.
+pnpm-lock.yaml -diff linguist-generated
+static/geo/*.json -diff linguist-generated

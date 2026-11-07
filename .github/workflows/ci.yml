@@ -93,6 +93,10 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # Ceilings on the shipped code, and maplibre and SheetJS kept lazy: tools/check-bundle-budget.mjs.
+      - name: Bundle budget
+        run: pnpm check:bundle
+
   e2e:
     name: E2E tests
     needs: changes
@@ -257,8 +261,8 @@ jobs:
         run: pnpm build
 
   # Runs on docs-only PRs too: a change under .claude/ counts as docs above,
-  # and this is the only check on the hook. The test also pins the hook's PR
-  # title rule to pr-title-lint.yml.
+  # and this is the only check on the hook and on the agents and commands. The
+  # hook test also pins the hook's PR title rule to pr-title-lint.yml.
   claude-tooling:
     name: Claude tooling
     runs-on: ubuntu-latest
@@ -271,6 +275,10 @@ jobs:
 
       - name: Hook tests
         run: python3 .claude/hooks/git-scope-guard.test.py
+
+      # Agents, commands and skills cite only real paths, with no template placeholders left.
+      - name: Agents and commands
+        run: node tools/check-claude-tooling.mjs
 
   # infra/: fmt, validate and the mocked-provider tests (bin/check-infra.sh),
   # plus the Trivy IaC scan. Credential-free; called so a failure fails the

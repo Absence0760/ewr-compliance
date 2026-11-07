@@ -15,7 +15,7 @@ Your two questions are: **"Could we use this as the shared view of Reserve compl
 2. Starting points:
    - `src/lib/ewr/resolve.ts` (which EC, method and file a node uses, and its notices)
    - `src/lib/components/compliance/`, `src/lib/components/viewer/`, `src/lib/components/nodes/`
-   - `tools/build_data.py` in the private repo (`resolve_ec_conflicts` and every `issue(...)` it logs)
+   - `../ewr-compliance-private/tools/build_data.py` (`resolve_ec_conflicts` and every `issue(...)` it logs)
 
 ## How I exercise the app
 

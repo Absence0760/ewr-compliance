@@ -8,10 +8,14 @@
 		"node": ">=24"
 	},
 	"scripts": {
+		"prepare": "node tools/git-hooks.mjs",
 		"dev": "vite dev --port 7790",
 		"build": "vite build",
 		"preview": "vite preview --port 7790",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:terms": "node tools/check-client-terms.mjs",
+		"check:claude": "node tools/check-claude-tooling.mjs",
+		"check:bundle": "node tools/check-bundle-budget.mjs",
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"test:e2e": "playwright test --config e2e/playwright.config.ts",

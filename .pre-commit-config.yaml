@@ -1,0 +1,46 @@
+# Optional: run by .githooks/pre-commit and commit-msg (which `pnpm install` points core.hooksPath at)
+# whenever the pre-commit framework is on PATH. Don't `pre-commit install`: it refuses with
+# core.hooksPath set. By hand: pre-commit run --all-files. SECURITY.md § Public repo hygiene.
+default_install_hook_types: [pre-commit, commit-msg]
+default_stages: [pre-commit]
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+        name: gitleaks (scan staged changes for secrets)
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-merge-conflict
+      # The DWS rivers (tools/build-rivers.ts) and the vendored SheetJS are large on purpose.
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+        exclude: ^(static/geo/rivers-[a-z-]+\.json|vendor/xlsx-[0-9.]+\.tgz)$
+      # Fixtures are byte for byte what their generators write: no fixing.
+      - id: end-of-file-fixer
+        exclude: ^(e2e/fixtures/|pipeline/fixtures/|static/geo/)
+      - id: trailing-whitespace
+        args: ['--markdown-linebreak-ext=md']
+        exclude: ^(e2e/fixtures/|pipeline/fixtures/|static/geo/)
+      - id: check-yaml
+      - id: check-json
+
+  # Client material never enters this public repo. The list lives in the private repo
+  # (../ewr-compliance-private/client-terms.txt); without it these do nothing. The .githooks run the
+  # same checks first, so they skip these two.
+  - repo: local
+    hooks:
+      - id: client-terms
+        name: client terms (staged changes)
+        entry: node tools/check-client-terms.mjs --staged
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+      - id: client-terms-message
+        name: client terms (commit message)
+        entry: node tools/check-client-terms.mjs --message
+        language: system
+        stages: [commit-msg]

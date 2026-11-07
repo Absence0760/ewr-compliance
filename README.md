@@ -41,6 +41,8 @@ Unit tests and the Playwright suite in `e2e/` run on the sample, and their expec
 
 With the private repo to hand, `pnpm test:private` copies it in and runs the suites pinned to the real data: the parsers over every supplied file, and the same behaviour as the specs here at real nodes. The public specs pin the sample, so they do not run on real data and will refuse to. `pnpm data:sample --force` goes back.
 
+CI also runs two guards: `pnpm check:bundle`, after `pnpm build`, holds the gzipped code under the ceilings in `tools/check-bundle-budget.mjs` and fails if maplibre or SheetJS stops loading lazily, and `pnpm check:claude` checks that `.claude/`'s agents and commands cite only paths that exist. Raise a ceiling in the same commit as the growth, and say why. On every commit, `.githooks/` run the client terms guard (`SECURITY.md` § Public repo hygiene).
+
 Those stubs say nothing about the real services, so check them by hand from time to time:
 
 ```

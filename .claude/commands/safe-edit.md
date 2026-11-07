@@ -12,7 +12,7 @@ Implement the task `$ARGUMENTS` with a project-specific code-reviewer agent in t
 - Which EC, method or file a node uses (`src/lib/ewr/resolve.ts`), and the notices that explain it.
 - Loading a user's file, and anything that reaches another origin (CLAUDE.md rule 1).
 - Text from a loaded file reaching the DOM.
-- `tools/build_data.py` (private repo) decisions about which file belongs to which node and EC.
+- `../ewr-compliance-private/tools/build_data.py` decisions about which file belongs to which node and EC.
 - GitHub Actions permissions, or a `pull_request_target` workflow.
 - Anything you want a second pair of eyes on before commit.
 
