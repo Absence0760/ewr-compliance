@@ -8,7 +8,7 @@ import {
 	mergeDays,
 	parseStations,
 	REFRESH_HOURS,
-	REFUSED_COOLDOWN_HOURS,
+	coolingUntil,
 	runBackfill,
 	runDaily,
 	STALE_AFTER_DAYS,
@@ -262,36 +262,45 @@ describe('runDaily', () => {
 	});
 });
 
+describe('the log of an adjusted page', () => {
+	it('counts what was dropped or blanked, and names no station', async () => {
+		// One row outside the window asked for, and one flow DWS gave as a negative figure.
+		const body = page('X0H001', [row('2007-01-01', '1.000', '1'), row('2010-03-30', '-6.000', '1'), row('2010-03-31', '7.000', '1')]);
+		const { ctx, logs } = testRun({ fetch: fakeDws(() => ok(body)).fetch });
+		await runDaily(ctx);
+		const line = logs.find((l) => l.fields.event === 'dws_page_adjusted');
+		expect(line).toEqual({ level: 'info', fields: { event: 'dws_page_adjusted', outside: 1, blanked: 1 } });
+		expect(JSON.stringify(line)).not.toContain('X0H001');
+	});
+});
+
 describe('after DWS stops a run', () => {
 	const refusedAt = async (store: MemoryStore, at = '2010-04-01T04:00:00Z') => {
 		await expect(runDaily(testRun({ fetch: fakeDws(() => ({ status: 403 })).fetch, store, at }).ctx)).rejects.toMatchObject({ name: 'DwsRefused' });
 	};
 
-	it('asks DWS nothing for most of a day after a 403, daily or backfill, and says so', async () => {
+	it('asks DWS nothing after a 403, daily or backfill, however many scheduled runs come, and says so', async () => {
 		const store = new MemoryStore();
 		await refusedAt(store);
 		const later = fakeDws(() => ok());
-		const daily = testRun({ fetch: later.fetch, store, at: new Date(Date.parse('2010-04-01T04:00:00Z') + (REFUSED_COOLDOWN_HOURS - 1) * HOUR).toISOString() });
-		expect(await runDaily(daily.ctx)).toMatchObject({ stopped: 'cooling', requests: 0 });
-		expect(daily.logs.at(-1)?.fields).toMatchObject({ event: 'dws_run', reason: 'refused' });
-		expect(daily.lags).toHaveLength(1);
+		// The next scheduled run, a day on, and one a month on: neither asks.
+		for (const at of ['2010-04-02T04:00:00Z', '2010-05-01T04:00:00Z']) {
+			const daily = testRun({ fetch: later.fetch, store, at });
+			expect(await runDaily(daily.ctx)).toMatchObject({ stopped: 'cooling', requests: 0 });
+			expect(daily.logs.at(-1)?.fields).toMatchObject({ event: 'dws_run', reason: 'refused', until: 'a run with ignoreStop' });
+			expect(daily.lags).toHaveLength(1);
+		}
 		// A backfill waiting on the lease is the case that matters: it must not ask minutes after the 403.
-		await expect(runBackfill(testRun({ fetch: later.fetch, store, at: '2010-04-01T04:05:00Z' }).ctx, { from: '2010-01-01', to: '2010-03-31' })).rejects.toMatchObject({ name: 'DwsCoolingDown' });
+		await expect(runBackfill(testRun({ fetch: later.fetch, store, at: '2010-04-01T04:05:00Z' }).ctx, { from: '2010-01-01', to: '2010-03-31' })).rejects.toThrow(
+			'The last run stopped (refused); nothing asks DWS again until a run with ignoreStop, unless the event says ignoreStop'
+		);
+		await expect(runBackfill(testRun({ fetch: later.fetch, store, at: '2010-06-01T04:05:00Z' }).ctx, { from: '2010-01-01', to: '2010-03-31' })).rejects.toMatchObject({ name: 'DwsCoolingDown' });
 		expect(later.requests).toHaveLength(0);
 		// The stop stays recorded until a run gets through.
 		expect(status(store).stopped).toBe('refused');
 	});
 
-	it('asks again once the cool-down has passed, and the next good run clears the stop', async () => {
-		const store = new MemoryStore();
-		await refusedAt(store);
-		const next = fakeDws(() => ok());
-		await runDaily(testRun({ fetch: next.fetch, store, at: '2010-04-02T04:00:00Z' }).ctx);
-		expect(next.requests).toHaveLength(1);
-		expect(status(store).stopped).toBeNull();
-	});
-
-	it("asks again inside the cool-down only when the operator's event says ignoreStop", async () => {
+	it("asks again after a 403 only when the operator's event says ignoreStop, and that run clears the stop", async () => {
 		const store = new MemoryStore();
 		await refusedAt(store);
 		const dws = fakeDws(() => ok());
@@ -299,6 +308,27 @@ describe('after DWS stops a run', () => {
 		run.ctx.ignoreStop = true;
 		await runDaily(run.ctx);
 		expect(dws.requests).toHaveLength(1);
+		expect(status(store).stopped).toBeNull();
+		// Cleared: the next scheduled run asks without the override.
+		await runDaily(testRun({ fetch: dws.fetch, store, at: '2010-04-02T05:00:00Z' }).ctx);
+		expect(dws.requests).toHaveLength(2);
+	});
+
+	it('keeps a refusal when the run with ignoreStop is refused too', async () => {
+		const store = new MemoryStore();
+		await refusedAt(store);
+		const run = testRun({ fetch: fakeDws(() => ({ status: 403 })).fetch, store, at: '2010-04-01T05:00:00Z' });
+		run.ctx.ignoreStop = true;
+		await expect(runDaily(run.ctx)).rejects.toMatchObject({ name: 'DwsRefused' });
+		expect(status(store).stopped).toBe('refused');
+		expect(coolingUntil(status(store))).toBe(Infinity);
+	});
+
+	it('times only the other stops', () => {
+		const at = (stopped: StatusFile['stopped']) => coolingUntil({ v: 1, runAt: '2010-04-01T04:00:00.000Z', mode: 'daily', stopped, stations: {} });
+		expect(at('refused')).toBe(Infinity);
+		for (const s of ['throttled', 'server_error', 'unavailable'] as const) expect(at(s)).toBe(Date.parse('2010-04-01T04:00:00Z') + STOP_COOLDOWN_HOURS * HOUR);
+		expect(at(null)).toBeNull();
 	});
 
 	it('cools down for an hour after throttling, not a day', async () => {

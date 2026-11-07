@@ -23,8 +23,9 @@
 // past what Retry-After allows, the ScriptServer page, or MAX_UNAVAILABLE_IN_A_ROW stations DWS didn't
 // answer stops the run at once, never retried: the status says why, the lag keeps growing, and the
 // invocation fails (the stopped alarm, and the DLQ for a daily run). The next runs, daily or backfill,
-// then ask DWS nothing until the stop cools down (coolingUntil: most of a day after a refusal, an hour
-// after the others), unless the operator's event says ignoreStop. A station whose own page fails
+// then ask DWS nothing until the stop cools down (coolingUntil: an hour after throttling, the ScriptServer
+// page or DWS not answering), unless the operator's event says ignoreStop. A refusal (403) never cools
+// down on its own: every run waits until the operator, having understood it, runs one with ignoreStop. A station whose own page fails
 // another way (a changed layout, a value out of bounds, not found, a timeout) is skipped, logged by
 // station and fixed label, and tried again next run.
 //
@@ -58,8 +59,6 @@ export const REFRESH_HOURS = 20;
 export const STALE_AFTER_DAYS = 3;
 /** The most stations the list may hold. */
 export const MAX_STATIONS = 500;
-/** After a run DWS refused (403), no run asks again for this long, unless its event says ignoreStop. */
-export const REFUSED_COOLDOWN_HOURS = 20;
 /** After a run stopped by throttling, the ScriptServer page or DWS not answering, no run asks again for this long. */
 export const STOP_COOLDOWN_HOURS = 1;
 /** DWS failing to answer this many stations running (network, timeouts, 5xx) means it is down: the run stops asking. */
@@ -315,7 +314,8 @@ class Pass {
 			covers,
 			validators: this.mode === 'daily' && (got.etag || got.lastModified) ? { window, etag: got.etag, lastModified: got.lastModified } : (before?.validators ?? null)
 		};
-		if (page.outside || page.blanked) this.ctx.log('info', { event: 'dws_page_adjusted', station, outside: page.outside, blanked: page.blanked });
+		// Counts only, no station: an info line that fires on ordinary pages (a failure names its station, at warn).
+		if (page.outside || page.blanked) this.ctx.log('info', { event: 'dws_page_adjusted', outside: page.outside, blanked: page.blanked });
 	}
 }
 
@@ -331,11 +331,20 @@ async function saveOnExit(pass: Pass, stop: DwsStop | null, threw: boolean): Pro
 const isStationFailure = (err: unknown) => err instanceof DwsFormatError || err instanceof DwsUnavailableError || err instanceof StoreFormatError;
 const isOutOfTime = (err: unknown) => err instanceof DwsUnavailableError && err.label === PoliteClient.OUT_OF_TIME;
 
-/** When the last run's stop still holds: a refusal for most of a day, anything else for an hour. Null when it doesn't. */
+/**
+ * When the last run's stop still holds: an hour for anything but a refusal. A refusal holds until a run
+ * with ignoreStop gets past it (Infinity): with a daily schedule, any timed cool-down shorter than a day
+ * would let the next scheduled run ask again, and DWS refusing us is for the operator to understand
+ * before anything asks it again. Null when no stop holds.
+ */
 export function coolingUntil(previous: StatusFile | null): number | null {
 	if (!previous?.stopped || !isTime(previous.runAt)) return null;
-	return Date.parse(previous.runAt) + (previous.stopped === 'refused' ? REFUSED_COOLDOWN_HOURS : STOP_COOLDOWN_HOURS) * 3600_000;
+	if (previous.stopped === 'refused') return Infinity;
+	return Date.parse(previous.runAt) + STOP_COOLDOWN_HOURS * 3600_000;
 }
+
+/** What a cool-down's end is called in a log line or an error. */
+export const coolingLabel = (until: number) => (until === Infinity ? 'a run with ignoreStop' : new Date(until).toISOString());
 
 interface Loop {
 	pulled: string[];
@@ -426,7 +435,7 @@ export async function runDaily(ctx: RunContext): Promise<RunResult> {
 			// The status is left as it is, so its stop keeps holding until it lapses.
 			const result: RunResult = { ...base, stopped: 'cooling', lagDays: pass.lagDays() };
 			ctx.emitLag(result.lagDays);
-			ctx.log('warn', { event: 'dws_run', reason: previous!.stopped, until: new Date(cooling).toISOString(), ...summary(result) });
+			ctx.log('warn', { event: 'dws_run', reason: previous!.stopped, until: coolingLabel(cooling), ...summary(result) });
 			return result;
 		}
 		const st = pass.stations;
@@ -465,7 +474,7 @@ export async function runBackfill(ctx: RunContext, window: { from: string; to: s
 	try {
 		const previous = await readJsonKey(ctx.store, KEYS.status, parseStatus);
 		const cooling = coolingUntil(previous);
-		if (cooling !== null && ctx.now() < cooling && !ctx.ignoreStop) throw new CoolingDownError(previous!.stopped!, new Date(cooling).toISOString());
+		if (cooling !== null && ctx.now() < cooling && !ctx.ignoreStop) throw new CoolingDownError(previous!.stopped!, coolingLabel(cooling));
 		const pass = new Pass(ctx, 'backfill', list, previous);
 		const loop = await pullEach(ctx, pass, list.stations, window, true);
 		const result: RunResult = { mode: 'backfill', pulled: loop.pulled, failed: loop.failed, skipped: loop.skipped, stopped: loop.stopped, requests: ctx.client.requests, lagDays: null };

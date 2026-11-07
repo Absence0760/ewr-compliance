@@ -21,7 +21,8 @@
 #     already waited out as far as Retry-After and the run allowed;
 #     DwsServerError, its ScriptServer page; DwsDown, station after station
 #     unanswered), DwsCoolingDown (a recent run was stopped so; the pipeline
-#     asks nothing until it lapses), DwsStationsFailed (a station's page
+#     asks nothing until it lapses, or after a 403 until a pull by hand with
+#     "ignoreStop": true gets through), DwsStationsFailed (a station's page
 #     failed; look at the log first), StoreFormatError (a bad window or no
 #     list), and anything else of the function's own. They fail the
 #     execution, and the backfill_failed alarm says so; the operator resumes

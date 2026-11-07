@@ -3,8 +3,9 @@
 //   { "mode": "daily" }                                     the EventBridge rule, once a day
 //   { "mode": "backfill", "from": "YYYY-MM-DD", "to": … }   one item of the Step Functions backfill
 //
-// Either may add "ignoreStop": true, the operator's override of the cool-down after a run DWS stopped
-// (run.ts coolingUntil), for a pull by hand once the reason is understood.
+// Either may add "ignoreStop": true, the operator's override of the hold after a run DWS stopped
+// (run.ts coolingUntil), for a pull by hand once the reason is understood. After a 403 it is the only
+// way past: nothing asks DWS again until a run with it does.
 //
 // An error that is not one of the pipeline's own (an S3 SDK error, say) can name a key, and so a
 // station, in its message. It is logged by name and status only, and leaves the function as

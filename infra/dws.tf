@@ -24,7 +24,8 @@
 # after station unanswered) fails the invocation and is never retried: the
 # async invoke config has no retries, its event goes to the DLQ, and the
 # stopped and DLQ alarms say so; the next runs cool down before asking again
-# (pipeline/src/run.ts coolingUntil). The lag alarm says the copy has stopped
+# (pipeline/src/run.ts coolingUntil), and after a 403 they wait for a run whose
+# event says ignoreStop. The lag alarm says the copy has stopped
 # moving, whatever the reason.
 #
 # Station codes are client material: they live in the private repo, this
@@ -479,7 +480,7 @@ resource "aws_cloudwatch_metric_alarm" "dws_stopped" {
   period              = 3600
   statistic           = "Sum"
   threshold           = 0
-  alarm_description   = "DWS stopped a run of the pipeline: stopped = refused (HTTP 403), throttled, server_error (its ScriptServer page) or unavailable (station after station unanswered). Nothing retries it, and the next runs ask DWS nothing until the stop cools down (most of a day after a 403, an hour after the others). Logs Insights on the ${local.dws_function_name} log group: filter message.event = \"dws_run\". After a 403, don't run it by hand until the reason is understood (docs/hosting.md)."
+  alarm_description   = "DWS stopped a run of the pipeline: stopped = refused (HTTP 403), throttled, server_error (its ScriptServer page) or unavailable (station after station unanswered). Nothing retries it, and the next runs ask DWS nothing: after a 403 until a run by hand with \"ignoreStop\": true, an hour after the others. Logs Insights on the ${local.dws_function_name} log group: filter message.event = \"dws_run\". After a 403, don't run it by hand until the reason is understood (docs/hosting.md)."
   alarm_actions       = [aws_sns_topic.alerts.arn]
   treat_missing_data  = "notBreaching"
 }
