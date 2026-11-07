@@ -2,7 +2,7 @@
 
 To report a vulnerability, use GitHub's private vulnerability reporting on this repository, or contact the owner through their GitHub profile. Please don't open a public issue.
 
-This is a static, client-side app. It has no accounts, server or database, and flow files a user loads are read in their browser and are not uploaded.
+This is a static, client-side app behind a sign-in. The hosted site serves nothing, its data included, without CloudFront signed cookies, which only the sign-in API in `server/` issues, to people on the site's list after an emailed code. The list, the codes, the sessions and the audit log are one DynamoDB table; the sign-in logic is the private package `auth-kit`. `pipeline/` pulls DWS's published flow into the site's store. Flow files a user loads are read in their browser and are not uploaded, to `server/` or anywhere else. The site sets only strictly necessary cookies and has no analytics. What each part does and what personal data it holds: `docs/architecture.md` § Users and access, and `docs/hosting.md` § Personal data.
 
 ## Public repo hygiene
 
