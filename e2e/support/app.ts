@@ -61,10 +61,15 @@ const gauges = (at: [number, number]) => ({
 });
 
 /** Fails any test whose page logged an error or warning, threw, got a 4xx/5xx, or left the site. */
-export const test = base.extend<{ gaugeAt: [number, number]; watch: void }>({
+export const test = base.extend<{ gaugeAt: [number, number]; refused: RegExp | null; watch: void }>({
 	gaugeAt: [[21.47, -33.55], { option: true }],
+	/**
+	 * Files of the site a spec answers with the edge's 401, as for an expired sign-in
+	 * (`test.use({ refused })`): the watch lets a 401 for these by, and nothing else.
+	 */
+	refused: [null, { option: true }],
 	watch: [
-		async ({ page, baseURL, gaugeAt }, use) => {
+		async ({ page, baseURL, gaugeAt, refused }, use) => {
 			const trouble: string[] = [];
 			await page.route(DWS, (route) =>
 				route.fulfill({
@@ -79,8 +84,10 @@ export const test = base.extend<{ gaugeAt: [number, number]; watch: void }>({
 			);
 			await page.route(USER_API, (route) => route.fulfill({ status: 404, body: 'Not found' }));
 			await page.route(DWS_STORE, (route) => route.fulfill({ status: 404, body: 'Not found' }));
+			const wasRefused = (url: string, status = 401) => status === 401 && !!refused?.test(url);
 			page.on('console', (m) => {
 				if (DWS_STORE.test(m.location().url) || USER_API.test(m.location().url)) return;
+				if (wasRefused(m.location().url) && /status of 401/.test(m.text())) return;
 				if ((m.type() === 'error' || m.type() === 'warning') && !KNOWN_NOISE.some((re) => re.test(m.text()))) {
 					trouble.push(`console.${m.type()}: ${m.text()}`);
 				}
@@ -90,7 +97,7 @@ export const test = base.extend<{ gaugeAt: [number, number]; watch: void }>({
 				if (/^https?:/.test(r.url()) && !r.url().startsWith(baseURL!) && !DWS.test(r.url())) trouble.push(`left the site: ${r.url()}`);
 			});
 			page.on('response', (r) => {
-				if (r.status() >= 400 && !DWS_STORE.test(r.url()) && !USER_API.test(r.url())) trouble.push(`HTTP ${r.status()}: ${r.url()}`);
+				if (r.status() >= 400 && !DWS_STORE.test(r.url()) && !USER_API.test(r.url()) && !wasRefused(r.url(), r.status())) trouble.push(`HTTP ${r.status()}: ${r.url()}`);
 			});
 			await use();
 			expect(trouble).toEqual([]);

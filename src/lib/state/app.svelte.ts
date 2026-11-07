@@ -7,6 +7,7 @@ import type {
 	EcBasis, EwrNode, EwrSite, Flow, FlowSource, FlowUnit, GaugeData, GaugeFlowFile, GaugeFlows, GaugeLink, GaugeRecord, HistView, IndexData, Issue, NodeChoices, NodeFile, NodeInfo, NodeInfoData, NodeView, Notice, ResolvedLines, RtView, Sheet, YearIs
 } from '#lib/ewr/types.ts';
 import { readStored, STORAGE, writeStored } from './storage.ts';
+import { siteFetch } from '#lib/users/siteFetch.ts';
 
 const slug = (b: string) => b.toLowerCase().replace(/-/g, '');
 
@@ -127,7 +128,7 @@ class AppState {
 		this.restore();
 		try {
 			const [res, gaugeRes, infoRes] = await Promise.all([
-				fetch(asset('data/index.json')), fetch(asset('data/gauges.json')), fetch(asset('data/node-info.json'))
+				siteFetch(asset('data/index.json')), siteFetch(asset('data/gauges.json')), siteFetch(asset('data/node-info.json'))
 			]);
 			if (!res.ok) throw new Error(`index.json: HTTP ${res.status}`);
 			if (!gaugeRes.ok) throw new Error(`gauges.json: HTTP ${gaugeRes.status}`);
@@ -155,7 +156,7 @@ class AppState {
 	 */
 	private async loadDws(): Promise<void> {
 		try {
-			const res = await fetch(asset(dwsPath.index as never), { cache: 'no-cache' });
+			const res = await siteFetch(asset(dwsPath.index as never), { cache: 'no-cache' });
 			this.dws = res.ok ? { status: 'ready', index: parseDwsIndex(await res.json()) } : dwsUnavailable(res.status);
 		} catch (e) {
 			this.dws = dwsUnavailable(null, (e as Error).message);
@@ -194,7 +195,7 @@ class AppState {
 
 	private store(basin: string, group: 'ewr' | 'series'): Promise<Record<string, string>> {
 		const key = `${group}-${slug(basin)}`;
-		return (this.stores[key] ??= fetch(asset(`data/${key}.json` as never))
+		return (this.stores[key] ??= siteFetch(asset(`data/${key}.json` as never))
 			.then((r) => {
 				if (!r.ok) throw new Error(`${key}.json: HTTP ${r.status}`);
 				return r.json();
@@ -287,7 +288,7 @@ class AppState {
 
 	/** Fetch one file of the store, revalidated, or throw with its HTTP status. */
 	private async dwsFile<T>(path: string): Promise<T> {
-		const res = await fetch(asset(path as never), { cache: 'no-cache' });
+		const res = await siteFetch(asset(path as never), { cache: 'no-cache' });
 		if (!res.ok) throw new Error(`HTTP ${res.status}`);
 		return (await res.json()) as T;
 	}
@@ -325,7 +326,7 @@ class AppState {
 		if (this.flows[station]) return;
 		this.flowsError = '';
 		try {
-			const res = await fetch(asset(`data/flows-${station}.json` as never));
+			const res = await siteFetch(asset(`data/flows-${station}.json` as never));
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			this.flows = { ...this.flows, [station]: parseGaugeFlows((await res.json()) as GaugeFlowFile) };
 		} catch (e) {

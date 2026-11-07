@@ -2,6 +2,11 @@
 // changed by its admins. A copy served without it, such as `pnpm dev` or `pnpm preview`, has no
 // list: /api/me answers 404 there, and the app then offers no user page.
 import { resolve } from '$app/paths';
+// XHR is sent on every call: the edge answers a request whose file cookies have run out with 401 JSON
+// rather than a redirect to the sign-in page (infra/edge_functions.tf). SignedOut is what a 401 throws.
+import { SignedOut, XHR } from '#lib/users/siteFetch.ts';
+
+export { SignedOut };
 
 export interface Me {
 	id: string;
@@ -25,20 +30,6 @@ const url = (path: string) => new URL(`api/${path}`, root());
 export function signinUrl(here: Location | URL = location, signedOut = false): string {
 	const next = `${here.pathname}${here.search}${here.hash}`;
 	return `${new URL('signin/', root()).href}?next=${encodeURIComponent(next)}${signedOut ? '&signedout=1' : ''}`;
-}
-
-/**
- * Sent on every call: the edge answers a request whose file cookies have run out with 401 JSON
- * rather than a redirect to the sign-in page (infra/edge_functions.tf).
- */
-const XHR = { 'X-Requested-With': 'XMLHttpRequest' };
-
-/** The API said the session is over (401). */
-export class SignedOut extends Error {
-	constructor() {
-		super('Your sign-in has ended. Sign in again to go on.');
-		this.name = 'SignedOut';
-	}
 }
 
 let onSignedOut: () => void = () => {};

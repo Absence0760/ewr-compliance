@@ -18,6 +18,7 @@
 	import type { GeoJSONSource, GeoJSONSourceSpecification, LngLatLike, MapGeoJSONFeature, Marker, Popup, PointLike } from 'maplibre-gl';
 	import type { Map as MapLibreMap } from 'maplibre-gl';
 	import { app } from '#lib/state/app.svelte.ts';
+	import { siteFetch } from '#lib/users/siteFetch.ts';
 	import type { EwrNode, EwrSite } from '#lib/ewr/types.ts';
 	import { loadBasins, loadGauges, loadQuaternaries, loadWma, namedQuaternaries, outlineOf, type Gauge } from '#lib/components/map/catchments.ts';
 	import { WMAS, wmaOfBasin, type Wma } from '#lib/components/map/wma.ts';
@@ -106,7 +107,7 @@
 		try {
 			// One per WMA, written by tools/build-rivers.ts.
 			const riversFile = `geo/rivers-${wma.slug}.json` as Parameters<typeof asset>[0];
-			const [lib, res] = await Promise.all([import('#lib/components/map/maplibre.ts'), fetch(asset(riversFile))]);
+			const [lib, res] = await Promise.all([import('#lib/components/map/maplibre.ts'), siteFetch(asset(riversFile))]);
 			if (!res.ok) throw new Error(`${riversFile}: HTTP ${res.status}`);
 			const rivers = (await res.json()) as FeatureCollection;
 			if (gone()) return;

@@ -6,8 +6,9 @@
 // while (a laptop asleep past the 15 minutes). A refresh also re-checks the list, so a removed user
 // is sent to sign in. A 401 from the API means the session is over: the person goes to
 // signin/?next=<here>. A 401 for a file (the edge's answer when only the file cookies ran out) gets one
-// refresh first, through unauthorized().
+// refresh first, through unauthorized(): every file fetch goes through siteFetch, which calls it.
 import { refresh, signinUrl, whenSignedOut, whoAmI, type Me } from '#lib/users/api.ts';
+import { whenUnauthorized } from '#lib/users/siteFetch.ts';
 
 /** Well inside the cookies' 15 minutes. */
 export const REFRESH_MS = 10 * 60_000;
@@ -24,6 +25,8 @@ class Session {
 	#last = 0;
 	#timer: ReturnType<typeof setInterval> | null = null;
 	#retry: ReturnType<typeof setTimeout> | null = null;
+	/** The refresh a file's 401 started, shared by every fetch refused meanwhile. */
+	#renewing: Promise<boolean> | null = null;
 
 	async check() {
 		const who = await whoAmI();
@@ -52,9 +55,14 @@ class Session {
 		return true;
 	}
 
-	/** For a fetch that got 401: one refresh, then sign-in. True when the caller may try again. */
+	/**
+	 * For a fetch that got 401: one refresh, then sign-in. True when the caller may try again. Before the
+	 * session is known (a file refused as the app starts), or where there is none, straight to sign-in:
+	 * the sign-in page lets a live session back in without a code. Fetches refused together share one refresh.
+	 */
 	unauthorized(): Promise<boolean> {
-		return this.me ? this.refresh() : Promise.resolve(this.signIn());
+		if (!this.me) return Promise.resolve(this.signIn());
+		return (this.#renewing ??= this.refresh().finally(() => (this.#renewing = null)));
 	}
 
 	/** `signedOut`: the person chose to sign out, so the sign-in page must not sign them straight back in. */
@@ -88,3 +96,4 @@ class Session {
 
 export const session = new Session();
 whenSignedOut(() => session.signIn());
+whenUnauthorized(() => session.unauthorized(), () => session.signIn());
