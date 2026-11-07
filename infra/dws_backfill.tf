@@ -16,19 +16,22 @@
 #   - Resumable: a station whose raw page for the window is stored is done
 #     and skipped (pipeline/src/run.ts runBackfill), so a failed or stopped
 #     execution is resumed by starting the same plan again.
-#   - Never retried: DwsRefused (DWS answered HTTP 403: asking again is what
-#     gets an address banned), DwsStationsFailed (a station's page failed;
-#     look at the log first), StoreFormatError (a bad window or no list), and
-#     anything else of the function's own. They fail the execution, and the
-#     backfill_failed alarm says so.
-#   - Retried, as waits rather than failures:
+#   - Never retried: every way DWS stops a run (DwsRefused, a 403: asking
+#     again is what gets an address banned; DwsThrottled, which the client
+#     already waited out as far as Retry-After and the run allowed;
+#     DwsServerError, its ScriptServer page; DwsDown, station after station
+#     unanswered), DwsCoolingDown (a recent run was stopped so; the pipeline
+#     asks nothing until it lapses), DwsStationsFailed (a station's page
+#     failed; look at the log first), StoreFormatError (a bad window or no
+#     list), and anything else of the function's own. They fail the
+#     execution, and the backfill_failed alarm says so; the operator resumes
+#     it by starting the same plan again.
+#   - Retried, as waits rather than failures, asking DWS nothing meanwhile:
 #       Lambda's own service errors and throttling, after a minute;
 #       LeaseBusy (the daily run holds the lease, at most its 15 minutes),
 #         every 2 minutes for an hour;
 #       WindowUnfinished (the invocation's time ran out; done stations are
-#         skipped), after a minute;
-#       DwsThrottled and DwsServerError (DWS asked us to slow down, or its
-#         backend is down), 15, 30 then 60 minutes on: well back off.
+#         skipped), after a minute.
 #   - A plain (inline) Map: ~20 windows for 40 years at ~10 history events
 #     each is far inside a Standard execution's 25,000.
 # ----------------------------------------------------------------------------
@@ -134,11 +137,6 @@ resource "aws_sfn_state_machine" "dws_backfill" {
                 IntervalSeconds = 60
                 MaxAttempts     = 5
                 BackoffRate     = 1
-                }, {
-                ErrorEquals     = ["DwsThrottled", "DwsServerError"]
-                IntervalSeconds = 900
-                MaxAttempts     = 3
-                BackoffRate     = 2
               }]
               Next = "Pace"
             }
@@ -170,7 +168,7 @@ resource "aws_cloudwatch_metric_alarm" "dws_backfill_failed" {
   period              = 300
   statistic           = "Sum"
   threshold           = 0
-  alarm_description   = "A ${local.dws_backfill_name} execution failed: a window's error ended it. Open the execution in Step Functions: the failed window's error is the execution's (DwsRefused = DWS answered HTTP 403, never re-run straight away; DwsStationsFailed = a station's page failed, the ${local.dws_function_name} log names it and the check; DwsThrottled or DwsServerError = DWS kept refusing through an hour and three quarters of retries). Then resume: start the same plan again, which skips what is stored (docs/hosting.md)."
+  alarm_description   = "A ${local.dws_backfill_name} execution failed: a window's error ended it. Open the execution in Step Functions: the failed window's error is the execution's (DwsRefused = DWS answered HTTP 403, never re-run straight away; DwsThrottled, DwsServerError or DwsDown = DWS asked us to slow down or was down; DwsCoolingDown = a recent run was stopped so; DwsStationsFailed = a station's page failed, the ${local.dws_function_name} log names it and the check). Then resume: start the same plan again, which skips what is stored (docs/hosting.md)."
   alarm_actions       = [aws_sns_topic.alerts.arn]
   treat_missing_data  = "notBreaching"
 

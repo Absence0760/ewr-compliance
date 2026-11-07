@@ -15,6 +15,9 @@
 //   a page. Bodies over MAX_BYTES, other statuses, network errors and timeouts are DwsUnavailableError:
 //   that one station is skipped and tried again next run.
 // - Redirects are followed by hand, to https on the same host only, at most MAX_REDIRECTS times.
+// - No request outlives the run's deadline: each one's timeout is cut to the time left, and one that
+//   would start with none left, or is cut short by it, is DwsUnavailableError('out of time'), which
+//   the run takes for its deadline. So a run always has its save margin to write the status.
 //
 // The clock, the sleep and fetch are injected, so the tests never touch the network or wait.
 import { DwsRefusedError, DwsThrottledError, DwsUnavailableError } from './errors.ts';
@@ -56,6 +59,8 @@ export interface PoliteOptions {
 	/** Without a Retry-After, the first wait; it doubles on each retry. */
 	defaultBackoffMs?: number;
 	timeoutMs?: number;
+	/** Epoch ms no request may run past (the run's deadline). */
+	deadline?: number;
 	/** Whether there is time left to wait this long and ask again (the Lambda's budget). */
 	mayWait?: (ms: number) => boolean;
 	now?: () => number;
@@ -69,6 +74,9 @@ export class PoliteClient {
 	#last = -Infinity;
 	readonly #o: Required<Omit<PoliteOptions, 'contact'>>;
 
+	/** The label of a request the deadline stopped: the run's deadline, not the station's failure. */
+	static readonly OUT_OF_TIME = 'out of time';
+
 	constructor(o: PoliteOptions = {}) {
 		this.userAgent = userAgent(o.contact);
 		this.#o = {
@@ -77,6 +85,7 @@ export class PoliteClient {
 			maxWaitMs: o.maxWaitMs ?? 120_000,
 			defaultBackoffMs: o.defaultBackoffMs ?? 30_000,
 			timeoutMs: o.timeoutMs ?? 60_000,
+			deadline: o.deadline ?? Infinity,
 			mayWait: o.mayWait ?? (() => true),
 			now: o.now ?? Date.now,
 			sleep: o.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms))),
@@ -101,11 +110,14 @@ export class PoliteClient {
 		let hops = 0;
 		for (;;) {
 			await this.#pace();
+			const left = this.#o.deadline - this.#o.now();
+			if (left < 1000) throw new DwsUnavailableError(PoliteClient.OUT_OF_TIME);
+			const cut = left < this.#o.timeoutMs;
 			let res: Response;
 			try {
-				res = await this.#o.fetch(target, { headers, redirect: 'manual', signal: AbortSignal.timeout(this.#o.timeoutMs) });
+				res = await this.#o.fetch(target, { headers, redirect: 'manual', signal: AbortSignal.timeout(Math.min(this.#o.timeoutMs, left)) });
 			} catch {
-				throw new DwsUnavailableError('no answer');
+				throw new DwsUnavailableError(cut ? PoliteClient.OUT_OF_TIME : 'no answer');
 			}
 			const s = res.status;
 			if (s === 403) {
@@ -142,7 +154,14 @@ export class PoliteClient {
 				await res.body?.cancel();
 				throw new DwsUnavailableError(`HTTP ${s}`);
 			}
-			const body = await readBody(res);
+			let body: string;
+			try {
+				body = await readBody(res);
+			} catch (err) {
+				// The deadline's abort ends the body too.
+				if (cut && err instanceof DwsUnavailableError && err.label === 'page cut short') throw new DwsUnavailableError(PoliteClient.OUT_OF_TIME);
+				throw err;
+			}
 			return { status: 200, body, etag: res.headers.get('etag'), lastModified: res.headers.get('last-modified') };
 		}
 	}

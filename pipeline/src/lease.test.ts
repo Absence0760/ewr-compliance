@@ -12,7 +12,9 @@ describe('takeLease', () => {
 		const body = store.json(KEYS.lease) as { owner: string; holder: string; expires: number };
 		expect(body).toEqual({ owner: take.held.owner, holder: 'daily', expires: (t.now() + 900_000 + LEASE_MARGIN_MS) / 1000 });
 		await take.held.release();
-		expect(store.objects.has(KEYS.lease)).toBe(false);
+		// Overwritten as expired, never deleted: the next run takes it over at once.
+		expect(store.json(KEYS.lease)).toEqual({ owner: null, holder: null, expires: 0 });
+		expect('held' in (await takeLease(store, { holder: 'backfill', remainingMs: 900_000, now: t.now }))).toBe(true);
 	});
 
 	it('is busy while another run holds it, saying who and until when', async () => {

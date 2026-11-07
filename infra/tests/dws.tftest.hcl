@@ -289,7 +289,7 @@ run "dws_off_creates_nothing" {
       length(aws_s3_bucket.dws) + length(aws_lambda_function.dws) + length(aws_iam_role.dws) + length(aws_sqs_queue.dws_dlq) +
       length(aws_secretsmanager_secret.dws_api_key) + length(aws_cloudwatch_event_rule.dws_daily) + length(aws_cloudwatch_event_target.dws_daily) +
       length(aws_sfn_state_machine.dws_backfill) + length(aws_iam_role.dws_backfill) + length(aws_cloudwatch_metric_alarm.dws_lag) +
-      length(aws_cloudwatch_metric_alarm.dws_errors) + length(aws_cloudwatch_metric_alarm.dws_dlq) + length(aws_cloudwatch_metric_alarm.dws_backfill_failed)
+      length(aws_cloudwatch_metric_alarm.dws_stopped) + length(aws_cloudwatch_metric_alarm.dws_failed) + length(aws_cloudwatch_metric_alarm.dws_dlq) + length(aws_cloudwatch_metric_alarm.dws_backfill_failed)
     ) == 0
     error_message = "dws_enabled is off by default: no store, no pipeline, no backfill, no alarms."
   }
@@ -382,14 +382,15 @@ run "backfill_never_retries_a_refusal" {
   }
   assert {
     condition = alltrue([for r in jsondecode(aws_sfn_state_machine.dws_backfill[0].definition).States.Windows.ItemProcessor.States.Pull.Retry :
-      length(setintersection(toset(r.ErrorEquals), toset(["DwsRefused", "DwsStationsFailed", "StoreFormatError", "States.ALL", "States.TaskFailed"]))) == 0
+      length(setintersection(toset(r.ErrorEquals), toset(["DwsRefused", "DwsThrottled", "DwsServerError", "DwsDown", "DwsCoolingDown", "DwsStationsFailed", "StoreFormatError", "PipelineFailed", "States.ALL", "States.TaskFailed"]))) == 0
     ])
-    error_message = "A 403 (DwsRefused), a failed station page or a bad request is never retried: the execution fails and alarms."
+    error_message = "No way DWS stops a run is retried (a 403 above all), nor a failed station page or a bad request: the execution fails and alarms."
   }
   assert {
-    condition = alltrue([for r in jsondecode(aws_sfn_state_machine.dws_backfill[0].definition).States.Windows.ItemProcessor.States.Pull.Retry :
-    r.IntervalSeconds >= 900 if contains(r.ErrorEquals, "DwsThrottled")])
-    error_message = "Throttling is retried only after a long wait."
+    condition = toset(flatten([for r in jsondecode(aws_sfn_state_machine.dws_backfill[0].definition).States.Windows.ItemProcessor.States.Pull.Retry : r.ErrorEquals])) == toset([
+      "Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException", "LeaseBusy", "WindowUnfinished",
+    ])
+    error_message = "Only waits that ask DWS nothing are retried: Lambda's own errors, the lease, and the time running out."
   }
   assert {
     condition     = jsondecode(aws_sfn_state_machine.dws_backfill[0].definition).States.Windows.ItemProcessor.States.Pace.Seconds == 60
@@ -430,14 +431,14 @@ run "pipeline_iam_is_scoped" {
     condition = { for s in data.aws_iam_policy_document.dws[0].statement : s.sid => toset(s.actions) } == {
       ReadStationList     = toset(["s3:GetObject"])
       ReadWriteStore      = toset(["s3:GetObject", "s3:PutObject"])
-      Lease               = toset(["s3:GetObject", "s3:PutObject", "s3:DeleteObject"])
+      Lease               = toset(["s3:GetObject", "s3:PutObject"])
       ListStore           = toset(["s3:ListBucket"])
       ReadDwsApiKey       = toset(["secretsmanager:GetSecretValue"])
       SendFailedRunsToDlq = toset(["sqs:SendMessage"])
       PublishLag          = toset(["cloudwatch:PutMetricData"])
       OwnLogs             = toset(["logs:CreateLogStream", "logs:PutLogEvents"])
     }
-    error_message = "The station list is read-only to the pipeline, and the lease is the only thing it deletes."
+    error_message = "The station list is read-only to the pipeline, and it deletes nothing."
   }
   assert {
     condition = alltrue([for s in data.aws_iam_policy_document.dws[0].statement :
@@ -553,11 +554,17 @@ run "alarms" {
 
   assert {
     condition = (
-      aws_cloudwatch_metric_alarm.dws_errors[0].alarm_actions == toset(["arn:aws:sns:af-south-1:000000000000:ewr-compliance-prod-alerts"]) &&
+      aws_cloudwatch_metric_alarm.dws_stopped[0].alarm_actions == toset(["arn:aws:sns:af-south-1:000000000000:ewr-compliance-prod-alerts"]) &&
+      aws_cloudwatch_metric_alarm.dws_failed[0].alarm_actions == toset(["arn:aws:sns:af-south-1:000000000000:ewr-compliance-prod-alerts"]) &&
       aws_cloudwatch_metric_alarm.dws_dlq[0].alarm_actions == toset(["arn:aws:sns:af-south-1:000000000000:ewr-compliance-prod-alerts"]) &&
       aws_cloudwatch_metric_alarm.dws_backfill_failed[0].alarm_actions == toset(["arn:aws:sns:af-south-1:000000000000:ewr-compliance-prod-alerts"]) &&
       aws_cloudwatch_metric_alarm.dws_backfill_failed[0].metric_name == "ExecutionsFailed"
     )
-    error_message = "Errors, the DLQ and a failed backfill each page the regional topic."
+    error_message = "A run DWS stopped, a failure of the pipeline's own, the DLQ and a failed backfill each page the regional topic."
+  }
+  assert {
+    condition = alltrue([for v in ["refused", "throttled", "server_error", "unavailable"] :
+    strcontains(aws_cloudwatch_log_metric_filter.dws_stopped[0].pattern, "$.message.stopped = \"${v}\"")])
+    error_message = "The stopped alarm counts every way DWS stops a run (pipeline/src/errors.ts stopReason), from the dws_run log line."
   }
 }

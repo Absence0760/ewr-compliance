@@ -5,8 +5,11 @@
 //     expiry in epoch seconds;
 //   - an expired one (a run that died holding it) taken over with If-Match on its ETag, so two takers
 //     can't both win;
-//   - released at the end by its owner: read, compare the owner, delete with If-Match on that ETag, so a
-//     release can never delete a lease someone else has since taken.
+//   - released at the end by its owner: read, compare the owner, and overwrite it with an expired body
+//     with If-Match on that ETag, so a release can never touch a lease someone else has since taken.
+//     An overwrite rather than a delete: a conditional put is S3's oldest conditional write, and the
+//     pipeline's role then needs no DeleteObject at all. The next taker finds it expired and takes it
+//     over with If-Match, as it would a dead holder's.
 //
 // The expiry is the holder's own deadline (the Lambda's time left) plus LEASE_MARGIN_MS, so no renewal
 // is needed (a Lambda can't run past its timeout) and a run killed by its timeout frees DWS a minute
@@ -67,7 +70,7 @@ async function release(store: Store, owner: string): Promise<void> {
 	try {
 		const got = await store.get(KEYS.lease);
 		if (!got || parse(got.body).owner !== owner) return;
-		await store.deleteIf(KEYS.lease, got.etag);
+		await store.put(KEYS.lease, `${JSON.stringify({ owner: null, holder: null, expires: 0 })}\n`, { contentType: 'application/json', ifMatch: got.etag });
 	} catch {
 		// It expires on its own, LEASE_MARGIN_MS past the holder's deadline.
 	}

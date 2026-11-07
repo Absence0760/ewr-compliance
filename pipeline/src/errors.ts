@@ -30,6 +30,30 @@ export class DwsServerError extends Error {
 	}
 }
 
+/** DWS failed to answer usefully for MAX_UNAVAILABLE_IN_A_ROW stations running: it is down, so the run stops asking. */
+export class DwsDownError extends Error {
+	override readonly name = 'DwsDown';
+	constructor(count: number) {
+		super(`DWS failed to answer for ${count} stations in a row: the run stopped`);
+	}
+}
+
+/** The last run was stopped by DWS too recently for this one to ask (run.ts STOP_COOLDOWN_HOURS). Not retried. */
+export class CoolingDownError extends Error {
+	override readonly name = 'DwsCoolingDown';
+	constructor(reason: string, until: string) {
+		super(`The last run stopped (${reason}); nothing asks DWS again until ${until}, unless the event says ignoreStop`);
+	}
+}
+
+/** Anything else that failed: its own message can name an S3 key, so only this fixed one leaves the function. */
+export class PipelineError extends Error {
+	override readonly name = 'PipelineFailed';
+	constructor() {
+		super('The pipeline failed; its log has the error name');
+	}
+}
+
 /** One station's page didn't answer usefully: a network failure, a timeout, another status, a body too large or cut short. */
 export class DwsUnavailableError extends Error {
 	override readonly name = 'DwsUnavailable';
@@ -75,18 +99,37 @@ export class StationsFailedError extends Error {
 	}
 }
 
-/** The errors that stop a run: DWS itself refusing, throttling or failing. */
-export type DwsStop = DwsRefusedError | DwsThrottledError | DwsServerError;
+/** The errors that stop a run: DWS itself refusing, throttling, failing, or not answering station after station. */
+export type DwsStop = DwsRefusedError | DwsThrottledError | DwsServerError | DwsDownError;
 
 export const isStop = (err: unknown): err is DwsStop =>
-	err instanceof DwsRefusedError || err instanceof DwsThrottledError || err instanceof DwsServerError;
+	err instanceof DwsRefusedError || err instanceof DwsThrottledError || err instanceof DwsServerError || err instanceof DwsDownError;
+
+export type StopReason = 'refused' | 'throttled' | 'server_error' | 'unavailable';
 
 /** Which way DWS stopped a run, as status.json records it. */
-export function stopReason(err: DwsStop): 'refused' | 'throttled' | 'server_error' {
+export function stopReason(err: DwsStop): StopReason {
 	if (err instanceof DwsRefusedError) return 'refused';
 	if (err instanceof DwsThrottledError) return 'throttled';
+	if (err instanceof DwsDownError) return 'unavailable';
 	return 'server_error';
 }
+
+/** The pipeline's own errors, whose names and fixed messages may leave the function (handler.ts). */
+export const OWN_ERRORS = new Set([
+	'DwsRefused',
+	'DwsThrottled',
+	'DwsServerError',
+	'DwsDown',
+	'DwsCoolingDown',
+	'DwsUnavailable',
+	'DwsFormatError',
+	'StoreFormatError',
+	'LeaseBusy',
+	'WindowUnfinished',
+	'DwsStationsFailed',
+	'PipelineFailed'
+]);
 
 /** The fixed text logged for a station's failure: never the message, which is ours, but kept short and the same everywhere. */
 export function failureLabel(err: unknown): string {

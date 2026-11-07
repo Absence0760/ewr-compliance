@@ -15,15 +15,17 @@
 #        ├─put─► raw/<station>/daily/<from>_<to>.txt   each page as sent
 #        ├─put─► serve/dws/flows-<station>.json, serve/dws/index.json
 #        ├─put─► state/status.json      per station, its last good and current pull
-#        └─put/delete─► lease/dws.json  one run at a time (pipeline/src/lease.ts)
+#        └─put─► lease/dws.json         one run at a time (pipeline/src/lease.ts)
 #
 #   CloudFront /dws/* (site.tf) ──OAC, origin_path /serve──► serve/dws/*
 #
 # The backfill (dws_backfill.tf) invokes the same function, one window at a
-# time. A run stopped by DWS (403, throttling, its ScriptServer page) fails
-# the invocation and is never retried: the async invoke config has no retries,
-# its event goes to the DLQ, and the errors and DLQ alarms say so. The lag
-# alarm says the copy has stopped moving, whatever the reason.
+# time. A run stopped by DWS (403, throttling, its ScriptServer page, station
+# after station unanswered) fails the invocation and is never retried: the
+# async invoke config has no retries, its event goes to the DLQ, and the
+# stopped and DLQ alarms say so; the next runs cool down before asking again
+# (pipeline/src/run.ts coolingUntil). The lag alarm says the copy has stopped
+# moving, whatever the reason.
 #
 # Station codes are client material: they live in the private repo, this
 # bucket and the pipeline's log group, never in this repo, a workflow or an
@@ -212,8 +214,8 @@ resource "aws_iam_role" "dws" {
 }
 
 # Each grant on its one resource. The bucket's prefixes are the pipeline's
-# keys (pipeline/src/store.ts KEYS); the station list is read-only, and the
-# only delete is the lease's release.
+# keys (pipeline/src/store.ts KEYS); the station list is read-only, and nothing
+# is ever deleted (the lease is released by an expired overwrite).
 data "aws_iam_policy_document" "dws" {
   count = local.dws
 
@@ -229,10 +231,10 @@ data "aws_iam_policy_document" "dws" {
     resources = [for p in local.dws_rw_prefixes : "${aws_s3_bucket.dws[0].arn}/${p}"]
   }
 
-  # Taken with If-None-Match / If-Match, released by a delete with If-Match.
+  # Taken with If-None-Match / If-Match, released by an expired overwrite with If-Match.
   statement {
     sid       = "Lease"
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    actions   = ["s3:GetObject", "s3:PutObject"]
     resources = ["${aws_s3_bucket.dws[0].arn}/${local.dws_lease_key}"]
   }
 
@@ -430,23 +432,71 @@ resource "aws_cloudwatch_metric_alarm" "dws_lag" {
   }
 }
 
-resource "aws_cloudwatch_metric_alarm" "dws_errors" {
+# A run DWS stopped (a 403, throttling, the ScriptServer page, DWS not
+# answering), daily or backfill: the pipeline logs its dws_run line at ERROR
+# with the reason. Read from the log, not Lambda's Errors metric, which the
+# backfill's expected waits (LeaseBusy, WindowUnfinished) also count.
+resource "aws_cloudwatch_log_metric_filter" "dws_stopped" {
+  count          = local.dws
+  name           = "${local.project}-dws-stopped"
+  log_group_name = aws_cloudwatch_log_group.dws[0].name
+  pattern        = "{ $.message.event = \"dws_run\" && ($.message.stopped = \"refused\" || $.message.stopped = \"throttled\" || $.message.stopped = \"server_error\" || $.message.stopped = \"unavailable\") }"
+
+  metric_transformation {
+    name          = "DwsStopped"
+    namespace     = local.dws_metric_namespace
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+# A failure of the pipeline's own, not DWS's: an unexpected error (it leaves
+# as PipelineFailed), the store or a bad event (StoreFormatError), or a
+# backfill station's page (DwsStationsFailed). The handler logs each as a
+# dws_error line (pipeline/src/handler.ts). A timeout reaches the DLQ (daily)
+# or fails the backfill's execution, whose alarms say so.
+resource "aws_cloudwatch_log_metric_filter" "dws_failed" {
+  count          = local.dws
+  name           = "${local.project}-dws-failed"
+  log_group_name = aws_cloudwatch_log_group.dws[0].name
+  pattern        = "{ $.message.event = \"dws_error\" }"
+
+  metric_transformation {
+    name          = "DwsFailed"
+    namespace     = local.dws_metric_namespace
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "dws_stopped" {
   count               = local.dws_alarms
-  alarm_name          = "${local.project}-dws-errors"
+  alarm_name          = "${local.project}-dws-stopped"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
-  metric_name         = "Errors"
-  namespace           = "AWS/Lambda"
+  metric_name         = "DwsStopped"
+  namespace           = local.dws_metric_namespace
   period              = 3600
   statistic           = "Sum"
   threshold           = 0
-  alarm_description   = "The DWS pipeline failed or timed out: DWS refused (403), throttled or sent its ScriptServer page, or the store failed. The error's name is the reason (DwsRefused, DwsThrottled, DwsServerError, ...). Nothing retries it; the next day's run tries again. Check its log group."
+  alarm_description   = "DWS stopped a run of the pipeline: stopped = refused (HTTP 403), throttled, server_error (its ScriptServer page) or unavailable (station after station unanswered). Nothing retries it, and the next runs ask DWS nothing until the stop cools down (most of a day after a 403, an hour after the others). Logs Insights on the ${local.dws_function_name} log group: filter message.event = \"dws_run\". After a 403, don't run it by hand until the reason is understood (docs/hosting.md)."
   alarm_actions       = [aws_sns_topic.alerts.arn]
   treat_missing_data  = "notBreaching"
+}
 
-  dimensions = {
-    FunctionName = aws_lambda_function.dws[0].function_name
-  }
+resource "aws_cloudwatch_metric_alarm" "dws_failed" {
+  count               = local.dws_alarms
+  alarm_name          = "${local.project}-dws-failed"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "DwsFailed"
+  namespace           = local.dws_metric_namespace
+  period              = 3600
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "The DWS pipeline failed for a reason of its own, not DWS's: the store (a bucket grant, an unreadable status or station list), or a backfill station's page (DwsStationsFailed). Logs Insights on the ${local.dws_function_name} log group: filter message.event = \"dws_error\" or message.event = \"dws_station_failed\"."
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  treat_missing_data  = "notBreaching"
 }
 
 resource "aws_cloudwatch_metric_alarm" "dws_dlq" {

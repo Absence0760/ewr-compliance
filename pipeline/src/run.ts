@@ -20,15 +20,21 @@
 // A station is listed in the index only once its flows file holds at least one day.
 //
 // Politeness: at most one request a second, one run at a time (the lease), and an HTTP 403, throttling
-// past what Retry-After allows, or the ScriptServer page stops the run at once, never retried: the
-// status says why, the lag keeps growing, and the invocation fails (the errors alarm and the DLQ). A
-// station whose own page fails another way (a changed layout, a value out of bounds, not found, a
-// timeout) is skipped, logged by station and fixed label, and tried again next run.
+// past what Retry-After allows, the ScriptServer page, or MAX_UNAVAILABLE_IN_A_ROW stations DWS didn't
+// answer stops the run at once, never retried: the status says why, the lag keeps growing, and the
+// invocation fails (the stopped alarm, and the DLQ for a daily run). The next runs, daily or backfill,
+// then ask DWS nothing until the stop cools down (coolingUntil: most of a day after a refusal, an hour
+// after the others), unless the operator's event says ignoreStop. A station whose own page fails
+// another way (a changed layout, a value out of bounds, not found, a timeout) is skipped, logged by
+// station and fixed label, and tried again next run.
 //
-// The status is written however the run ends, so what it fetched before a failure is never lost.
+// The status is written however the run ends, so what it fetched before a failure is never lost. No
+// request outlives the deadline (polite.ts), so the save margin is always there.
 import { parseDwsIndex, type DwsIndex } from '../../src/lib/ewr/dwsStore.ts';
 import { parseGaugeFlows } from '../../src/lib/ewr/parsers.ts';
 import {
+	CoolingDownError,
+	DwsDownError,
 	DwsFormatError,
 	DwsUnavailableError,
 	failureLabel,
@@ -38,11 +44,12 @@ import {
 	StoreFormatError,
 	stopReason,
 	WindowUnfinishedError,
-	type DwsStop
+	type DwsStop,
+	type StopReason
 } from './errors.ts';
 import { DWS_MAX_WINDOW_DAYS, DWS_WINDOW_DAYS, dwsUrl, lineRow, readPage, renderDay, STATION, type DayRow } from './hydata.ts';
 import { takeLease } from './lease.ts';
-import type { PoliteClient } from './polite.ts';
+import { PoliteClient } from './polite.ts';
 import { KEYS, SERVE_CACHE, type Store } from './store.ts';
 
 /** A station is pulled again once its last current pull is this old: a daily schedule, with slack for the rule's jitter. */
@@ -51,6 +58,12 @@ export const REFRESH_HOURS = 20;
 export const STALE_AFTER_DAYS = 3;
 /** The most stations the list may hold. */
 export const MAX_STATIONS = 500;
+/** After a run DWS refused (403), no run asks again for this long, unless its event says ignoreStop. */
+export const REFUSED_COOLDOWN_HOURS = 20;
+/** After a run stopped by throttling, the ScriptServer page or DWS not answering, no run asks again for this long. */
+export const STOP_COOLDOWN_HOURS = 1;
+/** DWS failing to answer this many stations running (network, timeouts, 5xx) means it is down: the run stops asking. */
+export const MAX_UNAVAILABLE_IN_A_ROW = 5;
 
 const DAY_MS = 86_400_000;
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -107,8 +120,8 @@ export interface StatusFile {
 	v: 1;
 	runAt: string;
 	mode: 'daily' | 'backfill';
-	/** The last run stopped on a refusal, throttling or the ScriptServer page. */
-	stopped: 'refused' | 'throttled' | 'server_error' | null;
+	/** How the last run that asked DWS was stopped by it, if it was; the next runs cool down (coolingUntil). */
+	stopped: StopReason | null;
 	stations: Record<string, StationStatus>;
 }
 
@@ -150,7 +163,12 @@ export function buildIndex(listed: string[], stations: Record<string, StationSta
 		out[s] = { fetchedAt: e.okAt, covers: e.covers, stale: isStale(e, now), monthly: false };
 	}
 	const index = { version: 1, stations: out };
-	parseDwsIndex(index);
+	try {
+		parseDwsIndex(index);
+	} catch {
+		// Its message names the station: this one doesn't.
+		throw new StoreFormatError("the index failed the app's own reader");
+	}
 	return index;
 }
 
@@ -200,6 +218,8 @@ export interface RunContext {
 	log: Log;
 	/** Publishes the daily run's lag (emitLag in the Lambda; a recorder in the tests). */
 	emitLag: (lagDays: number | null) => void;
+	/** Ask DWS even though the last run's stop is still cooling down: the operator's override, from the event. */
+	ignoreStop?: boolean;
 }
 
 export interface RunResult {
@@ -210,7 +230,7 @@ export interface RunResult {
 	failed: string[];
 	/** Listed stations recent enough to wait (daily), or already stored for this window (backfill). */
 	skipped: number;
-	stopped: 'no_stations' | 'busy' | 'done' | 'deadline' | 'refused' | 'throttled' | 'server_error';
+	stopped: 'no_stations' | 'busy' | 'cooling' | 'done' | 'deadline' | StopReason;
 	requests: number;
 	/** Days since the oldest listed station's last current pull (one never pulled counts from the list's date); null without a list. */
 	lagDays: number | null;
@@ -309,6 +329,80 @@ async function saveOnExit(pass: Pass, stop: DwsStop | null, threw: boolean): Pro
 }
 
 const isStationFailure = (err: unknown) => err instanceof DwsFormatError || err instanceof DwsUnavailableError || err instanceof StoreFormatError;
+const isOutOfTime = (err: unknown) => err instanceof DwsUnavailableError && err.label === PoliteClient.OUT_OF_TIME;
+
+/** When the last run's stop still holds: a refusal for most of a day, anything else for an hour. Null when it doesn't. */
+export function coolingUntil(previous: StatusFile | null): number | null {
+	if (!previous?.stopped || !isTime(previous.runAt)) return null;
+	return Date.parse(previous.runAt) + (previous.stopped === 'refused' ? REFUSED_COOLDOWN_HOURS : STOP_COOLDOWN_HOURS) * 3600_000;
+}
+
+interface Loop {
+	pulled: string[];
+	failed: string[];
+	skipped: number;
+	stopped: RunResult['stopped'];
+	stop: DwsStop | null;
+	/** Stations not reached by the deadline. */
+	left: number;
+}
+
+/**
+ * Pulls each station's window in turn, saving after each, and the status however it ends. Stops at a DWS
+ * stop, at MAX_UNAVAILABLE_IN_A_ROW stations DWS didn't answer, or at the deadline (also when a request is
+ * cut short by it). With `skipStored`, a station whose raw page for the window is stored is done.
+ */
+async function pullEach(ctx: RunContext, pass: Pass, stations: string[], window: { from: string; to: string }, skipStored: boolean): Promise<Loop> {
+	const { from, to } = window;
+	const out: Loop = { pulled: [], failed: [], skipped: 0, stopped: 'done', stop: null, left: 0 };
+	let unanswered = 0;
+	let threw = false;
+	try {
+		for (const [i, station] of stations.entries()) {
+			if (skipStored && (await ctx.store.exists(KEYS.raw(station, from, to)))) {
+				out.skipped++;
+				continue;
+			}
+			if (ctx.now() >= ctx.deadline) {
+				out.left = stations.length - i;
+				out.stopped = 'deadline';
+				break;
+			}
+			try {
+				await pass.pull(station, from, to);
+				unanswered = 0;
+				out.pulled.push(station);
+				await pass.save(null);
+			} catch (err) {
+				if (isOutOfTime(err)) {
+					out.left = stations.length - i;
+					out.stopped = 'deadline';
+					break;
+				}
+				if (isStop(err)) {
+					out.stop = err;
+					out.stopped = stopReason(err);
+					break;
+				}
+				if (!isStationFailure(err)) throw err;
+				out.failed.push(station);
+				ctx.log('warn', { event: 'dws_station_failed', station, check: failureLabel(err), ...(skipStored ? { from, to } : {}) });
+				unanswered = err instanceof DwsUnavailableError ? unanswered + 1 : 0;
+				if (unanswered >= MAX_UNAVAILABLE_IN_A_ROW) {
+					out.stop = new DwsDownError(unanswered);
+					out.stopped = 'unavailable';
+					break;
+				}
+			}
+		}
+	} catch (err) {
+		threw = true;
+		throw err;
+	} finally {
+		await saveOnExit(pass, out.stop, threw);
+	}
+	return out;
+}
 
 /** The daily run (see the header). Throws a DWS stop after saving, so the invocation fails; returns otherwise. */
 export async function runDaily(ctx: RunContext): Promise<RunResult> {
@@ -324,48 +418,27 @@ export async function runDaily(ctx: RunContext): Promise<RunResult> {
 		return result;
 	}
 	try {
-		const pass = new Pass(ctx, 'daily', list, await readJsonKey(ctx.store, KEYS.status, parseStatus));
+		const previous = await readJsonKey(ctx.store, KEYS.status, parseStatus);
+		const pass = new Pass(ctx, 'daily', list, previous);
 		const now = ctx.now();
+		const cooling = coolingUntil(previous);
+		if (cooling !== null && now < cooling && !ctx.ignoreStop) {
+			// The status is left as it is, so its stop keeps holding until it lapses.
+			const result: RunResult = { ...base, stopped: 'cooling', lagDays: pass.lagDays() };
+			ctx.emitLag(result.lagDays);
+			ctx.log('warn', { event: 'dws_run', reason: previous!.stopped, until: new Date(cooling).toISOString(), ...summary(result) });
+			return result;
+		}
 		const st = pass.stations;
 		const current = (s: string) => (st[s]?.currentAt ? Date.parse(st[s]!.currentAt!) : -Infinity);
 		const turn = (s: string) => Math.max(current(s), st[s]?.triedAt ? Date.parse(st[s]!.triedAt) : -Infinity);
 		const due = list.stations.filter((s) => current(s) <= now - REFRESH_HOURS * 3600_000).sort((a, b) => turn(a) - turn(b) || (a < b ? -1 : 1));
 		const to = sastDay(now);
-		const from = addDays(to, -(DWS_WINDOW_DAYS - 1));
-		let stopped: RunResult['stopped'] = 'done';
-		let stop: DwsStop | null = null;
-		let threw = false;
-		try {
-			for (const station of due) {
-				if (ctx.now() >= ctx.deadline) {
-					stopped = 'deadline';
-					break;
-				}
-				try {
-					await pass.pull(station, from, to);
-					base.pulled.push(station);
-					await pass.save(null);
-				} catch (err) {
-					if (isStop(err)) {
-						stop = err;
-						stopped = stopReason(err);
-						break;
-					}
-					if (!isStationFailure(err)) throw err;
-					base.failed.push(station);
-					ctx.log('warn', { event: 'dws_station_failed', station, check: failureLabel(err) });
-				}
-			}
-		} catch (err) {
-			threw = true;
-			throw err;
-		} finally {
-			await saveOnExit(pass, stop, threw);
-		}
-		const result: RunResult = { ...base, skipped: list.stations.length - due.length, stopped, requests: ctx.client.requests, lagDays: pass.lagDays() };
+		const loop = await pullEach(ctx, pass, due, { from: addDays(to, -(DWS_WINDOW_DAYS - 1)), to }, false);
+		const result: RunResult = { ...base, pulled: loop.pulled, failed: loop.failed, skipped: list.stations.length - due.length, stopped: loop.stopped, requests: ctx.client.requests, lagDays: pass.lagDays() };
 		ctx.emitLag(result.lagDays);
-		ctx.log(stop ? 'error' : 'info', { event: 'dws_run', ...summary(result) });
-		if (stop) throw stop;
+		ctx.log(loop.stop ? 'error' : 'info', { event: 'dws_run', ...summary(result) });
+		if (loop.stop) throw loop.stop;
 		return result;
 	} finally {
 		await lease.held.release();
@@ -390,48 +463,16 @@ export async function runBackfill(ctx: RunContext, window: { from: string; to: s
 	const lease = await takeLease(ctx.store, { holder: 'backfill', remainingMs: ctx.remainingMs, now: ctx.now });
 	if ('busy' in lease) throw new LeaseBusyError(lease.busy.holder);
 	try {
-		const pass = new Pass(ctx, 'backfill', list, await readJsonKey(ctx.store, KEYS.status, parseStatus));
-		const result: RunResult = { mode: 'backfill', pulled: [], failed: [], skipped: 0, stopped: 'done', requests: 0, lagDays: null };
-		let stop: DwsStop | null = null;
-		let left = 0;
-		let threw = false;
-		try {
-			for (const [i, station] of list.stations.entries()) {
-				if (await ctx.store.exists(KEYS.raw(station, from, to))) {
-					result.skipped++;
-					continue;
-				}
-				if (ctx.now() >= ctx.deadline) {
-					left = list.stations.length - i;
-					result.stopped = 'deadline';
-					break;
-				}
-				try {
-					await pass.pull(station, from, to);
-					result.pulled.push(station);
-					await pass.save(null);
-				} catch (err) {
-					if (isStop(err)) {
-						stop = err;
-						result.stopped = stopReason(err);
-						break;
-					}
-					if (!isStationFailure(err)) throw err;
-					result.failed.push(station);
-					ctx.log('warn', { event: 'dws_station_failed', station, check: failureLabel(err), from, to });
-				}
-			}
-		} catch (err) {
-			threw = true;
-			throw err;
-		} finally {
-			await saveOnExit(pass, stop, threw);
-		}
-		result.requests = ctx.client.requests;
-		ctx.log(stop || left || result.failed.length ? 'error' : 'info', { event: 'dws_run', from, to, ...summary(result) });
-		if (stop) throw stop;
-		if (left) throw new WindowUnfinishedError(left);
-		if (result.failed.length) throw new StationsFailedError(result.failed.length);
+		const previous = await readJsonKey(ctx.store, KEYS.status, parseStatus);
+		const cooling = coolingUntil(previous);
+		if (cooling !== null && ctx.now() < cooling && !ctx.ignoreStop) throw new CoolingDownError(previous!.stopped!, new Date(cooling).toISOString());
+		const pass = new Pass(ctx, 'backfill', list, previous);
+		const loop = await pullEach(ctx, pass, list.stations, window, true);
+		const result: RunResult = { mode: 'backfill', pulled: loop.pulled, failed: loop.failed, skipped: loop.skipped, stopped: loop.stopped, requests: ctx.client.requests, lagDays: null };
+		ctx.log(loop.stop || loop.left || loop.failed.length ? 'error' : 'info', { event: 'dws_run', from, to, ...summary(result) });
+		if (loop.stop) throw loop.stop;
+		if (loop.left) throw new WindowUnfinishedError(loop.left);
+		if (loop.failed.length) throw new StationsFailedError(loop.failed.length);
 		return result;
 	} finally {
 		await lease.held.release();

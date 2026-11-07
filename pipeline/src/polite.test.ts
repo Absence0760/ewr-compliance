@@ -118,6 +118,14 @@ describe('PoliteClient', () => {
 		await expect(d.get(URL_A)).rejects.toMatchObject({ label: 'redirected away' });
 	});
 
+	it('sends nothing once the deadline is under a second away, and says the time ran out', async () => {
+		const t = clock('2026-01-01T00:00:00Z');
+		const { fetch, sent } = scripted([ok()], t.now);
+		const c = new PoliteClient({ now: t.now, sleep: t.sleep, fetch, deadline: t.now() + 500 });
+		await expect(c.get(URL_A)).rejects.toMatchObject({ name: 'DwsUnavailable', label: PoliteClient.OUT_OF_TIME });
+		expect(sent).toHaveLength(0);
+	});
+
 	it('takes a network failure or another status for that one page failing', async () => {
 		const t = clock('2026-01-01T00:00:00Z');
 		const fail = (async () => {

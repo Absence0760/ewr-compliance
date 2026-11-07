@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { handler } from './handler.ts';
-import { S3Store } from './store.ts';
+import { describe, expect, it, vi } from 'vitest';
+import { handler, makeHandler } from './handler.ts';
+import { MemoryStore, S3Store } from './store.ts';
 
 /** An S3 client stub: answers each command by its class name, recording the input. */
 function stubS3(answer: (name: string, input: Record<string, unknown>) => unknown) {
@@ -43,14 +43,6 @@ describe('S3Store', () => {
 		await expect(store.put('k', 'x', { contentType: 'application/json' })).rejects.toThrow('PreconditionFailed');
 	});
 
-	it('deletes only on a matching ETag', async () => {
-		const s3 = stubS3((_, input) => (input.IfMatch === '"old"' ? s3Error('PreconditionFailed', 412) : {}));
-		const store = new S3Store('bucket', s3.client);
-		await expect(store.deleteIf('lease/dws.json', '"old"')).resolves.toBe(false);
-		await expect(store.deleteIf('lease/dws.json', '"mine"')).resolves.toBe(true);
-		expect(s3.sent[1]).toMatchObject({ name: 'DeleteObjectCommand', input: { Key: 'lease/dws.json', IfMatch: '"mine"' } });
-	});
-
 	it('tells a missing key from a refused one', async () => {
 		const s3 = stubS3((_, input) => (input.Key === 'gone' ? s3Error('NotFound', 404) : s3Error('AccessDenied', 403)));
 		const store = new S3Store('bucket', s3.client);
@@ -65,6 +57,32 @@ describe('handler', () => {
 	it('needs its bucket', async () => {
 		delete process.env.DWS_BUCKET;
 		await expect(handler({ mode: 'daily' }, context)).rejects.toThrow('DWS_BUCKET');
+	});
+
+	it("lets out only its own errors: anything else leaves as PipelineFailed, logged by name, never by message", async () => {
+		process.env.DWS_BUCKET = 'ewr-compliance-dws-000000000000';
+		const logs: unknown[] = [];
+		const spy = vi.spyOn(console, 'error').mockImplementation((v) => void logs.push(v));
+		// S3's AccessDenied names the key it refused, and a key can name a station.
+		const denied = Object.assign(new Error('User is not authorized to perform: s3:GetObject on resource: arn:aws:s3:::b/raw/X0H001/daily/x.txt'), { name: 'AccessDenied', $metadata: { httpStatusCode: 403 } });
+		const store = new MemoryStore();
+		store.get = async () => {
+			throw denied;
+		};
+		const err = await makeHandler(() => store)({ mode: 'daily' }, context).catch((e) => e);
+		spy.mockRestore();
+		delete process.env.DWS_BUCKET;
+		expect(err).toMatchObject({ name: 'PipelineFailed', message: 'The pipeline failed; its log has the error name' });
+		expect(logs).toEqual([JSON.stringify({ event: 'dws_error', error: 'AccessDenied', status: 403 })]);
+	});
+
+	it("logs a failure of its own as dws_error, for the dws-failed alarm, and lets it out by its name", async () => {
+		const logs: unknown[] = [];
+		const spy = vi.spyOn(console, 'error').mockImplementation((v) => void logs.push(v));
+		const err = await makeHandler(() => new MemoryStore())({ mode: 'daily' }, context).catch((e) => e);
+		spy.mockRestore();
+		expect(err).toMatchObject({ name: 'StoreFormatError', message: 'DWS_BUCKET is not set' });
+		expect(logs).toEqual([JSON.stringify({ event: 'dws_error', error: 'StoreFormatError', status: null })]);
 	});
 
 	it('refuses an unknown event, and a backfill window that is not one', async () => {

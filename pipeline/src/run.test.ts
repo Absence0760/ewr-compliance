@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { parseDay } from '../../src/lib/ewr/parsers.ts';
-import { checkWindow, lagMetricLine, mergeDays, parseStations, REFRESH_HOURS, runBackfill, runDaily, STALE_AFTER_DAYS, type StatusFile } from './run.ts';
+import { PoliteClient } from './polite.ts';
+import {
+	checkWindow,
+	lagMetricLine,
+	MAX_UNAVAILABLE_IN_A_ROW,
+	mergeDays,
+	parseStations,
+	REFRESH_HOURS,
+	REFUSED_COOLDOWN_HOURS,
+	runBackfill,
+	runDaily,
+	STALE_AFTER_DAYS,
+	STOP_COOLDOWN_HOURS,
+	type StatusFile
+} from './run.ts';
 import { KEYS, MemoryStore, SERVE_CACHE } from './store.ts';
 import { fakeDws, fixture, page, row, testRun, type Reply, type TestRun } from './testing.ts';
 
@@ -12,6 +26,8 @@ const DAY = 24 * HOUR;
 
 const status = (store: MemoryStore) => store.json(KEYS.status) as StatusFile;
 const index = (store: MemoryStore) => store.json(KEYS.index) as { version: number; stations: Record<string, { fetchedAt: string; covers: { from: string; to: string }; stale: boolean; monthly: boolean }> };
+/** Let go: overwritten as expired (lease.ts), never deleted. */
+const leaseFree = (store: MemoryStore) => (store.json(KEYS.lease) as { expires: number } | undefined)?.expires === 0;
 const daily = (store: MemoryStore, station: string) => (store.json(KEYS.flows(station)) as { daily: string }).daily;
 
 describe('runDaily', () => {
@@ -22,13 +38,13 @@ describe('runDaily', () => {
 		expect(r).toMatchObject({ stopped: 'done', pulled: ['X0H001'], failed: [], requests: 1, lagDays: 0 });
 		// Today in SAST, and the 729 days before it.
 		expect(dws.requests).toEqual([expect.objectContaining({ station: 'X0H001', from: '2008-04-02', to: '2010-04-01' })]);
-		expect(store.writes).toEqual([KEYS.lease, KEYS.flows('X0H001'), KEYS.raw('X0H001', '2008-04-02', '2010-04-01'), KEYS.status, KEYS.index, KEYS.status, KEYS.index]);
+		expect(store.writes).toEqual([KEYS.lease, KEYS.flows('X0H001'), KEYS.raw('X0H001', '2008-04-02', '2010-04-01'), KEYS.status, KEYS.index, KEYS.status, KEYS.index, KEYS.lease]);
 		expect(store.objects.get(KEYS.raw('X0H001', '2008-04-02', '2010-04-01'))?.body).toBe(REPLY);
 		expect(index(store)).toEqual({ version: 1, stations: { X0H001: { fetchedAt: '2010-04-01T04:00:00.000Z', covers: { from: '2010-01-01', to: '2010-03-31' }, stale: false, monthly: false } } });
 		expect(store.objects.get(KEYS.index)).toMatchObject({ contentType: 'application/json', cacheControl: SERVE_CACHE });
 		expect(store.objects.get(KEYS.flows('X0H001'))).toMatchObject({ contentType: 'application/json', cacheControl: SERVE_CACHE });
 		// The lease is let go.
-		expect(store.objects.has(KEYS.lease)).toBe(false);
+		expect(leaseFree(store)).toBe(true);
 		expect(lags).toEqual([0]);
 	});
 
@@ -53,7 +69,7 @@ describe('runDaily', () => {
 		expect(s.stations.X0H002).toMatchObject({ okAt: null, covers: null });
 		expect(s.stations.X0H003).toBeUndefined();
 		expect(Object.keys(index(store).stations)).toEqual(['X0H001']);
-		expect(store.objects.has(KEYS.lease)).toBe(false);
+		expect(leaseFree(store)).toBe(true);
 		expect(lags).toHaveLength(1);
 	});
 
@@ -93,7 +109,7 @@ describe('runDaily', () => {
 		await expect(runDaily(ctx)).rejects.toThrow('MemoryStore refused');
 		expect(status(store).stations.X0H001?.okAt).not.toBeNull();
 		expect(status(store).stations.X0H002?.triedAt).toBeDefined();
-		expect(store.objects.has(KEYS.lease)).toBe(false);
+		expect(leaseFree(store)).toBe(true);
 	});
 
 	it('merges a later window into the stored days: the later fetch wins day by day, and no stored day is dropped', async () => {
@@ -243,6 +259,103 @@ describe('runDaily', () => {
 		expect(again.requests[0]?.headers['If-None-Match']).toBe('"v1"');
 		expect(store.objects.get(KEYS.flows('X0H001'))?.body).toBe(before);
 		expect(status(store).stations.X0H001?.currentAt).toBe('2010-04-01T20:00:00.000Z');
+	});
+});
+
+describe('after DWS stops a run', () => {
+	const refusedAt = async (store: MemoryStore, at = '2010-04-01T04:00:00Z') => {
+		await expect(runDaily(testRun({ fetch: fakeDws(() => ({ status: 403 })).fetch, store, at }).ctx)).rejects.toMatchObject({ name: 'DwsRefused' });
+	};
+
+	it('asks DWS nothing for most of a day after a 403, daily or backfill, and says so', async () => {
+		const store = new MemoryStore();
+		await refusedAt(store);
+		const later = fakeDws(() => ok());
+		const daily = testRun({ fetch: later.fetch, store, at: new Date(Date.parse('2010-04-01T04:00:00Z') + (REFUSED_COOLDOWN_HOURS - 1) * HOUR).toISOString() });
+		expect(await runDaily(daily.ctx)).toMatchObject({ stopped: 'cooling', requests: 0 });
+		expect(daily.logs.at(-1)?.fields).toMatchObject({ event: 'dws_run', reason: 'refused' });
+		expect(daily.lags).toHaveLength(1);
+		// A backfill waiting on the lease is the case that matters: it must not ask minutes after the 403.
+		await expect(runBackfill(testRun({ fetch: later.fetch, store, at: '2010-04-01T04:05:00Z' }).ctx, { from: '2010-01-01', to: '2010-03-31' })).rejects.toMatchObject({ name: 'DwsCoolingDown' });
+		expect(later.requests).toHaveLength(0);
+		// The stop stays recorded until a run gets through.
+		expect(status(store).stopped).toBe('refused');
+	});
+
+	it('asks again once the cool-down has passed, and the next good run clears the stop', async () => {
+		const store = new MemoryStore();
+		await refusedAt(store);
+		const next = fakeDws(() => ok());
+		await runDaily(testRun({ fetch: next.fetch, store, at: '2010-04-02T04:00:00Z' }).ctx);
+		expect(next.requests).toHaveLength(1);
+		expect(status(store).stopped).toBeNull();
+	});
+
+	it("asks again inside the cool-down only when the operator's event says ignoreStop", async () => {
+		const store = new MemoryStore();
+		await refusedAt(store);
+		const dws = fakeDws(() => ok());
+		const run = testRun({ fetch: dws.fetch, store, at: '2010-04-01T05:00:00Z' });
+		run.ctx.ignoreStop = true;
+		await runDaily(run.ctx);
+		expect(dws.requests).toHaveLength(1);
+	});
+
+	it('cools down for an hour after throttling, not a day', async () => {
+		const store = new MemoryStore();
+		await expect(runDaily(testRun({ fetch: fakeDws(() => ({ status: 429, headers: { 'Retry-After': '3600' } })).fetch, store }).ctx)).rejects.toMatchObject({ name: 'DwsThrottled' });
+		const soon = fakeDws(() => ok());
+		expect(await runDaily(testRun({ fetch: soon.fetch, store, at: new Date(Date.parse('2010-04-01T04:00:00Z') + (STOP_COOLDOWN_HOURS * HOUR) / 2).toISOString() }).ctx)).toMatchObject({ stopped: 'cooling' });
+		await runDaily(testRun({ fetch: soon.fetch, store, at: new Date(Date.parse('2010-04-01T04:00:00Z') + STOP_COOLDOWN_HOURS * HOUR + 1000).toISOString() }).ctx);
+		expect(soon.requests).toHaveLength(1);
+	});
+});
+
+describe('when DWS is down', () => {
+	it(`stops asking after ${MAX_UNAVAILABLE_IN_A_ROW} stations it did not answer`, async () => {
+		const stations = ['X0H001', 'X0H002', 'X0H003', 'X0H004', 'X0H005', 'X0H006', 'X0H007'];
+		const dws = fakeDws(() => ({ status: 502 }));
+		const { ctx, store } = testRun({ stations, fetch: dws.fetch });
+		await expect(runDaily(ctx)).rejects.toMatchObject({ name: 'DwsDown' });
+		expect(dws.requests).toHaveLength(MAX_UNAVAILABLE_IN_A_ROW);
+		expect(status(store).stopped).toBe('unavailable');
+	});
+
+	it('counts only stations running: a page that answered resets the count', async () => {
+		const stations = ['X0H001', 'X0H002', 'X0H003', 'X0H004', 'X0H005', 'X0H006'];
+		const dws = fakeDws(({ station }) => (station === 'X0H003' ? ok(REPLY.replaceAll('X0H001', station)) : { status: 502 }));
+		const r = await runDaily(testRun({ stations, fetch: dws.fetch }).ctx);
+		expect(r).toMatchObject({ stopped: 'done', pulled: ['X0H003'] });
+		expect(dws.requests).toHaveLength(6);
+	});
+});
+
+describe('the deadline', () => {
+	it('cuts a request short rather than let it outlive the run, and the status is still saved', async () => {
+		const store = new MemoryStore();
+		let run: TestRun | undefined;
+		// The first page answers at once; the second never would, and is aborted at the deadline.
+		const fetch = (async (input: URL | string, init?: RequestInit) => {
+			const station = new URL(String(input)).searchParams.get('Station');
+			if (station === 'X0H001100.00') return new Response(REPLY, { status: 200 });
+			return new Promise<Response>((_, reject) => init?.signal?.addEventListener('abort', () => reject(new Error('aborted'))));
+		}) as typeof globalThis.fetch;
+		run = testRun({ stations: ['X0H001', 'X0H002'], fetch, store });
+		const client = new PoliteClient({ now: run.time.now, sleep: run.time.sleep, fetch, deadline: run.ctx.now() + 1500 });
+		run.ctx.client = client;
+		run.ctx.deadline = run.ctx.now() + 1500;
+		const r = await runDaily(run.ctx);
+		expect(r).toMatchObject({ stopped: 'deadline', pulled: ['X0H001'], failed: [] });
+		expect(status(store).stations.X0H001?.okAt).not.toBeNull();
+		expect(leaseFree(store)).toBe(true);
+	});
+
+	it('fails a backfill item as WindowUnfinished, not as a failed station, when a request is cut short', async () => {
+		const fetch = (async (_: URL | string, init?: RequestInit) =>
+			new Promise<Response>((_, reject) => init?.signal?.addEventListener('abort', () => reject(new Error('aborted'))))) as typeof globalThis.fetch;
+		const run = testRun({ fetch });
+		run.ctx.client = new PoliteClient({ now: run.time.now, sleep: run.time.sleep, fetch, deadline: run.ctx.now() + 1500 });
+		await expect(runBackfill(run.ctx, { from: '2010-01-01', to: '2010-03-31' })).rejects.toMatchObject({ name: 'WindowUnfinished' });
 	});
 });
 
