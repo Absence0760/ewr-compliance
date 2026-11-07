@@ -104,4 +104,4 @@ Agents live in `.claude/agents/` by team, commands in `.claude/commands/`. The i
 
 ## Where to look
 
-`docs/architecture.md` for the layout, `README.md` for the sample, the data rebuild and the data sources, `docs/hosting.md` for what a deployment needs. In the private repo: `../ewr-compliance-private/docs/requirements.md` for what was asked, `../ewr-compliance-private/docs/data-review.csv` for every join and correction a person should check.
+`docs/architecture.md` for the layout, `CONTRIBUTING.md` for how a change lands and a release deploys, `README.md` for the sample, the data rebuild and the data sources, `docs/hosting.md` for what a deployment needs. In the private repo: `../ewr-compliance-private/docs/requirements.md` for what was asked, `../ewr-compliance-private/docs/data-review.csv` for every join and correction a person should check.

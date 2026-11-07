@@ -11,6 +11,8 @@ Repo-specific conventions for a session that owns or watches a PR. The root `CLA
 
 On every wake, look at the whole PR on its current head: merge state, the `CI gate` check, every open review thread. `CI gate` (the `ci-gate` job in `.github/workflows/ci.yml`) is the one required check: it fans in on every job and is green only when none failed. A red `CI gate` names the upstream job that failed; that job is the thing to fix.
 
+Branch protection on `main` (`CONTRIBUTING.md`) requires `CI gate` green, every review conversation resolved, and a squash or rebase merge (linear history). Nothing else is required: CodeQL, Scorecard and the labeler report but never block, so a merge state of `UNSTABLE` while they run is not a block. `BLOCKED` means `CI gate` or a conversation; `BEHIND` never blocks here (the check isn't strict).
+
 `pr-mergeable` failing means GitHub couldn't build a merge ref (a conflict), so **ci.yml didn't run at all**: green-looking PR checks from the other workflows prove nothing. Resolve the conflict first.
 
 ## Docs-only and draft PRs
@@ -25,11 +27,15 @@ Run the same command the job runs.
 |---|---|
 | Typecheck, unit tests and build (`test`) | `pnpm check`, `pnpm test`, `pnpm build` |
 | E2E tests (`e2e`) | `pnpm test:e2e > e2e.log 2>&1` (never piped into `grep` or `head`: it can hang) |
-| Claude tooling (`claude-tooling`) | `python3 .claude/hooks/git-scope-guard.test.py` |
+| Claude tooling (`claude-tooling`) | `python3 .claude/hooks/git-scope-guard.test.py`, then `node tools/check-claude-tooling.mjs` |
+| Bundle budget (a step of `test`) | `pnpm build && pnpm check:bundle` |
+| Server (`server`) | `cd server && pnpm install --frozen-lockfile && pnpm check && pnpm test && pnpm build` (needs access to auth-kit; CI skips with a warning until `AUTH_KIT_READ_TOKEN` exists) |
+| Pipeline (`pipeline`) | `cd pipeline && pnpm install --frozen-lockfile && pnpm check && pnpm test && pnpm build` |
+| Terraform (`terraform`) | `bin/check-infra.sh` |
 | gitleaks | the finding names the file and rule; remove the secret and treat it as leaked (rotate), never allowlist a real one |
 | `pr-title-lint` | the title is `type(scope): lowercase subject` with no trailing period |
 
-Read the failure first: `gh run view <run> --log-failed`. An e2e failure uploads `playwright-results` as an artifact.
+Read the failure first: `gh run view <run> --log-failed`. An e2e failure uploads `playwright-results` as an artifact: `e2e/test-results/` (traces) and `e2e/playwright-report/`, for `gh run download <run> -n playwright-results`.
 
 ## Flakes
 
@@ -57,9 +63,10 @@ A conflict in `pnpm-lock.yaml`: take `main`'s, then `pnpm install` to regenerate
 ## Ask the operator before
 
 - Anything irreversible or outside the PR: a release, a change of repo settings, deleting a branch that isn't yours.
-- Merging. Merging is the operator's call even when everything is green.
+- Merging. Merging is the operator's call even when everything is green; when they ask, squash (`gh pr merge <n> --squash`). The branch is deleted on merge; remove its worktree and `git pull --ff-only` in the main checkout.
+- Approving a deploy. A published `api@` or `pipeline@` release waits for the `production` environment's approval, which is the operator's alone; never publish one unasked.
 - A fix that needs a hydrology decision the brief (`../ewr-compliance-private/docs/requirements.md`) leaves open.
 
 ## Done
 
-A PR is done when `CI gate` is green on the current head, it merges cleanly, and no review thread is waiting on you. Then say so once, with the link, and stop; nothing else is yours until the base, CI or a review changes.
+A PR is done when `CI gate` is green on the current head, it merges cleanly (`CLEAN`, or `UNSTABLE` only for checks that aren't required), and no review thread is waiting on you. Then say so once, with the link, and stop; nothing else is yours until the base, CI or a review changes.

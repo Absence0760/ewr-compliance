@@ -101,6 +101,7 @@ Optional. Without it the map draws on a plain background.
 
 - `docs/architecture.md`: structure and conventions.
 - `docs/hosting.md`: what to build, upload and set to host it.
+- `CONTRIBUTING.md`: how a change reaches `main` (a PR, with `CI gate` green) and how releases deploy (each through the `production` environment's approval).
 
 The client brief is in the private repo.
 
