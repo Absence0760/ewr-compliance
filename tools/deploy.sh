@@ -23,6 +23,9 @@
 # AWS access is the operator's SSO profile, ewr-compliance by default (AWS_PROFILE overrides): this
 # script never reads, prints or passes a credential. --dry-run does everything but the upload and the
 # invalidation, and needs no AWS login when both values are given in the environment.
+#
+# A real deploy then uploads the DWS store's station list (tools/dws-stations.sh), built from the same
+# private repo's gauge links; with no store (dws_enabled off) that step says so and does nothing.
 set -euo pipefail
 
 PROJECT=ewr-compliance
@@ -143,8 +146,10 @@ echo "  Pass 2:  ${rest[*]}"
 echo "           ${rest_mjs[*]}"
 echo "  Prune:   ${prune[*]}"
 echo "  Then:    ${invalidate[*]}"
+[ "$mode" = real ] && echo "  Last:    tools/dws-stations.sh, the DWS store's station list from the same private repo"
 
 if [ "$dry_run" = 1 ]; then
+	[ "$mode" = real ] && "$here/dws-stations.sh" --dry-run --gauges "$private/static/data/gauges.json"
 	echo
 	echo "Dry run: nothing was uploaded."
 	exit 0
@@ -173,6 +178,9 @@ fi
 "${rest_mjs[@]}"
 "${prune[@]}"
 "${invalidate[@]}" >/dev/null
+
+# The DWS store's station list, from the same private repo: real only, and only once the store exists.
+[ "$mode" = real ] && "$here/dws-stations.sh" --gauges "$private/static/data/gauges.json"
 
 echo
 echo "Uploaded and invalidated. From a browser that is not signed in, check that data/index.json and"
