@@ -44,3 +44,7 @@ auth_enabled = false
 dws_enabled          = false
 dws_schedule_enabled = false
 # dws_contact        = "dws-contact@example.org"
+
+# Once the account's Lambda concurrency limit is raised (Deploy readiness, go-live checks):
+# lambda_account_concurrency_limit = 1000  # read it with aws lambda get-account-settings
+# api_reserved_concurrency = 5

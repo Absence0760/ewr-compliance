@@ -291,7 +291,7 @@ gh release create pipeline@0.1.0 --target main --generate-notes --repo Absence07
 cd ~/github/ewr-compliance && tools/dws-stations.sh
 ```
 
-4. One pull by hand, from af-south-1: the test request the plan's Q1 asks for. It prints counts only (`pulled`, `failed`, `stopped`), never a station. `stopped` = `done` with `failed` = 0 means DWS answered and every page read; `refused` means DWS answered 403, so stop and don't try again until that is understood. After any stop the pipeline itself asks nothing for a while (20 hours after a 403, an hour after the others) and answers `cooling`; adding `"ignoreStop":true` to the payload overrides that, for when you know why.
+4. One pull by hand, from af-south-1: the test request the plan's Q1 asks for. It prints counts only (`pulled`, `failed`, `stopped`), never a station. `stopped` = `done` with `failed` = 0 means DWS answered and every page read; `refused` means DWS answered 403, so stop and don't try again until that is understood. After any stop the pipeline itself asks nothing for a while (after a 403 until a run with `"ignoreStop":true` gets through; an hour after the others) and answers `cooling`; adding `"ignoreStop":true` to the payload overrides that, for when you know why.
 
 ```
 aws lambda invoke --function-name ewr-compliance-dws --cli-binary-format raw-in-base64-out --payload '{"mode":"daily"}' --region af-south-1 --profile ewr-compliance /dev/stdout
