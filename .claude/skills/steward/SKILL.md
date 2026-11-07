@@ -35,7 +35,7 @@ Read the failure first: `gh run view <run> --log-failed`. An e2e failure uploads
 
 "Flake" is not a root cause. A test that fails once and passes on a re-run is still a bug in the test or the app: find the race (CLAUDE.md § Fix bugs at the source). What's never allowed: a bigger timeout, a `waitForTimeout`, a retry, `test.skip`/`fixme`, a loosened assertion, `networkidle`.
 
-A re-run is fine once, and only to confirm a failure that isn't this PR's: the job died before any test ran (checkout, install, runner loss), or the same check is red on `main` too. `pnpm install` fetches SheetJS from its CDN, so an install that fails on that URL is one of these.
+A re-run is fine once, and only to confirm a failure that isn't this PR's: the job died before any test ran (checkout, install, runner loss), or the same check is red on `main` too.
 
 ## A branch that fell behind
 

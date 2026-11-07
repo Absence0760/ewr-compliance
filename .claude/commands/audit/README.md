@@ -25,7 +25,7 @@ The agent's other areas (`uploads`, `ci`, `public-repo`) have no command of thei
 
 | Command | What it checks |
 |---|---|
-| [/audit/deps](deps.md) | `pnpm audit`, the hand pin Dependabot can't see, Dependabot coverage, action pinning, Node versions |
+| [/audit/deps](deps.md) | `pnpm audit`, the vendored SheetJS Dependabot can't see, Dependabot coverage, action pinning, Node versions |
 
 ### Dispatcher
 

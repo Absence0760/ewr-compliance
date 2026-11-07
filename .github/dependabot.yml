@@ -9,9 +9,9 @@ version: 2
 # auth-kit is exempt from the cooldown, so its security fixes arrive at once. Its tag bumps also need
 # the onlyBuiltDependencies line in server/pnpm-workspace.yaml updated by hand, with the new commit.
 #
-# Not covered: SheetJS `xlsx` is pinned to a CDN tarball URL in package.json,
-# which Dependabot can't read (/audit/deps checks it by hand), and tools/ has no
-# requirements file to watch.
+# Not covered: SheetJS `xlsx` is vendored as vendor/xlsx-0.20.3.tgz (a file:
+# dependency, integrity in the lockfile), which Dependabot can't read (/audit/deps
+# checks it by hand), and tools/ has no requirements file to watch.
 registries:
   auth-kit:
     type: git
