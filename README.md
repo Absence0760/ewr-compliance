@@ -18,7 +18,7 @@ pnpm install && pnpm data:sample && pnpm dev
 
 Then open http://localhost:7790. The nodes you see are invented.
 
-To host it, run `pnpm build` and copy `build/` to any static host, at a domain root or under a sub-path. Hosting real data is a decision of its own: see `docs/hosting.md`.
+To host it, run `pnpm build` and copy `build/` to any static host, at a domain root or under a sub-path. Hosting real data is a decision of its own: see `docs/hosting.md`. The site's own host, Cloudflare Pages, is deployed from a workstation with `tools/deploy.sh sample` or `tools/deploy.sh real`, and `--dry-run` to see what would go up.
 
 ## Data
 

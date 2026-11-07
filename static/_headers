@@ -1,0 +1,28 @@
+# Response headers on Cloudflare Pages, copied to build/_headers. docs/hosting.md § Headers says why
+# each is here and what another host needs instead. Paths are from the domain root: a build with
+# BASE_PATH needs them prefixed. A request matching several rules gets every rule's headers, and two
+# values for one header are joined with a comma, so Cache-Control is set by one rule per path only.
+# Pinned by src/headers.test.ts.
+
+/*
+  X-Content-Type-Options: nosniff
+  Content-Security-Policy: frame-ancestors 'none'
+  Referrer-Policy: strict-origin-when-cross-origin
+
+# Named by their hash, so a new build gives a new name.
+/_app/immutable/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Pages and data keep their names between builds. Private: they sit behind the sign-in, and the
+# data may be real, so no shared cache keeps a copy.
+/
+  Cache-Control: private, no-cache
+
+/*/
+  Cache-Control: private, no-cache
+
+/*.html
+  Cache-Control: private, no-cache
+
+/data/*
+  Cache-Control: private, no-cache

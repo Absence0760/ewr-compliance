@@ -1,6 +1,6 @@
 # Hosting
 
-The app is a folder of static files, plus `functions/`, the access check that Cloudflare Pages runs in front of them. Nothing here deploys it yet.
+The app is a folder of static files, plus `functions/`, the access check that Cloudflare Pages runs in front of them. `tools/deploy.sh` deploys it there: § Build.
 
 ## The data is the decision
 
@@ -68,7 +68,9 @@ pnpm build
 
 Use `pnpm data:sample` in place of `pnpm data:private` for a trial build. With neither, the build still succeeds but the app cannot start, because it needs `data/index.json`.
 
-On Cloudflare Pages, deploy from the repo's root with `pnpm wrangler pages deploy build --project-name ewr-compliance --branch main`, so `functions/` goes up with the files. **A deploy without `functions/` has no list check, and anyone who completes Access's code gets in.** After each deploy, check that its Functions tab lists `_middleware`.
+On Cloudflare Pages, deploy with `tools/deploy.sh sample` (the synthetic sample, to test the site and its gate) or `tools/deploy.sh real` (the real data, from the private repo beside this one or `EWR_PRIVATE_DIR`), from the operator's workstation and never from CI. It uses wrangler's own login, `pnpm wrangler login`, and never handles a token. It builds a clean, temporary worktree of freshly fetched `origin/main`, never the working tree, with no base map and no `BASE_PATH`. Before uploading, `tools/deploy-check.mjs` refuses a build with a file over 25 MiB, more than 20,000 files, data that does not match the mode, a `tiles/` folder, a `_worker.js` or `_routes.json`, or no `functions/_middleware.ts`, and compiles `functions/` to check that `_middleware` runs on every path. It warns when `_headers` is missing. `--dry-run` stops there and says what would go up; it needs no login. A `real` deploy asks for the project name to be typed before uploading, unless given `--yes`.
+
+The script runs `pnpm wrangler pages deploy build --project-name ewr-compliance --branch main` from the worktree's root, which is how `functions/` goes up with the files. **A deploy without `functions/` has no list check, and anyone who completes Access's code gets in.** The script fails if wrangler does not report uploading the Functions bundle. After each deploy, check that its Functions tab lists `_middleware`, and run the checks at the end of § Access control.
 
 Elsewhere, upload the contents of `build/`, not the folder itself. That is about 30 MB with the real data and the rivers, or about 295 MB with the base map.
 
@@ -107,12 +109,19 @@ None are required. These matter when the host allows them:
 
 | Files | Header | Why |
 |---|---|---|
-| `*.mjs` | `Content-Type: text/javascript` | **Required in effect.** The map's worker is a module, and the browser refuses it under any other type: the map's layers do not load, and the console logs "Worker failed to load". Check this on any host that sets types from its own list. |
+| `*.mjs` | `Content-Type: text/javascript` | **Required in effect.** The map's worker is a module, and the browser refuses it under a type that is not JavaScript: the map's layers do not load, and the console logs "Worker failed to load". `application/javascript` also works. Check this on any host that sets types from its own list. |
 | `*.json`, `*.js`, `*.css`, `*.html` | gzip or brotli | The real `data/` is 19 MB, and 3.6 MB gzipped. |
 | `_app/immutable/*` | `Cache-Control: public, max-age=31536000, immutable` | The names carry a hash. |
-| `*.html`, `data/*` | `Cache-Control: no-cache` | These keep their names between builds. |
+| Every page, `data/*` | `Cache-Control: private, no-cache` | These keep their names between builds. `private` because they sit behind the sign-in and the data may be real, so no shared cache should keep a copy. |
 | Everything | `X-Content-Type-Options: nosniff` | |
 | Everything | `Content-Security-Policy: frame-ancestors 'none'` | A meta tag cannot carry this one. A second policy from the host adds to the one in the page, so it can only tighten it. |
+| Everything | `Referrer-Policy: strict-origin-when-cross-origin` | Other sites get the site's origin and never a path. Stricter gains nothing: every request to another site is a CORS request, which sends the origin as `Origin` whatever this says. |
+
+A page is a folder's address, such as `/nodes/`, so a rule for `*.html` alone misses every page but `404.html`.
+
+On Cloudflare Pages, `static/_headers` sets all but the first two rows, which Pages does itself: it serves `.mjs` as JavaScript and compresses text. `pnpm build` copies it to `build/_headers`, and `src/headers.test.ts` pins its rules. Pages applies it to the files `functions/_middleware.ts` passes on with `ctx.next()`, but not to a response a Function makes itself, such as the sign-in refusal or `api/`. Its paths are from the domain root, so a build with `BASE_PATH` needs them prefixed. Elsewhere, take the file as the list to set.
+
+Pages keeps every uploaded file in its own cache until the next deploy, behind the middleware, which still checks each request. A cache rule on the domain sits in front of the middleware, and could serve a page or data file to someone it never checked: add none. Cloudflare does not cache HTML or JSON unless a rule tells it to, and does not store a `private` response.
 
 Serve the site over `https`. The browser's Copy needs a secure context. A browser refuses an `http` API from an `https` page whatever the policy says.
 
@@ -150,6 +159,8 @@ The host needs nothing for these. Each browser reads them directly from the ArcG
 ## Base map
 
 `tools/fetch-tiles.sh` fills `static/tiles/`, 251 MB of `.pmtiles` for South Africa and the label fonts, and `pnpm build` copies it into `build/tiles/`. Check the host's limit on one file. To keep the file elsewhere, set `VITE_TILES_URL` and `VITE_TILES_GLYPHS_URL` to full `https` URLs.
+
+On Cloudflare Pages the base map cannot be beside the app: the file is far over Pages' 25 MiB limit, and Pages answers a range request with `200`. `tools/deploy.sh` builds without it. To have one there, host the `.pmtiles` elsewhere and set `VITE_TILES_URL`.
 
 The host of the `.pmtiles`, here or elsewhere, must:
 

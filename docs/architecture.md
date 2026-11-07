@@ -79,7 +79,7 @@ A copy served without `functions/`, such as `pnpm dev`, `pnpm preview` or the e2
 | `src/lib/components/charts` | uPlot wrapper. |
 | `src/lib/components/nodes` | Nodes table and data notes. |
 | `src/lib/components/viewer` | File viewer dialog. |
-| `tools/` | `build-rivers.ts` for `static/geo`, `build_geo.py` for the private quaternaries file, `sync-private.sh` and `sample-data.mjs`, which fill `static/data`, `fetch-tiles.sh` for the base map, and `check-live-services.ts`, the contract check on the live layers. See README. |
+| `tools/` | `build-rivers.ts` for `static/geo`, `build_geo.py` for the private quaternaries file, `sync-private.sh` and `sample-data.mjs`, which fill `static/data`, `fetch-tiles.sh` for the base map, `check-live-services.ts`, the contract check on the live layers, and `deploy.sh` with `deploy-check.mjs`, the Cloudflare Pages deploy and the checks it makes first (`docs/hosting.md` § Build). See README. |
 | `e2e/fixtures` | Synthetic flow files and the sample dataset, each with the script that writes it. |
 | `vite.config.ts` | Adapter, `BASE_PATH` and the content security policy. See `docs/hosting.md`. |
 

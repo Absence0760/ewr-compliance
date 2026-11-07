@@ -25,6 +25,7 @@ pnpm 10 and Node 24. One package, no workspace.
 | `python3 ../ewr-compliance-private/tools/build_node_info.py` | Rebuild `node-info.json`, what the RQO node workbook records at each node (REMP/BM site, EWR site ID, WQ station, SWSAs), in the private repo. Arguments: `README.md` § Rebuild the data |
 | `python3 ../ewr-compliance-private/tools/build_data.py`, `python3 tools/build_geo.py` | Rebuild the real data in the private repo, and the quaternaries file it places nodes with. Arguments and dependencies: `README.md` § Rebuild the data |
 | `node tools/build-rivers.ts` | Rebuild `static/geo/rivers-<wma>.json`, the named DWS 1:500 000 rivers of each WMA. Network |
+| `tools/deploy.sh sample\|real [--dry-run] [--yes]` | Build a clean worktree of `origin/main`, check it (`tools/deploy-check.mjs`) and deploy it to Cloudflare Pages. Operator's workstation only, with wrangler's own login. Details: `docs/hosting.md` § Build |
 | `node tools/check-live-services.ts` | Check the live ArcGIS layers against what the app assumes. Network, by hand |
 
 ## Hard rules
