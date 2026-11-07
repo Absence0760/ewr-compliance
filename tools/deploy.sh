@@ -7,8 +7,9 @@
 #
 # It builds from a clean, temporary git worktree of freshly fetched origin/main, never from this
 # working tree, which may hold uncommitted work or the wrong static/data. The build has no base map
-# and no BASE_PATH. tools/deploy-check.mjs then refuses a build that holds the wrong data or carries
-# tiles/.
+# and no BASE_PATH. tools/deploy-check.mjs then refuses a build that holds the wrong data, carries
+# tiles/, or lacks the sign-in page (static/signin/). The API Lambda is not deployed from here: CI
+# does that (.github/workflows/deploy-lambdas.yml).
 #
 # The upload is `aws s3 sync` in two cache passes, then a CloudFront invalidation:
 #   1. _app/immutable/*: named by their hash, so `public, max-age=31536000, immutable`.
