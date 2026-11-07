@@ -29,12 +29,12 @@
 		"@sveltejs/kit": "3.1.1",
 		"@sveltejs/vite-plugin-svelte": "7.3.1",
 		"@types/geojson": "7946.0.16",
-		"@types/node": "24.12.2",
+		"@types/node": "24.19.2",
 		"svelte": "5.57.3",
 		"svelte-check": "4.7.7",
 		"typescript": "6.0.3",
 		"vite": "8.3.5",
-		"vitest": "5.0.3"
+		"vitest": "5.0.5"
 	},
 	"dependencies": {
 		"maplibre-gl": "6.16.0",
