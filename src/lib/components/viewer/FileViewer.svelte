@@ -11,9 +11,12 @@
 	const files = $derived(node ? app.filesOf(node) : []);
 	const file = $derived(files.find((f) => f.name === app.viewer?.file) ?? null);
 
+	// Read app.viewer itself, not only the node: a file picked again on the node just closed is a new
+	// app.viewer for the same node, and must open the dialog again.
 	$effect(() => {
-		if (node && !dialog?.open) dialog?.showModal();
-		else if (!node && dialog?.open) dialog.close();
+		const open = app.viewer !== null && node !== null;
+		if (open && !dialog?.open) dialog?.showModal();
+		else if (!open && dialog?.open) dialog.close();
 	});
 
 	$effect(() => {
@@ -57,8 +60,9 @@
 	}
 </script>
 
-<!-- close fires for the Close button and for Esc, so both clear app.viewer. -->
-<dialog bind:this={dialog} aria-label={node ? `Files for ${node.label}` : 'File viewer'} onclose={() => (app.viewer = null)}>
+<!-- close fires for the Close button and for Esc, so both clear app.viewer. It fires a task after the
+     dialog closed, by when a file picked straight away may have opened it again: then it is stale. -->
+<dialog bind:this={dialog} aria-label={node ? `Files for ${node.label}` : 'File viewer'} onclose={() => { if (!dialog?.open) app.viewer = null; }}>
 	{#if node}
 		<div class="head">
 			<b>{node.label}</b>

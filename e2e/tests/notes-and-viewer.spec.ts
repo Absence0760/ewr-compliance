@@ -48,6 +48,30 @@ test.describe('file viewer', () => {
 		await expect(viewer.getByLabel('File text')).toContainText('Ecological Category = D');
 	});
 
+	test('stays open on a file picked before the close event of the last one arrives', async ({ page }) => {
+		const pick = select(panel(page), /View file/);
+		await pick.selectOption('SYT1D.tab');
+		const viewer = page.getByRole('dialog', { name: 'Files for syt1' });
+		await expect(viewer.getByLabel('File text')).toContainText('Ecological Category = D');
+		// Close, and pick the file again in the same task, then wait for the dialog's close event, which
+		// comes a task later: it is stale by then, and must leave the viewer open.
+		const close = await viewer.getByRole('button', { name: 'Close' }).elementHandle();
+		const again = await pick.elementHandle();
+		await page.evaluate(
+			([button, sel]) =>
+				new Promise<void>((done) => {
+					const dialog = (button as HTMLElement).closest('dialog')!;
+					dialog.addEventListener('close', () => setTimeout(done), { once: true });
+					(button as HTMLButtonElement).click();
+					(sel as HTMLSelectElement).value = 'SYT1D.tab';
+					sel!.dispatchEvent(new Event('change', { bubbles: true }));
+				}),
+			[close, again] as const
+		);
+		await expect(viewer).toBeVisible();
+		await expect(viewer.getByLabel('File text')).toContainText('Ecological Category = D');
+	});
+
 	test('moves between a node\'s files, including the flow series', async ({ page }) => {
 		await select(panel(page), /View file/).selectOption('SYT1D.tab');
 		const viewer = page.getByRole('dialog', { name: 'Files for syt1' });
