@@ -7,7 +7,7 @@ Run the go/no-go checklist before a release. Report it; never tag, push or publi
 
 ## How releases work here
 
-A release is a tag `vX.Y.Z` on `main`, matching `version` in `package.json`. The deploy target is the AWS site in af-south-1 (`docs/hosting.md`): the operator deploys the static build from the workstation with `tools/deploy.sh real`, and CI deploys the API and the pipeline on `api@X.Y.Z` and `pipeline@X.Y.Z` releases. This command never deploys; before a first deploy, also walk `docs/hosting.md` § Deploy readiness and report which of its checks are not yet done.
+A release is a tag `vX.Y.Z` on `main`, matching `version` in `package.json`. The deploy target is the AWS site in af-south-1 (`docs/hosting.md`): the operator deploys the static build from the workstation with `tools/deploy.sh real`, and CI deploys the API and the pipeline on `api@X.Y.Z` and `pipeline@X.Y.Z` releases, each waiting for the `production` environment's approval (`CONTRIBUTING.md` § Releases and deploys). This command never deploys; before a first deploy, also walk `docs/hosting.md` § Deploy readiness and report which of its checks are not yet done.
 
 ## Procedure
 

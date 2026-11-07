@@ -42,7 +42,7 @@ export const PLACEHOLDERS = [
 
 /** What a backticked token must start with to count as a repo path. */
 const PATH_ROOTS =
-	/^(?:src|e2e|docs|tools|bin|infra|server|pipeline|static|vendor|\.github|\.claude)\/|^(?:CLAUDE\.md|README\.md|SECURITY\.md|NOTICE\.md|LICENSE|package\.json|pnpm-lock\.yaml|vite\.config\.ts|tsconfig\.json|\.gitignore|\.gitattributes|\.editorconfig|\.pre-commit-config\.yaml)$/;
+	/^(?:src|e2e|docs|tools|bin|infra|server|pipeline|static|vendor|\.github|\.claude)\/|^(?:CLAUDE\.md|README\.md|SECURITY\.md|NOTICE\.md|CONTRIBUTING\.md|LICENSE|package\.json|pnpm-lock\.yaml|vite\.config\.ts|tsconfig\.json|\.gitignore|\.gitattributes|\.editorconfig|\.pre-commit-config\.yaml)$/;
 /** A token with any of these is a pattern or an example, not a citation. */
 const PATTERN = /[<>*{}$…\[\]]|\s|\.\.\.|\bX\b/;
 /** Generated, ignored or throwaway paths an agent may rightly name though they are absent. */

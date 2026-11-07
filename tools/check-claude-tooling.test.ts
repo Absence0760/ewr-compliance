@@ -28,7 +28,11 @@ describe('check-claude-tooling', () => {
 	it('skips patterns, the private repo, and generated or throwaway paths', () => {
 		const text = 'Use `src/lib/*.ts`, `static/data/<wma>.json`, `../ewr-compliance-private/tools/build_data.py`, `static/data/index.json`, `build/index.html`, `e2e/zz-shot.spec.ts`, `pnpm test`.';
 		expect(citedPaths(text)).toEqual([]);
-		expect(citedPaths('Read `src/lib/ewr/parsers.ts § DAYS` and `CLAUDE.md`.').map((c) => c.path)).toEqual(['src/lib/ewr/parsers.ts', 'CLAUDE.md']);
+		expect(citedPaths('Read `src/lib/ewr/parsers.ts § DAYS`, `CLAUDE.md` and `CONTRIBUTING.md § Releases and deploys`.').map((c) => c.path)).toEqual([
+			'src/lib/ewr/parsers.ts',
+			'CLAUDE.md',
+			'CONTRIBUTING.md'
+		]);
 	});
 
 	it("finds nothing wrong in this repo's own Claude tooling", () => {

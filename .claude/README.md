@@ -57,6 +57,10 @@ Each walks the app as one kind of person and writes `.claude/reviews/<persona>.m
 
 - **`steward/SKILL.md`** — how a session drives a PR here to green: the `CI gate`, what docs-only PRs still run, the local command for each CI job, flakes, updating a branch that fell behind, reviews, and what to ask the operator first.
 
+## How changes land
+
+Every change is a PR into a protected `main`, merged once `CI gate` is green; deploys of `server/` and `pipeline/` wait for the `production` environment's approval. The process is `CONTRIBUTING.md`; the session rules are `CLAUDE.md` § Working alongside other Claude sessions; `steward` drives a PR.
+
 ## Hooks (`hooks/`, wired in `settings.json`)
 
 - **`git-scope-guard.py`** (PreToolUse on Bash) — blocks whole-tree git commands, any push to `main` and PR titles CI would refuse, so sessions sharing one checkout don't sweep up each other's work. Tests: `python3 .claude/hooks/git-scope-guard.test.py` (CI job `claude-tooling`).
