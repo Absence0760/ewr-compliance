@@ -32,8 +32,8 @@ def decision(command):
 
 
 # (command, expected) — the core of the suite is the bare-commit gap.
-# "allow" while MAIN_PUSH_GATE is off. Set it to "deny" when the gate comes back.
-MAIN = "allow"
+# "deny" while MAIN_PUSH_GATE is on, as it is. "allow" if it is ever turned off again.
+MAIN = "deny"
 
 CASES = [
     # The regression that motivated this guard: bare commit sweeps the index.
