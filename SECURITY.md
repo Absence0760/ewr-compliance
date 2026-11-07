@@ -6,7 +6,7 @@ This is a static, client-side app behind a sign-in. The hosted site serves nothi
 
 ## Public repo hygiene
 
-This repository is public. Client material (real flow or EWR values, node codes, sites, file names, the brief) stays in the private repo, `ewr-compliance-private`, and so does the list of terms that would identify it: `../ewr-compliance-private/client-terms.txt`, one term per line, `#` for comments. `EWR_PRIVATE_DIR` or `CLIENT_TERMS_FILE` point elsewhere.
+This repository is public. Client material (real flow or EWR values, node codes, sites, file names, the brief) stays in the private repo, `ewr-compliance-private`, and so does the list of terms that would identify it: `../ewr-compliance-private/client-terms.txt`, one term per line, `#` for comments. It is built from the real data by `../ewr-compliance-private/tools/build_client_terms.py`, rerun after any data rebuild; terms the data can't know are added by hand below its `# --- kept by hand ---` line. `EWR_PRIVATE_DIR` or `CLIENT_TERMS_FILE` point elsewhere.
 
 `pnpm install` points git at `.githooks/` (`tools/git-hooks.mjs`), so every commit, in every checkout and worktree, is checked by `tools/check-client-terms.mjs`: the staged changes, their paths and the commit message. A hit blocks the commit. The guard names the file, the line and the term's number in the list, never the term, and stars any term out of a path it reports, since a log is as public as the repo. Without the list (a fresh clone, CI, a fork) it does nothing. `pnpm check:terms` checks every tracked file, and `node tools/check-client-terms.mjs --history` every ref's history. A hit in history needs a rewrite and a force push: ask the owner.
 
