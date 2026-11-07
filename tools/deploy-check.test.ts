@@ -5,19 +5,18 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkBuild, checkFunctions, isSampleIndex, listFiles, MAX_FILE_BYTES, MAX_FILES, summarize } from './deploy-check.mjs';
+import { checkBuild, isSampleIndex, listFiles, summarize } from './deploy-check.mjs';
 
 const SAMPLE = JSON.stringify({ sample: true, nodes: [] });
 const REAL = JSON.stringify({ nodes: [] });
 
 const ok = [
 	{ path: 'index.html', size: 1000 },
-	{ path: '_headers', size: 200 },
+	{ path: 'signin/index.html', size: 200 },
 	{ path: 'data/index.json', size: 500 }
 ];
 
-const check = (over: Partial<Parameters<typeof checkBuild>[0]> = {}) =>
-	checkBuild({ files: ok, indexJson: SAMPLE, mode: 'sample', hasMiddleware: true, ...over });
+const check = (over: Partial<Parameters<typeof checkBuild>[0]> = {}) => checkBuild({ files: ok, indexJson: SAMPLE, mode: 'sample', ...over });
 
 describe('checkBuild', () => {
 	it('passes a sample build deployed as the sample, and a real one as real', () => {
@@ -39,63 +38,28 @@ describe('checkBuild', () => {
 		expect(check({ mode: 'prod' as 'real' }).errors[0]).toMatch(/Unknown mode "prod"/);
 	});
 
-	it('refuses when functions/_middleware.ts is missing', () => {
-		expect(check({ hasMiddleware: false }).errors[0]).toMatch(/_middleware\.ts is missing/);
-	});
-
-	it('refuses a file over 25 MiB, naming it, and allows one at exactly the limit', () => {
-		const big = [...ok, { path: 'data/flows-big.json', size: MAX_FILE_BYTES + 1 }];
-		expect(check({ files: big }).errors).toEqual([expect.stringContaining('data/flows-big.json is 25.0 MiB')]);
-		expect(check({ files: [...ok, { path: 'edge.json', size: MAX_FILE_BYTES }] }).errors).toEqual([]);
-	});
-
-	it('refuses more than 20,000 files, and allows exactly 20,000', () => {
-		const pad = (n: number) => Array.from({ length: n }, (_, i) => ({ path: `f/${i}`, size: 1 }));
-		expect(check({ files: [...ok, ...pad(MAX_FILES - ok.length)] }).errors).toEqual([]);
-		expect(check({ files: [...ok, ...pad(MAX_FILES - ok.length + 1)] }).errors).toEqual([`${MAX_FILES + 1} files, over Cloudflare Pages' limit of ${MAX_FILES}.`]);
-	});
-
 	it('refuses a build carrying the base map', () => {
 		expect(check({ files: [...ok, { path: 'tiles/south-africa.pmtiles', size: 10 }] }).errors[0]).toMatch(/tiles\/ folder/);
 	});
 
-	it('refuses a _worker.js or _routes.json, which would override functions/', () => {
-		expect(check({ files: [...ok, { path: '_worker.js', size: 10 }] }).errors[0]).toMatch(/has _worker\.js/);
-		expect(check({ files: [...ok, { path: '_worker.js/index.js', size: 10 }] }).errors[0]).toMatch(/has _worker\.js/);
-		expect(check({ files: [...ok, { path: '_routes.json', size: 10 }] }).errors[0]).toMatch(/has _routes\.json/);
+	it("refuses Cloudflare's _headers file, which S3 would serve as a file", () => {
+		expect(check({ files: [...ok, { path: '_headers', size: 10 }] }).errors[0]).toMatch(/_headers file/);
 	});
 
-	it('only warns when _headers is absent', () => {
-		const r = check({ files: ok.filter((f) => f.path !== '_headers') });
+	it('only warns when the sign-in page is absent', () => {
+		const r = check({ files: ok.filter((f) => f.path !== 'signin/index.html') });
 		expect(r.errors).toEqual([]);
-		expect(r.warnings).toEqual([expect.stringContaining('no _headers file')]);
+		expect(r.warnings).toEqual([expect.stringContaining('no signin/index.html')]);
+	});
+
+	it('takes no size or file-count limit from Cloudflare Pages any more', () => {
+		const many = Array.from({ length: 20_001 }, (_, i) => ({ path: `f/${i}`, size: 1 }));
+		expect(check({ files: [...ok, ...many, { path: 'data/big.json', size: 26 * 1024 * 1024 }] }).errors).toEqual([]);
 	});
 
 	it('reports every problem at once', () => {
-		const r = checkBuild({ files: [{ path: 'tiles/x', size: MAX_FILE_BYTES + 1 }], indexJson: null, mode: 'real', hasMiddleware: false });
-		expect(r.errors).toHaveLength(4);
-	});
-});
-
-describe('checkFunctions', () => {
-	const gate = { routePath: '/', mountPath: '/', method: '', middleware: ['_middleware.ts:onRequest'] };
-	const api = { routePath: '/api/me', mountPath: '/api', method: 'GET', module: ['api/me.ts:onRequestGet'] };
-	const all = { include: ['/*'], exclude: [] as string[] };
-
-	it('passes a middleware at / that runs on every path', () => {
-		expect(checkFunctions({ routes: [api, gate] }, all)).toEqual([]);
-	});
-
-	it('refuses functions with no middleware at /', () => {
-		expect(checkFunctions({ routes: [api] }, all)).toEqual([expect.stringContaining('no _middleware.ts:onRequest at /')]);
-		expect(checkFunctions({ routes: [api, { ...gate, routePath: '/api' }] }, all)).toHaveLength(1);
-	});
-
-	it('refuses routes that leave any path out of the functions', () => {
-		expect(checkFunctions({ routes: [gate] }, { include: ['/api/*'], exclude: [] })).toEqual(['The functions run only on /api/*, not on every path (/*).']);
-		expect(checkFunctions({ routes: [gate] }, { include: ['/*'], exclude: ['/data/*'] })).toEqual([
-			'The functions skip /data/*, which would be served without the list check.'
-		]);
+		const r = checkBuild({ files: [{ path: 'tiles/x', size: 1 }, { path: '_headers', size: 1 }], indexJson: null, mode: 'real' });
+		expect(r.errors).toHaveLength(3);
 	});
 });
 
@@ -120,15 +84,13 @@ describe('the command line', () => {
 	function tree(index: string) {
 		const root = mkdtempSync(join(tmpdir(), 'ewr-deploy-'));
 		dirs.push(root);
-		mkdirSync(join(root, 'functions'));
-		writeFileSync(join(root, 'functions/_middleware.ts'), '');
 		mkdirSync(join(root, 'build/data'), { recursive: true });
 		writeFileSync(join(root, 'build/index.html'), 'x');
 		writeFileSync(join(root, 'build/data/index.json'), index);
 		return root;
 	}
 	const run = (root: string, mode: string) => {
-		const r = spawnSync('node', [join(import.meta.dirname, 'deploy-check.mjs'), join(root, 'build'), mode, root], { encoding: 'utf8' });
+		const r = spawnSync('node', [join(import.meta.dirname, 'deploy-check.mjs'), join(root, 'build'), mode], { encoding: 'utf8' });
 		return { status: r.status, out: r.stdout + r.stderr };
 	};
 
@@ -137,16 +99,21 @@ describe('the command line', () => {
 		expect(listFiles(join(root, 'build')).map((f) => f.path).sort()).toEqual(['data/index.json', 'index.html']);
 	});
 
-	it('passes a matching build with a summary and the _headers warning', () => {
+	it('passes a matching build with a summary and the sign-in warning', () => {
 		const r = run(tree(SAMPLE), 'sample');
 		expect(r.status).toBe(0);
 		expect(r.out).toContain('Build: 2 files');
-		expect(r.out).toContain('Warning: The build has no _headers file');
+		expect(r.out).toContain('Warning: The build has no signin/index.html');
 	});
 
 	it('exits 1 on a mismatch, saying why', () => {
 		const r = run(tree(SAMPLE), 'real');
 		expect(r.status).toBe(1);
 		expect(r.out).toContain('Refused: The build holds the synthetic sample');
+	});
+
+	it('exits 2 without a mode', () => {
+		const r = spawnSync('node', [join(import.meta.dirname, 'deploy-check.mjs'), 'build'], { encoding: 'utf8' });
+		expect(r.status).toBe(2);
 	});
 });

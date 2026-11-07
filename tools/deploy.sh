@@ -1,22 +1,31 @@
 #!/usr/bin/env bash
-# Deploys the site to Cloudflare Pages, project ewr-compliance, production branch main, from this
-# workstation. Never from CI: CI has no access to the real data, and must not have.
+# Deploys the site to its private S3 bucket behind CloudFront (infra/site.tf), from this workstation.
+# Never from CI: CI has no access to the real data, and its deploy role cannot write the bucket.
 #
 #   tools/deploy.sh sample [--dry-run]          the synthetic sample, to test the site and its gate
 #   tools/deploy.sh real   [--dry-run] [--yes]  the real data, from ../ewr-compliance-private or EWR_PRIVATE_DIR
 #
 # It builds from a clean, temporary git worktree of freshly fetched origin/main, never from this
 # working tree, which may hold uncommitted work or the wrong static/data. The build has no base map
-# and no BASE_PATH. tools/deploy-check.mjs then refuses a build that is too big for Pages, holds the
-# wrong data, carries tiles/, or whose functions would not put _middleware in front of every path.
+# and no BASE_PATH. tools/deploy-check.mjs then refuses a build that holds the wrong data or carries
+# tiles/.
 #
-# --dry-run does all of that and stops before the upload, saying what would go up. It needs no
-# Cloudflare login. A real upload uses wrangler's own login (`pnpm wrangler login`, by the operator):
-# this script never reads, prints or passes a token.
+# The upload is `aws s3 sync` in two cache passes, then a CloudFront invalidation:
+#   1. _app/immutable/*: named by their hash, so `public, max-age=31536000, immutable`.
+#   2. everything else, with --delete: `private, no-cache`, because the pages and data keep their
+#      names between builds, sit behind the sign-in and may be real.
+# *.mjs (the map's worker) goes up as text/javascript, which the browser needs for a module worker.
+# The previous build's chunks are deleted after pass 2, so no page ever names a chunk already gone.
+#
+# The bucket and distribution come from `terraform output` in infra/ (which needs `terraform init
+# -backend-config=backend.config` done there), or from EWR_SITE_BUCKET and EWR_DISTRIBUTION_ID.
+# AWS access is the operator's SSO profile, ewr-compliance by default (AWS_PROFILE overrides): this
+# script never reads, prints or passes a credential. --dry-run does everything but the upload and the
+# invalidation, and needs no AWS login when both values are given in the environment.
 set -euo pipefail
 
 PROJECT=ewr-compliance
-BRANCH=main
+PROFILE=${AWS_PROFILE:-ewr-compliance}
 
 usage() {
 	echo "Usage: tools/deploy.sh sample|real [--dry-run] [--yes]" >&2
@@ -40,8 +49,6 @@ done
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(cd "$here/.." && pwd)
 check="$here/deploy-check.mjs"
-# Wrangler's anonymous usage metrics stay off for every call here.
-export WRANGLER_SEND_METRICS=false
 
 if [ "$mode" = real ]; then
 	source_dir=${EWR_PRIVATE_DIR:-$root/../ewr-compliance-private}
@@ -51,6 +58,22 @@ if [ "$mode" = real ]; then
 	fi
 	private=$(cd "$source_dir" && pwd)
 fi
+
+# The target, before any build, so a missing one fails fast.
+tf_output() {
+	AWS_PROFILE=$PROFILE terraform -chdir="$root/infra" output -raw "$1" 2>/dev/null || true
+}
+bucket=${EWR_SITE_BUCKET:-$(tf_output site_bucket)}
+distribution=${EWR_DISTRIBUTION_ID:-$(tf_output distribution_id)}
+if [ -z "$bucket" ] || [ -z "$distribution" ] || [ "$bucket" = null ] || [ "$distribution" = null ]; then
+	echo "No site bucket or distribution. Apply infra/ with site_enabled = true and run this where" >&2
+	echo "'terraform -chdir=infra output site_bucket' works, or set EWR_SITE_BUCKET and EWR_DISTRIBUTION_ID." >&2
+	exit 1
+fi
+case $bucket in
+	"$PROJECT"-site-*) ;;
+	*) echo "Refusing bucket '$bucket': not this project's site bucket ($PROJECT-site-<account>)." >&2; exit 1 ;;
+esac
 
 echo "Fetching origin/main."
 git -C "$root" fetch --quiet origin main
@@ -90,37 +113,41 @@ env -u BASE_PATH VITE_TILES_URL= VITE_TILES_GLYPHS_URL= pnpm --silent build >"$w
 	exit 1
 }
 
-node "$check" build "$mode" "$tree"
+node "$check" build "$mode"
 
-# The same compile `pages deploy` runs on functions/ from the directory it is run in, done here first
-# so a dry run shows what the gate would be. Local only: no login.
-pnpm wrangler pages functions build functions --outdir "$work/functions" \
-	--output-config-path "$work/functions-config.json" --output-routes-path "$work/functions-routes.json" \
-	>"$work/functions.log" 2>&1 || {
-	cat "$work/functions.log" >&2
-	echo "functions/ did not compile." >&2
-	exit 1
-}
-node "$check" functions "$work/functions-config.json" "$work/functions-routes.json"
+# *.mjs goes up in passes of its own, with its type: sync skips a file already uploaded, so a later
+# pass could not correct the type of one an earlier pass sent.
+immutable=(aws s3 sync build/_app/immutable "s3://$bucket/_app/immutable" --profile "$PROFILE"
+	--cache-control "public, max-age=31536000, immutable" --exclude "*.mjs")
+immutable_mjs=(aws s3 sync build/_app/immutable "s3://$bucket/_app/immutable" --profile "$PROFILE"
+	--cache-control "public, max-age=31536000, immutable" --exclude "*" --include "*.mjs" --content-type "text/javascript")
+rest=(aws s3 sync build "s3://$bucket" --profile "$PROFILE" --cache-control "private, no-cache"
+	--exclude "_app/immutable/*" --exclude "*.mjs" --delete)
+rest_mjs=(aws s3 sync build "s3://$bucket" --profile "$PROFILE" --cache-control "private, no-cache"
+	--exclude "*" --include "*.mjs" --exclude "_app/immutable/*" --content-type "text/javascript")
+# Last, once no page names them: the previous build's chunks. Nothing is uploaded here, since every
+# file is already up from the passes above.
+prune=(aws s3 sync build/_app/immutable "s3://$bucket/_app/immutable" --profile "$PROFILE" --delete)
+invalidate=(aws cloudfront create-invalidation --profile "$PROFILE" --distribution-id "$distribution" --paths "/*")
 
 echo
-echo "Going up to Cloudflare Pages project $PROJECT, branch $BRANCH (production):"
+echo "Going up to s3://$bucket, distribution $distribution:"
 echo "  Mode:    $mode"
 echo "  Commit:  $sha  $subject"
 [ "$mode" = real ] && echo "  Data:    $private at $private_sha"
-echo "  Command: pnpm wrangler pages deploy build --project-name $PROJECT --branch $BRANCH --commit-hash $sha"
+echo "  Profile: $PROFILE"
+echo "  Pass 1:  ${immutable[*]}"
+echo "           ${immutable_mjs[*]}"
+echo "  Pass 2:  ${rest[*]}"
+echo "           ${rest_mjs[*]}"
+echo "  Prune:   ${prune[*]}"
+echo "  Then:    ${invalidate[*]}"
 
 if [ "$dry_run" = 1 ]; then
 	echo
 	echo "Dry run: nothing was uploaded."
 	exit 0
 fi
-
-echo
-echo "Before uploading, the project's settings must hold (docs/hosting.md § Access control):"
-echo "  Settings > Runtime > Fail open / closed is Fail closed, in Production and in Preview."
-echo "  After this deploy, if it changed functions/, the data or a setting, delete the superseded"
-echo "  deployments: each stays live at its <hash>.$PROJECT.pages.dev URL with its own copy."
 
 if [ "$mode" = real ] && [ "$yes" = 0 ]; then
 	echo
@@ -138,19 +165,14 @@ if [ "$mode" = real ] && [ "$yes" = 0 ]; then
 	fi
 fi
 
-pnpm wrangler pages deploy build --project-name "$PROJECT" --branch "$BRANCH" \
-	--commit-hash "$sha" --commit-message "$subject" 2>&1 | tee "$work/deploy.log"
+# The new chunks are in place before any page that names them, and the old ones go only after.
+"${immutable[@]}"
+"${immutable_mjs[@]}"
+"${rest[@]}"
+"${rest_mjs[@]}"
+"${prune[@]}"
+"${invalidate[@]}" >/dev/null
 
 echo
-if grep -q 'Uploading Functions bundle' "$work/deploy.log"; then
-	echo "Wrangler uploaded the Functions bundle with this deployment."
-else
-	echo "WARNING: wrangler did not report uploading the Functions bundle. This deployment may have no list check." >&2
-	echo "Check its Functions tab now. If _middleware is not listed, roll production back to the previous" >&2
-	echo "deployment in the dashboard, then DELETE this one: a rollback leaves it live at its <hash> URL." >&2
-	echo "Its id is in the deployment list (pnpm wrangler pages deployment list --project-name $PROJECT):" >&2
-	echo "  pnpm wrangler pages deployment delete <id> --project-name $PROJECT" >&2
-	exit 1
-fi
-echo "Now, in the dashboard, check that this deployment's Functions tab lists _middleware,"
-echo "and run the checks in docs/hosting.md § Access control (\"Before going live\") from a browser that is not signed in."
+echo "Uploaded and invalidated. From a browser that is not signed in, check that data/index.json and"
+echo "nodes/ are refused (infra/README.md, \"After a deploy\")."
