@@ -2,7 +2,7 @@
 
 Guidance for Claude Code working in this repository. Keep this file short — it loads into every conversation.
 
-EWR Compliance Measurement compares observed river flows with Environmental Water Requirements at the EWR nodes and sites of the Berg, Breede-Overberg, Gouritz and Olifants-Doorn basins. It opens on South Africa's Water Management Areas of 2023, each with its own map. It is a static, client-only SvelteKit 3 app (`adapter-static`, `ssr = false`) with Svelte 5 runes and TypeScript. There is no server, database or deploy target. Layout and conventions: `docs/architecture.md`.
+EWR Compliance Measurement compares observed river flows with Environmental Water Requirements at the EWR nodes and sites of the Berg, Breede-Overberg, Gouritz and Olifants-Doorn basins. It opens on South Africa's Water Management Areas of 2023, each with its own map. It is a static SvelteKit 3 app (`adapter-static`, `ssr = false`) with Svelte 5 runes and TypeScript. Its one server part is `functions/`, Cloudflare Pages Functions that check every request against a list of users kept in Cloudflare D1, which the site's admins manage. There is no deploy target yet. Layout and conventions: `docs/architecture.md`.
 
 This repo is public and holds the code. The real data, the client's brief and the tests pinned to them are in the private repo `ewr-compliance-private`, a sibling folder. This repo runs on a synthetic sample.
 
@@ -15,10 +15,10 @@ pnpm 10 and Node 24. One package, no workspace.
 | `pnpm install --frozen-lockfile` | Install |
 | `pnpm dev` | Dev server on port 7790 |
 | `pnpm build`, `pnpm preview` | Static build into `build/`, and serve it on port 7790 |
-| `pnpm check` | `svelte-kit sync` and `svelte-check` |
+| `pnpm check` | `svelte-kit sync`, `svelte-check`, and `tsc` over `functions/` |
 | `pnpm data:sample` | Copy the synthetic sample to `static/data`. Run it first on a fresh clone. Refuses to replace real data without `--force` |
 | `pnpm data:private` | Copy the real data and its tests in from the private repo (`EWR_PRIVATE_DIR` overrides the folder) |
-| `pnpm test`, `pnpm test:watch` | Vitest (`src/**/*.test.ts`, beside each module), on the sample |
+| `pnpm test`, `pnpm test:watch` | Vitest (`src/**/*.test.ts` and `functions/**/*.test.ts`, beside each module), on the sample |
 | `pnpm test:e2e` | Playwright (`e2e/`), on the sample. Needs `pnpm data:sample` |
 | `pnpm test:private` | `pnpm data:private`, then Vitest and Playwright over the real data |
 | `python3 ../ewr-compliance-private/tools/build_gauges.py` | Rebuild `gauges.json` and `flows-<station>.json`, the node-to-gauge links and gauge records, in the private repo. Arguments: `README.md` § Rebuild the data |
@@ -29,7 +29,7 @@ pnpm 10 and Node 24. One package, no workspace.
 
 ## Hard rules
 
-1. **Client-only.** No server code, SSR adapter, server load function or API key. A flow file a user loads stays in the browser: nothing in `src/` sends it anywhere.
+1. **Client-only, except `functions/`.** `src/` has no server code, SSR adapter, server load function or API key. The only server code is `functions/`: the access check in front of the site and the user list behind it, and nothing else goes there. A flow file a user loads stays in the browser: nothing sends it anywhere, `functions/` included.
 2. **Everything here is public.** No secret in any file, encrypted or not, and no personal data. No client material either: no real flow or EWR value, node code, site, file name or quoted brief, in code, comments, tests or docs. Fixtures added to tests are synthetic. Real values go in the private repo.
 3. **`static/data` is generated and ignored by git.** Never edit it by hand and never force-add it: it may hold real data. Real data is rebuilt into the private repo through `tools/`, and `pnpm test:private` is what can fail for a real reason. The sample comes from `e2e/fixtures/make-sample-data.mjs`: change that, rerun it, and update the specs' hand arithmetic.
 4. **Numbers on screen come from `src/lib/ewr`,** never recomputed in a component. `parsers.ts` and `resolve.ts` stay pure: no DOM, no fetch.

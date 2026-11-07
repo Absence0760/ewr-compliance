@@ -27,8 +27,9 @@ Walk these in order. Stop at about five findings; quality over quantity.
 
 ### Project invariants
 
-**Client-only** (rule 1):
-- No server code, SSR adapter or `+page.server.ts`, no API key, no secret-bearing call from the browser.
+**Client-only, except `functions/`** (rule 1):
+- No server code in `src/`, no SSR adapter or `+page.server.ts`, no API key, no secret-bearing call from the browser.
+- `functions/` is the access check and user list only. Anything else added there is Critical. A rule in `functions/lib/users.ts` changed without its test in `users.test.ts` is Major, and so is a request path that reaches `next()` without passing `gate`.
 - A flow file a user loads is never sent anywhere. A new `fetch` needs a look: the only ones expected read `static/data` and the operator-configured real-time source. A new origin is Critical unless the task asked for it.
 
 **Data** (rule 3):

@@ -1,6 +1,6 @@
 # Hosting
 
-The app is a folder of static files. Nothing here deploys it, and no host has been chosen.
+The app is a folder of static files, plus `functions/`, the access check that Cloudflare Pages runs in front of them. Nothing here deploys it yet.
 
 ## The data is the decision
 
@@ -12,28 +12,49 @@ CI builds the sample only and has no access to the private repo, so a real build
 
 ## Access control
 
-The decision: a site with the real data is open only to people on an allow-list of email addresses. Nobody else can load any of its files.
+The decision: only people on the site's list of users can load any of its files. The list is kept by the site's admins, in the app. The operator adds the first admin once; after that, admins add and remove users and make other admins. Design: `docs/architecture.md` § Users and access.
 
-The access is checked by the host, in front of the files, and not by the app:
+The host is Cloudflare Pages, because the check runs there, in front of every file:
 
-- A login in the app would not protect anything. Every file in `data/` can be fetched directly, so the check has to cover each request, `data/` included, and only the host sees each request.
-- The app has nothing a person owns on a server. Choices are kept in the browser's `localStorage`, and a loaded flow file stays in the browser. An account would only decide who can open the site.
-- Accounts in the app need a server, for passwords and sessions, and the app has none (CLAUDE.md, hard rule 1).
+- **Cloudflare Access** signs people in with a one-time code sent to their email address, so nobody has a password and none is stored. Its policy lets in any address that completes the code. It proves who someone is, not whether they may come in.
+- **`functions/_middleware.ts`** runs before every request, `data/` included. It verifies the Access token and looks the address up in the list. Anyone not on it gets a page saying so, and an admin removing someone takes effect on that person's next request, not when their sign-in expires.
+- **Cloudflare D1** holds the list and a log of every change, with who made it. It names people, so it is never copied into a repo.
 
-What the host needs:
+Settings the Pages project needs (dashboard, Settings):
 
-- An access gateway in front of the whole site, with a policy that allows the listed email addresses and refuses everyone else.
-- Sign-in with a one-time code sent to the address, so nobody has a password to keep and none is stored. Signing in through an organisation's Microsoft or Google account can come later, through the same gateway.
-- The list kept by the host's operator, in the gateway's settings. It names people, so it is not kept in this repo.
-- A session of a working day or so, after which the person signs in again.
+| Setting | Value |
+|---|---|
+| Variable `ACCESS_TEAM_DOMAIN` | The Zero Trust team domain, `<team>.cloudflareaccess.com` |
+| Variable `ACCESS_AUD` | The Application Audience (AUD) tags of the site's two Access applications, the site and its deployment previews, separated by a comma |
+| D1 binding `USERS_DB` | The user database, with `migrations/0001_users.sql` applied |
+| Functions failure mode | **Fail closed.** Fail open serves the files without the check once the free daily limit is used up |
 
-Cloudflare Access does all of this, free for up to 50 people, with no change to the app. On AWS, CloudFront with a Lambda@Edge check against Cognito does the same, with more to maintain. Any host whose gateway checks every request is fine. A password page that only hides `index.html` is not.
+Set the variables and the binding for both of the project's environments, Production and Preview: Pages keeps them apart, and a preview without them refuses everyone. Without either variable, or the binding, every request is refused with "not set up". If Access's keys cannot be fetched, requests are refused with "Sign-in unavailable" until they can. The first admin, once, by the operator:
 
-The gateway is on the site's own address, so the content security policy is unchanged. It sets a sign-in cookie of its own. That cookie is strictly necessary to reach the site, so it needs no consent banner. The app itself still sets no cookie.
+```
+pnpm wrangler d1 execute ewr-compliance-users --remote --command "INSERT INTO users (email, admin, added_by, added_at) VALUES ('<address>', 1, 'operator', datetime('now'))"
+```
 
-Before going live, check from a browser that is not signed in that `data/index.json` gets the sign-in page and not the data, and that someone off the list cannot get past the sign-in.
+The address in lowercase: the table refuses any other, because a mixed-case address would never match a sign-in. A typo there locks nobody in or out for good: run it again with the right address.
 
-Accounts in the app, kept on a server, would be needed only for features the brief does not ask for: choices that follow a person between machines, a record of who did what, or different rights for different people. Any of them means adding a server, and changing hard rule 1 first.
+The sign-in cookie is Access's and strictly necessary to reach the site, so it needs no consent banner. The app itself still sets no cookie. The list is personal data the operator keeps for the client: email addresses, who added whom and when.
+
+Before going live, check from a browser that is not signed in that `data/index.json` gets the sign-in page, that an address not on the list gets "Not on the list" after signing in, for `data/index.json` as well as the home page, and that removing a user shuts them out on their next request.
+
+### Cost
+
+At this scale it is free: checked on 2026-11-06 against Cloudflare's pricing pages.
+
+| Part | Free allowance | This site |
+|---|---|---|
+| Pages | Static files free and unlimited, 500 builds a month, 20,000 files of up to 25 MiB | About 1,000 files and 30 MB |
+| Pages Functions | 100,000 requests a day, 10 ms CPU each. Every file is a request, because the middleware runs on all of them | About 30 to 60 requests a page load: 20 people loading it 10 times a day is about 12,000 |
+| D1 | 5 million rows read and 100,000 written a day, 5 GB | One row read a request |
+| Zero Trust (Access) | Up to 50 users. A card is needed to activate the Free plan, and is not charged | A user takes a seat when they sign in, on the list or not. Seats can be set to expire |
+
+The first cost, if one ever comes, is Workers Paid at US$5 a month for the account, which lifts the daily request limit to 10 million a month. More than 50 people signing in moves Zero Trust to US$7 a user a month. A custom domain needs its zone on Cloudflare, free on the Free plan, plus the domain's own registration.
+
+Because Access lets in any address that completes the code, someone off the list can use up a seat by signing in. They see only "Not on the list". If seats ever run short, shorten the seat expiry, or keep the Access policy in step with the list.
 
 ## Build
 
@@ -47,7 +68,9 @@ pnpm build
 
 Use `pnpm data:sample` in place of `pnpm data:private` for a trial build. With neither, the build still succeeds but the app cannot start, because it needs `data/index.json`.
 
-Upload the contents of `build/`, not the folder itself. That is about 30 MB with the real data and the rivers, or about 295 MB with the base map.
+On Cloudflare Pages, deploy from the repo's root with `pnpm wrangler pages deploy build --project-name ewr-compliance --branch main`, so `functions/` goes up with the files. **A deploy without `functions/` has no list check, and anyone who completes Access's code gets in.** After each deploy, check that its Functions tab lists `_middleware`.
+
+Elsewhere, upload the contents of `build/`, not the folder itself. That is about 30 MB with the real data and the rivers, or about 295 MB with the base map.
 
 | Build setting | Default | Purpose |
 |---|---|---|

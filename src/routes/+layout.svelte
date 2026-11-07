@@ -4,16 +4,19 @@
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { app } from '#lib/state/app.svelte.ts';
+	import { session } from '#lib/state/session.svelte.ts';
 	import FileViewer from '#lib/components/viewer/FileViewer.svelte';
 	import { wmaBySlug } from '#lib/components/map/wma.ts';
 	import type { EcBasis } from '#lib/ewr/types.ts';
 
 	let { children } = $props();
-	const nav = [
+	/** Users is offered to admins only, on a host with a user list. */
+	const nav = $derived([
 		{ href: resolve('/'), label: 'Map and compliance' },
 		{ href: resolve('nodes/'), label: 'Nodes and ECs' },
-		{ href: resolve('notes/'), label: 'Method and data notes' }
-	];
+		{ href: resolve('notes/'), label: 'Method and data notes' },
+		...(session.me?.admin ? [{ href: resolve('users/'), label: 'Users' }] : [])
+	]);
 	const home = resolve('/');
 	/** A WMA's map is part of the map, under its first link. */
 	const inWma = $derived(page.url.pathname.startsWith(`${home.replace(/\/$/, '')}/wma/`));
@@ -22,7 +25,10 @@
 	const wmaName = $derived(inWma ? wmaBySlug(page.params.wma ?? '')?.name : undefined);
 	/** The home page's banner carries the title, as its h1, so the bar leaves it out there. */
 	const isHome = $derived(page.url.pathname.replace(/\/$/, '') === home.replace(/\/$/, '') && !page.error);
-	onMount(() => app.load());
+	onMount(() => {
+		void app.load();
+		void session.check();
+	});
 </script>
 
 <svelte:head>
@@ -39,6 +45,9 @@
 			<a href={n.href} class:on={here(n.href)} aria-current={here(n.href) ? 'page' : undefined}>{n.label}</a>
 		{/each}
 	</nav>
+	{#if session.me}
+		<span class="muted signed">Signed in as {session.me.email}</span>
+	{/if}
 	<label class="inline">
 		EC to use
 		<select value={app.ecBasis} onchange={(e) => app.setEcBasis(e.currentTarget.value as EcBasis)}>

@@ -13,6 +13,12 @@ export const DWS = /^https:\/\/services[38]\.arcgis\.com\//;
 /** The path of the made-up flow API. Its failures are what the API tests are for, so the watch lets them by. */
 export const API_STUB = '/stub-api/';
 
+/**
+ * The host's user API (functions/), which the test servers do not have. By default it answers 404, as a
+ * host with no user list does, and the watch lets that by. users.spec.ts answers for it.
+ */
+export const USER_API = /\/api\/(me|users)(\/|$)/;
+
 /** The map of the WMA the sample's basins are in, which most specs work on. */
 export const MAP = 'wma/breede-olifants/';
 
@@ -66,8 +72,9 @@ export const test = base.extend<{ gaugeAt: [number, number]; watch: void }>({
 								: boundary({ QUATERNARY: 'Z80D' })
 				})
 			);
+			await page.route(USER_API, (route) => route.fulfill({ status: 404, body: 'Not found' }));
 			page.on('console', (m) => {
-				if (m.location().url.includes(API_STUB)) return;
+				if (m.location().url.includes(API_STUB) || USER_API.test(m.location().url)) return;
 				if ((m.type() === 'error' || m.type() === 'warning') && !KNOWN_NOISE.some((re) => re.test(m.text()))) {
 					trouble.push(`console.${m.type()}: ${m.text()}`);
 				}
@@ -77,7 +84,7 @@ export const test = base.extend<{ gaugeAt: [number, number]; watch: void }>({
 				if (/^https?:/.test(r.url()) && !r.url().startsWith(baseURL!) && !DWS.test(r.url())) trouble.push(`left the site: ${r.url()}`);
 			});
 			page.on('response', (r) => {
-				if (r.status() >= 400 && !r.url().includes(API_STUB)) trouble.push(`HTTP ${r.status()}: ${r.url()}`);
+				if (r.status() >= 400 && !r.url().includes(API_STUB) && !USER_API.test(r.url())) trouble.push(`HTTP ${r.status()}: ${r.url()}`);
 			});
 			await use();
 			expect(trouble).toEqual([]);

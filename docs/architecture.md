@@ -1,7 +1,8 @@
 # Architecture
 
-A client-only SvelteKit 3 app (`adapter-static`, `ssr = false`) with Svelte 5 runes and TypeScript.
-There is no server: flow files stay in the browser, and everything else is static JSON in `static/data`.
+A static SvelteKit 3 app (`adapter-static`, `ssr = false`) with Svelte 5 runes and TypeScript.
+Flow files stay in the browser, and everything else is static JSON in `static/data`. The one server
+part is `functions/`, which decides who may open the site: § Users and access.
 
 ## Data tiers
 
@@ -46,6 +47,21 @@ Observed flow comes from a linked gauge, the DWS API once it exists, or a file. 
 - A gauge's 12-minute readings can be drawn over its daily flow, a month at a time, in the Real Time Comparison and in the gauge's own panel ("Show 12-minute readings", off by default). The gauge panel offers the switch only for a gauge that has readings.
 - A linked node starts on its gauge in each comparison the gauge has data for. A file already loaded stays in use until the user picks the gauge in Data source. Under a gauge the Real Time Comparison shows one month at a time, opening on the latest month with most of its days measured.
 - A gauge opens from the map or from its node. The map's gauges are the live layer, so a gauge with a record can only be clicked while that layer has it. The node route always works.
+
+## Users and access
+
+On the host, Cloudflare Pages, nobody reaches any file of the site, `data/` included, unless two things hold. Cloudflare Access has signed them in, with a one-time code sent to their email address, and that address is on the site's list of users. Access proves who someone is; the list, which the site's admins keep, decides whether they may come in. Hosting and setting it up: `docs/hosting.md` § Access control.
+
+| Path | Role |
+|---|---|
+| `functions/_middleware.ts` | Runs before every request. Verifies the Access token (`lib/access.ts`: RS256 with Access's published keys, cached for an hour and fetched again for an unknown key id at most once a minute) and looks the address up in the list (`lib/gate.ts`). Refuses with a page, or JSON for the app's own calls. A change (POST, PATCH, DELETE) must come from the site's own origin. |
+| `functions/lib/users.ts` | The rules. Only an admin lists, adds, removes, or makes and unmakes admins. Nobody removes themself or their own admin rights. Addresses are kept trimmed and lowercase. Every change is logged in `audit`. |
+| `functions/lib/d1.ts`, `migrations/` | The list in Cloudflare D1. The last-admin rule is in each SQL statement, so two admins acting at once cannot leave the site with none. A change and its audit row go in one batch, a transaction. The table refuses an address that is not lowercase and trimmed. |
+| `functions/api/` | `me` (who is signed in), `users` (list, add) and `users/<email>` (make or unmake admin, remove), JSON over `fetch`. |
+| `src/lib/users/api.ts`, `src/lib/state/session.svelte.ts` | The app asks `api/me` once at start. Every call sends `X-Requested-With`, so an expired sign-in is a JSON 401 and not a sign-in page; a 401 from `api/me` sets `session.expired`, and the Users page then asks for a reload instead of saying there is no list. |
+| `src/lib/components/users/UsersAdmin.svelte`, `src/routes/users/` | The Users page, offered in the nav to admins only. |
+
+A copy served without `functions/`, such as `pnpm dev`, `pnpm preview` or the e2e servers, has no list: `api/me` is not found, the app shows no Users link, and everything else works as before. The e2e fixture answers `api/` with 404 by default, and `users.spec.ts` stands in for a host with a list. The first admin is added by the operator, once, straight into D1; after that, admins add everyone else. The list holds email addresses, so it lives only in D1, never in this repo.
 
 ## Layout
 
