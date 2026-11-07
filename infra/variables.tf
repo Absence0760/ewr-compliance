@@ -311,7 +311,7 @@ variable "dws_enabled" {
 }
 
 variable "dws_schedule_enabled" {
-  description = "Turn the daily pull on: the EventBridge rule's state, and the lag alarm with it. Off until the pipeline's code is deployed (H10) and the station list uploaded (H11), so the rule never runs the stub and the lag alarm doesn't fire from the first apply."
+  description = "Turn the daily pull on: the EventBridge rule's state, and the lag alarm with it. Off until the pipeline's code is deployed, the station list uploaded and the backfill done (all H11), so the rule never runs the stub and the lag alarm doesn't fire from the first apply."
   type        = bool
   default     = false
 

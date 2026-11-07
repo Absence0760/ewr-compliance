@@ -8,7 +8,7 @@ aws_region  = "af-south-1"
 github_repo = "OWNER/ewr-compliance"
 
 # The delegated child zone the bootstrap made (create_subdomain = true):
-#   aws route53 list-hosted-zones-by-name --dns-name <domain> --profile ewr-compliance
+#   aws route53 list-hosted-zones-by-name --dns-name <domain> --profile ewr-compliance --query 'HostedZones[0].Id' --output text | sed 's#/hostedzone/##'
 domain_name     = "ewr.example.org"
 route53_zone_id = "Z0000000000000000000"
 
@@ -37,5 +37,10 @@ auth_enabled = false
 # cloudfront_signing_key = "2026-11"
 # dmarc_report_email     = "dmarc@example.org"
 
-# P4: more Lambdas CI may update.
-# deploy_lambda_functions = ["ewr-compliance-dws"]
+# P4: the DWS store (dws.tf), H11. Its pipeline is added to the deploy role by
+# itself, like the API, so deploy_lambda_functions stays unset. The daily pull
+# stays off until the pipeline is deployed, the stations are uploaded and the
+# backfill is done. dws_contact is optional: a mailbox DWS can write to.
+dws_enabled          = false
+dws_schedule_enabled = false
+# dws_contact        = "dws-contact@example.org"

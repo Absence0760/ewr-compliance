@@ -65,7 +65,7 @@ If someone is locked out, or has run out of sends, by someone else's attempts ag
 tools/clear-lock
 ```
 
-They need `server/` installed (`cd server && pnpm install --frozen-lockfile`, which needs read access to `auth-kit`) and `terraform -chdir=infra output users_table` to work.
+They need `server/` installed (`cd server && pnpm install --frozen-lockfile`, which needs read access to `auth-kit`) and `AWS_PROFILE=ewr-compliance terraform -chdir=infra output users_table` to work.
 
 ### Personal data
 
@@ -88,16 +88,14 @@ Then take the address off SES's account-level suppression list if it is on it (`
 Needs Node 24 and pnpm 10.
 
 ```
-pnpm install --frozen-lockfile
-pnpm data:private
-pnpm build
+pnpm install --frozen-lockfile && pnpm data:private && pnpm build
 ```
 
 Use `pnpm data:sample` in place of `pnpm data:private` for a trial build. With neither, the build still succeeds but the app cannot start, because it needs `data/index.json`.
 
 Deploy with `tools/deploy.sh sample` (the synthetic sample, to test the site and its gate) or `tools/deploy.sh real` (the real data, from the private repo beside this one or `EWR_PRIVATE_DIR`), from the operator's workstation and never from CI. It builds a clean, temporary worktree of freshly fetched `origin/main`, never the working tree, with no base map and no `BASE_PATH`. Before uploading, `tools/deploy-check.mjs` refuses a build whose data does not match the mode, with no `data/index.json`, with a `tiles/` folder or with a `_headers` file, and warns when there is no `signin/index.html`. A `real` deploy asks for the project name to be typed before uploading, unless given `--yes`.
 
-The upload is `aws s3 sync` with the operator's SSO profile (`ewr-compliance`, or `AWS_PROFILE`), to the bucket and distribution from `terraform output` in `infra/` or from `EWR_SITE_BUCKET` and `EWR_DISTRIBUTION_ID`. It goes in two cache passes: `_app/immutable/` as `public, max-age=31536000, immutable`, then everything else, with `--delete`, as `private, no-cache`. `.mjs` files go up as `text/javascript`. The previous build's chunks are deleted only after the pages that named them are replaced, then the whole distribution is invalidated. The script never reads or prints a credential. `--dry-run` builds and checks, prints the commands, and stops; it needs no AWS login when both environment variables are set. After a deploy, run the checks in `infra/README.md` § After a deploy.
+The upload is `aws s3 sync` with the operator's SSO profile (`ewr-compliance`, or `AWS_PROFILE`), to the bucket and distribution from `terraform output` in `infra/` or from `EWR_SITE_BUCKET` and `EWR_DISTRIBUTION_ID`. It goes in two cache passes: `_app/immutable/` as `public, max-age=31536000, immutable`, then everything else, with `--delete`, as `private, no-cache`. `.mjs` files go up as `text/javascript`. The previous build's chunks are deleted only after the pages that named them are replaced, then the whole distribution is invalidated. The script never reads or prints a credential. `--dry-run` builds and checks, prints the commands, and stops; it needs no AWS login when both environment variables are set, and for `real` also `EWR_DWS_BUCKET`, since it checks the station list's upload too. `tools/dws-stations.sh` does nothing when `terraform output dws_bucket` reads null (`dws_enabled` off), and stops with an error when it can't read the output at all (an expired SSO session, no `terraform init`), so a real deploy never skips the station list unannounced. After a deploy, run the checks in `infra/README.md` § After a deploy.
 
 Elsewhere, upload the contents of `build/`, not the folder itself. That is about 30 MB with the real data and the rivers, or about 295 MB with the base map.
 
@@ -210,14 +208,15 @@ The operator's steps from nothing to live, in the order they must run. The numbe
 |---|---|---|
 | H0 | Read access to `auth-kit`: the fine-grained token as the Actions and Dependabot secret `AUTH_KIT_READ_TOKEN`. Needed before CI can build `server/` and before H9 | all off |
 | H1 | `infra-secrets/ewr-compliance/bootstrap.tfvars`, committed and pushed | — |
+| before H2 | Once a workstation: the `mgmt` and `dns-parent` SSO profiles in `~/.aws/config` (`aws configure sso`, Runbook D), `dns-parent` on the parent zone's account | — |
 | H2 | `aws sso login` as `mgmt` and `dns-parent` | — |
-| H3 | `new-project-account.sh ewr-compliance`, `--plan` first (Runbook A) | — |
-| H4 | Enable af-south-1 for the account; wait for `ENABLED` | — |
-| H5 | Identity Center assignment, the `ewr-compliance` SSO profile, IAM access to billing | — |
-| H6 | `backend.config`, `prod.tfvars`, `init`, `plan`, `apply` (P1). Confirm both SNS subscription emails; both budgets listed | all off |
-| H7 | The CloudFront key pair: public key in `cloudfront_public_keys`, apply, private key into its secret from the file. `tools/deploy.sh sample`, then § After a deploy in `infra/README.md`; note whether the edge function or the signature check runs first. Shred the key file | `site_enabled = true` |
+| H3 | `new-project-account.sh ewr-compliance`, `--plan` first (Runbook A). Its stage 4 creates the `production` environment (H10 needs it) and locks `main` behind pull requests (Q5): to stay direct-to-main, delete that branch protection and keep the environment. The choice is the operator's; record it in the plan | — |
+| H4 | Trusted access for AWS Account Management in the organisation (once), then enable af-south-1 for the account; wait for `ENABLED`. Or enable it from inside the account after H5 | — |
+| H5 | Identity Center assignment, the `ewr-compliance` SSO profile; the root password by reset to H1's `account_email`, root MFA, IAM access to billing | — |
+| H6 | `backend.config`, `prod.tfvars` (the zone ID without its `/hostedzone/` prefix), `init`, `plan`, `apply` (P1). Confirm both SNS subscription emails; both budgets listed. Every command from here on names the `ewr-compliance` profile | all off |
+| H7 | The CloudFront key pair, generated in RAM (`$XDG_RUNTIME_DIR` or `/dev/shm`): public key in `cloudfront_public_keys`, apply, private key into its secret from the file. `tools/deploy.sh sample`, then § After a deploy in `infra/README.md`, whose signed check is the key file's last use before it is deleted; note whether the edge function or the signature check runs first | `site_enabled = true` |
 | H8 | Apply the sign-in, request SES production access, wait for DKIM `SUCCESS` | `auth_enabled = true` |
-| H10 | `production` environment reviewer and tag rules, `AWS_DEPLOY_ROLE_ARN`, `AWS_REGION`, `API_FUNCTION_NAME`; release `api@X.Y.Z` and approve it. `api/me` answers 401 JSON, not 503 | unchanged |
+| H10 | The `production` environment's reviewer (from H3) and tag rules, the secret `AWS_DEPLOY_ROLE_ARN` (H3's summary), `AWS_REGION`, `API_FUNCTION_NAME`; release `api@X.Y.Z` and approve it. `api/me` answers 401 JSON, not 503 | unchanged |
 | H9 | `tools/first-admin` with your address; sign in; add a second admin on the Users page | unchanged |
 | H11 | Apply the store; `DWS_FUNCTION_NAME`, release `pipeline@X.Y.Z`; `tools/dws-stations.sh`; one pull by hand (Q1's test request); the backfill; then the daily schedule. The DWS API key from a file, when it exists | `dws_enabled = true`, then `dws_schedule_enabled = true` once the backfill is done |
 | H12 | Fill the privacy notice's placeholders (private repo `static/data/privacy.md`) and send the client `docs/hosting-consent.md`; keep the reply in the plan | unchanged |
@@ -225,6 +224,12 @@ The operator's steps from nothing to live, in the order they must run. The numbe
 | H14 | Registry rows in `project-mgmt` (`vendor-accounts`, `architecture`) and the `templates` `estate-map` | unchanged |
 
 H10 comes before H9 because the first admin signs in through the deployed API. `deploy_lambda_functions` stays empty: the API and the pipeline are granted by their own flags. `cost_anomaly_threshold_usd` is optional, at any point after H6.
+
+Optional, at any time: this repo is public, so CodeQL (`security.yml`) and the OpenSSF Scorecard (`scorecard.yml`) can run. Each runs only when the repository variable `PUBLIC_REPO` is `true`:
+
+```
+gh variable set PUBLIC_REPO --body true --repo Absence0760/ewr-compliance
+```
 
 ### Go-live checks
 
@@ -239,7 +244,7 @@ After H13, with `<domain>` the site's domain. Say what each showed in the plan.
 - **Past CloudFront.** A request straight to the API's Function URL (Lambda console) gets `404`: the origin secret is checked.
 - **Headers.** `curl -sI https://<domain>/signin/` shows `strict-transport-security`, `x-content-type-options: nosniff`, `content-security-policy: frame-ancestors 'none'` and `referrer-policy: strict-origin-when-cross-origin`; a signed `.mjs` under `_app/immutable/workers/` is `text/javascript` with the immutable `Cache-Control` (`infra/README.md` § After a deploy). The browser console is clean on `/`, a WMA's map and `/nodes/`.
 - **Mail.** `DkimAttributes.Status` reads `SUCCESS` and `ProductionAccessEnabled` is `true` (H8's commands). The code's email arrives from `no-reply@<domain>` and passes DKIM in the receiving mailbox's headers.
-- **Alarms reach the operator.** Every subscription on both topics (`terraform -chdir=infra output alerts_topic_arns`) is confirmed, none `PendingConfirmation`: `aws sns list-subscriptions-by-topic --topic-arn <arn> --region <its region> --profile ewr-compliance --query 'Subscriptions[].SubscriptionArn'`. The alarms in CloudWatch, af-south-1 and us-east-1, are `OK` or `INSUFFICIENT_DATA`, none `ALARM`.
+- **Alarms reach the operator.** Every subscription on both topics (`AWS_PROFILE=ewr-compliance terraform -chdir=infra output alerts_topic_arns`) is confirmed, none `PendingConfirmation`: `aws sns list-subscriptions-by-topic --topic-arn <arn> --region <its region> --profile ewr-compliance --query 'Subscriptions[].SubscriptionArn'`. The alarms in CloudWatch, af-south-1 and us-east-1, are `OK` or `INSUFFICIENT_DATA`, none `ALARM`.
 - **Budgets.** Both budgets are listed (H6's command), and Cost Anomaly Detection is on if `cost_anomaly_threshold_usd` is set.
 - **The privacy notice.** `/privacy/` shows the real notice with no `[` placeholder left, and its date.
 - **The real data.** The map shows the nodes, a node's comparisons draw, and the build `tools/deploy.sh real` uploaded is `origin/main`'s (it prints the commit).
