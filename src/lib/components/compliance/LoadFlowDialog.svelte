@@ -41,10 +41,10 @@
 	});
 
 	const slotOf = (want: FlowWant) => (want === 'monthly' ? app.hist : app.rt);
-	/** A file is reported only while it is what the comparison uses, not a gauge or the API. */
+	/** A file is reported only while it is what the comparison uses, not a gauge or the DWS store. */
 	const fileInUse = (want: FlowWant) => ['sheet', 'text'].includes((want === 'monthly' ? app.histView : app.rtView).source);
 
-	/** Read the file, put it in use in its comparison in place of a gauge or API, and say how it went. */
+	/** Read the file, put it in use in its comparison in place of a gauge or the DWS store, and say how it went. */
 	async function load(want: FlowWant, file: File | undefined) {
 		if (!file) return;
 		const id = ++request[want];
@@ -91,7 +91,7 @@
 		<button type="button" onclick={() => dialog?.close()}>Close</button>
 	</div>
 	<p class="muted intro">
-		Load observed flow from a file, as well as or instead of a linked gauge or the DWS API. The file is read in this browser and is
+		Load observed flow from a file, as well as or instead of a linked gauge or the DWS store. The file is read in this browser and is
 		not sent anywhere. It stays in use as you move between nodes.
 	</p>
 	{#each KINDS as k (k.want)}

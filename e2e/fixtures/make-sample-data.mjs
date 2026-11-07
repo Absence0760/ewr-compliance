@@ -8,10 +8,14 @@
 //
 // It has the same shape as the real static/data: index.json, gauges.json, node-info.json, flows-<station>.json,
 // and for each basin ewr-<slug>.json and series-<slug>.json, each mapping a file name to that file's text.
+//
+// It also writes sample-store/, a DWS store as the host serves it under dws/ (docs/architecture.md § DWS
+// store). That is not copied to static/: support/app.ts serves it to the specs that stand in for a host with one.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const OUT = fileURLToPath(new URL('sample-data/', import.meta.url));
+const STORE_OUT = fileURLToPath(new URL('sample-store/', import.meta.url));
 const MONTHS = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'];
 const BASINS = { Berg: 'berg', Breede: 'breede', Gouritz: 'gouritz', 'Olifants-Doring': 'olifantsdoring' };
 const round3 = (v) => Math.round(v * 1000) / 1000;
@@ -93,13 +97,13 @@ function seriesFile(title) {
 
 /**
  * A DWS monthly volume file in its fixed widths. Hydrological year k = 0 to 2 from 2001/2002, month
- * i = 0 for Oct: (k + 1) × (i + 1) × 0.1 Mm³. Nov of k = 1 is flagged # with a figure, and Jan of
- * k = 2 is flagged with none. A year with a flagged month has its total flagged too.
+ * i = 0 for Oct: (k + 1) × (i + 1) × scale Mm³, scale 0.1 unless given. Nov of k = 1 is flagged # with a
+ * figure, and Jan of k = 2 is flagged with none. A year with a flagged month has its total flagged too.
  */
-function monFile(station) {
+function monFile(station, scale = 0.1) {
 	const cell = (value, flagged) => ` ${(value === null ? '' : value.toFixed(3)).padStart(6)} ${flagged ? '#' : ' '}`;
 	const rows = [0, 1, 2].map((k) => {
-		const values = MONTHS.map((_, i) => round3((k + 1) * (i + 1) * 0.1));
+		const values = MONTHS.map((_, i) => round3((k + 1) * (i + 1) * scale));
 		const row = values.map((v, i) => (k === 1 && i === 1 ? cell(v, true) : k === 2 && i === 3 ? cell(null, true) : cell(v, false)));
 		const total = k === 0 ? `    ${round3(values.reduce((a, b) => a + b, 0)).toFixed(2)}` : '    #';
 		return `${2001 + k}/${2002 + k}${row.join('')}${total}`;
@@ -166,6 +170,35 @@ function tableFile(station) {
 
 /** 12-minute readings for two days of Mar 2003. Day 1 reads 1 and 3, so its mean is 2. Day 2 reads 4. */
 const READINGS = 'Date,Time,Flow (m3/s)\n2003-03-01,00:00:00,1\n2003-03-01,00:12:00,3\n2003-03-02,00:00:00,4\n';
+
+/**
+ * A daily flow file of the DWS store, in the .day layout. Oct 2024 for X0H999: day d × 0.2 m³/s, code 1,
+ * except that day 5 is missing (code 170, no figure) and day 8 has code 91. Sep 2024 for X0H998: days 1 to
+ * 29 at 1.5 m³/s.
+ */
+function storeDayFile(station) {
+	const row = (date, v, code) => `${date}${(v === null ? '' : v.toFixed(3)).padStart(10)}${String(code).padStart(6)}`;
+	const days = station === 'X0H999'
+		? Array.from({ length: 31 }, (_, i) => {
+			const d = i + 1;
+			return row(`202410${String(d).padStart(2, '0')}`, d === 5 ? null : d * 0.2, { 5: 170, 8: 91 }[d] ?? 1);
+		})
+		: Array.from({ length: 29 }, (_, i) => row(`202409${String(i + 1).padStart(2, '0')}`, 1.5, 1));
+	return [
+		'Synthetic daily flow of the DWS store, invented for the tests',
+		'POS.  1-8   = Date of daily flow  CCYYMMDD',
+		'',
+		station,
+		'',
+		'DATE     D AVG F/R  QUAL',
+		...days,
+		'ZZZZZZZZZZZZ',
+		''
+	].join('\r\n');
+}
+
+/** The store's 12-minute readings of X0H999, for two days of Nov 2024. Day 1 reads 2 and 4, so its mean is 3. Day 2 reads 6. */
+const STORE_READINGS = 'Date,Time,Flow (m3/s)\n2024-11-01,00:00:00,2\n2024-11-01,00:12:00,4\n2024-11-02,00:00:00,6\n';
 
 const ruleFile = (node, ec) => `Synthetic rule curve for ${node}, Ecological Category = ${ec}. Not read by the app.\n`;
 
@@ -320,6 +353,22 @@ const FLOWS = {
 	X0H999: { daily: dayFile('X0H999'), readings: READINGS }
 };
 
+// The DWS store. X0H999 is current and has every file: its monthly volumes are the gauge's .mon at twice the
+// scale, with Dec 2001 listed as incomplete. X0H998 is out of date and has daily flow only. X0H997 is linked
+// but not in the store. fetchedAt is in UTC: 04:15Z is 06:15 SAST.
+const STORE_INDEX = {
+	version: 1,
+	stations: {
+		X0H999: { fetchedAt: '2024-11-02T04:15:00Z', covers: { from: '2024-10-01', to: '2024-10-31' }, stale: false, monthly: true },
+		X0H998: { fetchedAt: '2024-09-30T04:00:00Z', covers: { from: '2024-09-01', to: '2024-09-29' }, stale: true }
+	}
+};
+const STORE_FILES = {
+	'flows-X0H999.json': { daily: storeDayFile('X0H999'), readings: STORE_READINGS },
+	'flows-X0H998.json': { daily: storeDayFile('X0H998'), readings: '' },
+	'monthly-X0H999.json': { monthly: monFile('X0H999', 0.2), incomplete: ['2001-12'] }
+};
+
 // What the RQO node workbook records at a node: everything at syt1, one field at syq1, nothing elsewhere.
 const NODE_INFO = {
 	'Breede:syq1': { wqStation: 'Z20 000002' },
@@ -370,3 +419,7 @@ for (const [station, file] of Object.entries(FLOWS)) writeFileSync(`${OUT}flows-
 for (const slug of Object.values(BASINS)) {
 	for (const group of ['ewr', 'series']) writeFileSync(`${OUT}${group}-${slug}.json`, json(STORES[`${group}-${slug}`]));
 }
+
+mkdirSync(STORE_OUT, { recursive: true });
+writeFileSync(`${STORE_OUT}index.json`, json(STORE_INDEX));
+for (const [name, file] of Object.entries(STORE_FILES)) writeFileSync(`${STORE_OUT}${name}`, json(file));

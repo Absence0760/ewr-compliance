@@ -10,8 +10,12 @@ const KNOWN_NOISE = [/GL Driver Message .*Performance/, /GPU stall due to ReadPi
 /** The DWS boundary service and the gauge layer, which the browser calls directly. Tests answer for them. */
 export const DWS = /^https:\/\/services[38]\.arcgis\.com\//;
 
-/** The path of the made-up flow API. Its failures are what the API tests are for, so the watch lets them by. */
-export const API_STUB = '/stub-api/';
+/**
+ * The DWS store, served by the host under dws/ (docs/architecture.md § DWS store), which the test servers do not
+ * have. By default it answers 404, as `pnpm preview` does, and the watch lets that by. `serveStore` stands in
+ * for a host with one.
+ */
+export const DWS_STORE = /\/dws\/(index|flows-[^/]+|monthly-[^/]+)\.json$/;
 
 /**
  * The host's user API (functions/), which the test servers do not have. By default it answers 404, as a
@@ -73,8 +77,9 @@ export const test = base.extend<{ gaugeAt: [number, number]; watch: void }>({
 				})
 			);
 			await page.route(USER_API, (route) => route.fulfill({ status: 404, body: 'Not found' }));
+			await page.route(DWS_STORE, (route) => route.fulfill({ status: 404, body: 'Not found' }));
 			page.on('console', (m) => {
-				if (m.location().url.includes(API_STUB) || USER_API.test(m.location().url)) return;
+				if (DWS_STORE.test(m.location().url) || USER_API.test(m.location().url)) return;
 				if ((m.type() === 'error' || m.type() === 'warning') && !KNOWN_NOISE.some((re) => re.test(m.text()))) {
 					trouble.push(`console.${m.type()}: ${m.text()}`);
 				}
@@ -84,7 +89,7 @@ export const test = base.extend<{ gaugeAt: [number, number]; watch: void }>({
 				if (/^https?:/.test(r.url()) && !r.url().startsWith(baseURL!) && !DWS.test(r.url())) trouble.push(`left the site: ${r.url()}`);
 			});
 			page.on('response', (r) => {
-				if (r.status() >= 400 && !r.url().includes(API_STUB) && !USER_API.test(r.url())) trouble.push(`HTTP ${r.status()}: ${r.url()}`);
+				if (r.status() >= 400 && !DWS_STORE.test(r.url()) && !USER_API.test(r.url())) trouble.push(`HTTP ${r.status()}: ${r.url()}`);
 			});
 			await use();
 			expect(trouble).toEqual([]);
@@ -92,6 +97,20 @@ export const test = base.extend<{ gaugeAt: [number, number]; watch: void }>({
 		{ auto: true }
 	]
 });
+
+/**
+ * Serve a DWS store: each file by its name under dws/, such as `index.json` or `flows-X0H999.json`. A name
+ * not given answers 404. Returns the names asked for, in order, so a test can see what was read.
+ */
+export async function serveStore(page: Page, files: Record<string, unknown>): Promise<string[]> {
+	const asked: string[] = [];
+	await page.route(DWS_STORE, (route) => {
+		const name = new URL(route.request().url()).pathname.replace(/^.*\/dws\//, '');
+		asked.push(name);
+		return name in files ? route.fulfill({ json: files[name] }) : route.fulfill({ status: 404, body: 'Not found' });
+	});
+	return asked;
+}
 
 export const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
 
@@ -104,7 +123,7 @@ export const sources = (scope: Locator) => scope.getByRole('group', { name: 'Dat
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export const source = (scope: Locator, label: string) => sources(scope).getByRole('radio', { name: new RegExp(`^${escape(label)} `) });
 export const chooseSource = (scope: Locator, label: string) => source(scope, label).check();
-/** The source in use, whose value is gauge, api, sheet or text. */
+/** The source in use, whose value is gauge, dws, sheet or text. */
 export const sourceInUse = (scope: Locator) => sources(scope).getByRole('radio', { checked: true });
 
 /** The panel's chip, for example `chip(page, 'EC in use')`, which reads "EC in use D". */

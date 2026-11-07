@@ -31,9 +31,32 @@ The app opens on South Africa's six Water Management Areas of 2023 (`/`): a bann
 
 `static/data/node-info.json` holds, by node id, what the RQO node workbook records at a node beyond its EWR: `remp`, the REMP/BM site, `ewrSite`, the EWR site ID of the Reserve Gazette, `wqStation`, the water quality monitoring station, and `swsaSw` and `swsaGw`, the surface water and groundwater Strategic Water Source Areas the node is in. Each value is the workbook's text, and a field it records nothing for is absent, as is a node it records nothing at. The node's map popup lists what there is, in that order (`infoRows`). It loads with `index.json`, and the app does not start without it. It is built in the private repo by `tools/build_node_info.py`: README § Rebuild the data.
 
-## Loading flow by hand
+## Loading flow
 
-Observed flow comes from a linked gauge, the DWS API once it exists, or a file. Each comparison's Data source lists these as radio buttons, each saying what it holds (`FlowImport.svelte`). A node with no linked gauge starts on the DWS API. The API's data is kept apart from a loaded file's (`histApiSlot`, `rtApiSlots`), so switching source shows each one's own. The Real Time Comparison's two API requests, daily flow and real-time readings, are put together by `gaugeSeries`, as a gauge's are (`apiRt`), and shown a month at a time; README § DWS API. A file can be loaded in each comparison's Data source, or in the Load flow data window, opened from the compliance panel: monthly flow for the Historical Comparison, and 12-minute or daily flow for the Real Time Comparison, chosen or dropped. The window uses the same importer (`importFile`) and puts the file in use in its comparison, in place of a gauge or the API. Sheet, units and year are then set in the comparison. A file is read in the browser and never sent anywhere.
+Observed flow comes from a linked gauge, the DWS store, or a file. Each comparison's Data source lists these as radio buttons, each saying what it holds (`FlowImport.svelte`). A linked node starts on its gauge where the gauge has data for the comparison; otherwise a node starts on the DWS store if it can, and on Spreadsheet if not. A file can be loaded in each comparison's Data source, or in the Load flow data window, opened from the compliance panel: monthly flow for the Historical Comparison, and 12-minute or daily flow for the Real Time Comparison, chosen or dropped. The window uses the same importer (`importFile`) and puts the file in use in its comparison, in place of a gauge or the store. Sheet, units and year are then set in the comparison. A file is read in the browser and never sent anywhere.
+
+## DWS store
+
+The browser never calls DWS. A pipeline in AWS af-south-1 pulls each linked gauge's flow from DWS on a schedule into our own store, and the site serves it same-origin under `dws/` (CloudFront `/dws/*` to the store's `serve/` prefix). Data source > DWS (kept current) reads it. Decisions, recorded with the operator:
+
+- It is offered only at a node with a linked gauge (`app.link`), for that link's station. A node with no link has no store source.
+- It applies the node's factor exactly as the gauge source does (`dwsRt`, `dwsHist`, through `gaugeSeries` and `gaugeFlow`): one factor per node, scaling the node's observed flow and never a record as shown for the gauge itself.
+- The Real Time Comparison reads the station's daily flow and readings (`flows-<station>.json`), shown a month at a time, as a gauge's are.
+- The Historical Comparison reads monthly volumes only from `monthly-<station>.json`, when the index says there is one. Without it the source cannot be picked there, and the gauge's monthly record in `gauges.json` stays what the comparison uses: the store's option never stands for data it does not hold.
+- Each comparison shows the station's `fetchedAt`, in SAST, and the days it covers, and an out-of-date notice when the pipeline has set `stale`. The app never works staleness out from the clock: the pipeline knows its schedule.
+- `dws/index.json` is read once at start, revalidated (`cache: 'no-cache'`). A 404, such as on `pnpm dev`, `pnpm preview` or the e2e servers, or any other failure, leaves the source unpickable with the reason as its line, after that one request. A station's files are read when its source is first used, and only once the index lists it.
+
+The files, which the pipeline (P4) writes exactly so. `src/lib/ewr/dwsStore.ts` reads and checks them:
+
+| Path | Holds |
+|---|---|
+| `dws/index.json` | `{ "version": 1, "stations": { "<station>": { "fetchedAt", "covers": { "from", "to" }, "stale", "monthly" } } }`. `fetchedAt` is when the last pull that got the station's data ended, ISO 8601 with its offset. `covers` is the first and last day of its daily flow, `YYYY-MM-DD`. `stale` is `true` when the pulls have stopped keeping it current. `monthly`, optional and `false` when absent, says `monthly-<station>.json` is there. A station is listed only once its flows file is written. Another `version`, or an entry missing a field, is refused whole, never half-read. |
+| `dws/flows-<station>.json` | `{ "daily": "<a DWS .day file>", "readings": "<12-minute readings, as CSV>" }`, the `GaugeFlowFile` of `static/data/flows-<station>.json`, read by `parseGaugeFlows` unchanged. Either may be `""`. Code 170 or a blank in the daily flow is a missing day. |
+| `dws/monthly-<station>.json` | Optional. `{ "monthly": "<a DWS .mon file, or a table worked up from a daily file>", "incomplete": ["YYYY-MM", …] }`, as a record and its `incomplete` list are in `gauges.json`, read by `parseMon`. |
+
+The station names in the index are client material: the store sits behind the sign-in, and no list of them goes in this repo. The sample's store, `e2e/fixtures/sample-store`, is written by `make-sample-data.mjs` and served to the specs by `serveStore` in `e2e/support/app.ts`; it is not copied to `static/`.
+
+`localStorage` (`src/lib/state/storage.ts`) keeps the EC basis and each node's choices. The DWS API addresses an older version kept there, `histApi` and `rtApi`, are dropped the first time this one runs.
 
 ## Gauge records
 
@@ -41,7 +64,7 @@ Observed flow comes from a linked gauge, the DWS API once it exists, or a file. 
 
 - A month flagged `#` is incomplete or missing and is left out of every mean, whatever figure it carries. The record panel still shows that figure, marked. The same goes for a `#` in a loaded file, through `cellNumber`.
 - A table worked up from a daily file has `+` for a patched value and `-99.999` for none. A patched value is real: it counts in the means and is marked in the record, like a coded day. `-99.999` is treated like `#`. Otherwise the table does not say when days are missing, adding up the measured days alone, and can show a month with no measured day as `0.000`. So the build lists every month the gauge's daily record shows is not whole (`incomplete`), and those are left out unless they are patched. A table loaded by hand has no such check.
-- In daily flow, code 170 or a blank is missing: a gap in the line, never a zero or a join. Codes 1 and 2 are clean. Any other code marks a real value, which counts in the means and is drawn as its own series (`isCoded`). A quality column in a loaded table or API response works the same way.
+- In daily flow, code 170 or a blank is missing: a gap in the line, never a zero or a join. Codes 1 and 2 are clean. Any other code marks a real value, which counts in the means and is drawn as its own series (`isCoded`). A quality column in a loaded table works the same way.
 - A day's flow is the mean of its readings, however few there are, as the reference workbook does. A day in the `.day` record is taken from it and not from the readings.
 - A node's factor multiplies its gauge's monthly volumes, daily flow and readings before anything is compared, and comes from outside the app. There is one factor per node, across both comparisons. A typed factor is the user's own, stored per node with the other choices, and clearing it goes back to the link's. The gauge's own panel always shows the record unfactored.
 - A gauge's 12-minute readings can be drawn over its daily flow, a month at a time, in the Real Time Comparison and in the gauge's own panel ("Show 12-minute readings", off by default). The gauge panel offers the switch only for a gauge that has readings.
@@ -66,6 +89,14 @@ On the host, Cloudflare Pages, nobody reaches any file of the site, `data/` incl
 
 A copy served without `functions/`, such as `pnpm dev`, `pnpm preview` or the e2e servers, has no list: `api/me` is not found, the app shows no Users link, and everything else works as before. The e2e fixture answers `api/` with 404 by default, and `users.spec.ts` stands in for a host with a list. The first admin is added by the operator, once, straight into D1; after that, admins add everyone else. The list holds email addresses, so it lives only in D1, never in this repo.
 
+## Hosting on AWS
+
+Phases P1 and P2 of the private hosting plan, in `infra/` (Terraform, flat `*.tf`, applied by the operator from the workstation, never by CI). What each file makes, and the operator's steps: `infra/README.md`. What the host does: `docs/hosting.md` § AWS, as built so far.
+
+- **Skeleton (P1).** Providers for af-south-1 and us-east-1, `default_tags`, the S3 backend whose bucket is in the gitignored `backend.config`, alert topics, budgets, and the lookup of the bootstrap's OIDC deploy role with a postcondition on its trust. The deploy role is never given S3 or CloudFront; from P3 it may update named Lambdas.
+- **Gated site (P2, `site_enabled`).** A private bucket behind CloudFront (OAC). The default behaviour trusts one key group, so every path needs CloudFront signed cookies, which the API signs from P3; `/signin/*` is the one unsigned path. The viewer-request function (`infra/edge_functions.tf`, run as code by `tools/edge-functions.test.ts`) redirects a request with no live session to `/signin/`, or answers 401 JSON to one with `X-Requested-With`, and serves folder paths their `index.html`. A response-headers policy replaces `static/_headers`, and WAF rate-limits each address.
+- **Tests.** `infra/tests/*.tftest.hcl`, plan-only against mocked providers, pin the region rule, the deploy role's scope, the site's wiring, the WAF and the headers. `bin/check-infra.sh` runs fmt, validate and these in a temporary copy, and is CI's `Terraform` job, which the `CI gate` needs.
+
 ## Privacy notice
 
 `privacy/` shows the privacy notice, linked from the end of the app bar on every page (`+layout.svelte`; not a footer, which would take height from the map). It renders even when the data fails to load, since it needs none of it. Its text is not in this repo: it is `static/data/privacy.md`, the real notice from the private repo through `pnpm data:private`, or a made-up one from `make-sample-data.mjs` in the sample. `src/lib/privacy/markdown.ts` reads a little Markdown (headings `#` to `###`, drawn as h2 to h4, paragraphs, lists, `**bold**`, links) into blocks the page draws with Svelte's own elements. No text becomes HTML, and a link keeps its address only when it is `https:` or `mailto:`. `src/lib/privacy/notice.svelte.ts` fetches it once. What the site keeps, and how a person is erased: `docs/hosting.md` § Personal data.
@@ -78,17 +109,20 @@ A copy served without `functions/`, such as `pnpm dev`, `pnpm preview` or the e2
 | `src/lib/ewr/resolve.ts` | Which EC, method and file a node uses, and its notices. Pure. |
 | `src/lib/ewr/types.ts` | Shared shapes. |
 | `src/lib/ewr/format.ts` | Number format, series colours, file-kind labels. |
-| `src/lib/ewr/importFlow.ts` | Reads flow files and API responses, by `FlowWant`; `xlsx` loads only when needed. The DWS API is not published, so the API format is an assumption: README § DWS API. |
+| `src/lib/ewr/importFlow.ts` | Reads flow files, by `FlowWant`; `xlsx` loads only when needed. |
+| `src/lib/ewr/dwsStore.ts` | The DWS store's formats, and what Data source says about it: § DWS store. Pure. |
 | `src/lib/state/app.svelte.ts` | The single app state (`app`). Components read it and call its methods. |
+| `src/lib/state/storage.ts` | What is kept in `localStorage`, and the keys an older version kept that are dropped. |
 | `src/lib/components/map` | `WmaMap.svelte`, the national map of WMAs, and `EwrMap.svelte`, one WMA's map, with popup (`NodePopup.svelte`), legend, basin zoom and search. `wma.ts` holds the WMAs and the geometry tests, `mapData.ts` the map's other pure logic, `mapStyle.ts` the layers and base map style, `catchments.ts` the live DWS boundaries and flow gauges, paged, with a time limit. |
 | `src/routes` | `/`, the WMA chooser. `wma/[wma]/`, one WMA's map and compliance panel. `nodes/`, `notes/`, `privacy/`, and `+error.svelte`. |
 | `src/lib/components/compliance` | Node panel, Historical and Real Time Comparison, `GaugePanel.svelte`, a gauge's published monthly volumes, and `LoadFlowDialog.svelte`, the Load flow data window. `compare.ts` holds table rows and chart series. |
 | `src/lib/components/charts` | uPlot wrapper. |
 | `src/lib/components/nodes` | Nodes table and data notes. |
 | `src/lib/components/viewer` | File viewer dialog. |
-| `tools/` | `build-rivers.ts` for `static/geo`, `build_geo.py` for the private quaternaries file, `sync-private.sh` and `sample-data.mjs`, which fill `static/data`, `fetch-tiles.sh` for the base map, `check-live-services.ts`, the contract check on the live layers, and `deploy.sh` with `deploy-check.mjs`, the Cloudflare Pages deploy and the checks it makes first (`docs/hosting.md` § Build). See README. |
-| `e2e/fixtures` | Synthetic flow files and the sample dataset, each with the script that writes it. |
-| `vite.config.ts` | Adapter, `BASE_PATH` and the content security policy. See `docs/hosting.md`. |
+| `tools/` | `build-rivers.ts` for `static/geo`, `build_geo.py` for the private quaternaries file, `sync-private.sh` and `sample-data.mjs`, which fill `static/data`, `fetch-tiles.sh` for the base map, `check-live-services.ts`, the contract check on the live layers, `deploy.sh` with `deploy-check.mjs`, the S3 deploy and the checks it makes first (`docs/hosting.md` § Build), and `edge-functions.test.ts`, which runs the CloudFront function in `infra/` as code. See README. |
+| `infra/`, `bin/check-infra.sh` | Terraform for the AWS hosting (§ Hosting on AWS), and its credential-free checks. `infra/README.md`. |
+| `e2e/fixtures` | Synthetic flow files, the sample dataset and the sample DWS store, each with the script that writes it. |
+| `vite.config.ts`, `src/csp.ts` | Adapter, `BASE_PATH` and the content security policy, whose `connect-src` `src/csp.ts` builds. See `docs/hosting.md`. |
 
 ## Conventions
 

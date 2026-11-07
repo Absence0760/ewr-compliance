@@ -1,4 +1,4 @@
-import { chip, chooseSource, expect, expectRow, legend, loadFile, openNode, realTime, select, showRealTime, test } from '../support/app.ts';
+import { chip, chooseSource, expect, expectRow, legend, loadFile, openNode, realTime, select, showRealTime, sourceInUse, sources, test } from '../support/app.ts';
 import type { Locator, Page } from '@playwright/test';
 
 // readings-12min.csv: 120 readings a day, alternating 0.01 under and over the day's mean.
@@ -144,13 +144,10 @@ test.describe('Real Time Comparison', () => {
 		await expect(rt.getByRole('alert')).toContainText('No flow table found in "junk.txt".');
 	});
 
-	test('choosing the API says it is not established', async ({ page }) => {
+	test('a node with no linked gauge starts on a spreadsheet, and is not offered the DWS store', async ({ page }) => {
 		const rt = realTime(page);
-		await chooseSource(rt, 'DWS API');
-		await expect(rt.getByText('The DWS daily flow and real-time APIs are not yet established')).toContainText('the response format is an assumption');
-		await expect(rt.getByLabel('12-minute flow file')).toHaveCount(0);
-		await expect(rt.getByRole('textbox', { name: 'Daily flow API' })).toBeVisible();
-		await rt.getByRole('button', { name: 'Load daily and real-time flow' }).click();
-		await expect(rt.getByRole('alert')).toHaveText('Enter the daily flow API address, the real-time API address, or both.');
+		await expect(sourceInUse(rt)).toHaveValue('sheet');
+		await expect(rt.getByLabel('12-minute flow file')).toBeVisible();
+		await expect(sources(rt).getByRole('radio', { name: /^DWS/ })).toHaveCount(0);
 	});
 });

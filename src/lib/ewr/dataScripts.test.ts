@@ -144,9 +144,12 @@ describe('the sample generator', () => {
 		mkdirSync(join(dir, 'fixtures'));
 		copyFileSync(join(REPO, 'e2e/fixtures/make-sample-data.mjs'), join(dir, 'fixtures/make-sample-data.mjs'));
 		expect(run('node', [join(dir, 'fixtures/make-sample-data.mjs')]).status).toBe(0);
-		const committed = join(REPO, 'e2e/fixtures/sample-data');
-		for (const f of readdirSync(committed)) {
-			expect(readFileSync(join(dir, 'fixtures/sample-data', f), 'utf8'), f).toBe(readFileSync(join(committed, f), 'utf8'));
+		for (const out of ['sample-data', 'sample-store']) {
+			const committed = join(REPO, 'e2e/fixtures', out);
+			expect(readdirSync(join(dir, 'fixtures', out)).sort(), out).toEqual(readdirSync(committed).sort());
+			for (const f of readdirSync(committed)) {
+				expect(readFileSync(join(dir, 'fixtures', out, f), 'utf8'), `${out}/${f}`).toBe(readFileSync(join(committed, f), 'utf8'));
+			}
 		}
 	});
 });

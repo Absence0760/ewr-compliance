@@ -115,7 +115,7 @@ test.describe('a linked gauge', () => {
 		await openNode(page, 'syq1');
 		await findNode(page, 'syt1', 'syt1 / SYN-SITE1');
 		const hist = historical(page);
-		await expect(sourceInUse(hist)).toHaveValue('api');
+		await expect(sourceInUse(hist)).toHaveValue('sheet');
 		await expect(sources(hist).getByRole('radio', { name: /Linked gauge/ })).toHaveCount(0);
 		await expect(hist.getByLabel('Factor on the gauge record')).toHaveCount(0);
 	});

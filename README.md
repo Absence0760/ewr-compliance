@@ -18,7 +18,7 @@ pnpm install && pnpm data:sample && pnpm dev
 
 Then open http://localhost:7790. The nodes you see are invented.
 
-To host it, run `pnpm build` and copy `build/` to any static host, at a domain root or under a sub-path. Hosting real data is a decision of its own: see `docs/hosting.md`. The site's own host, Cloudflare Pages, is deployed from a workstation with `tools/deploy.sh sample` or `tools/deploy.sh real`, and `--dry-run` to see what would go up.
+To host it, run `pnpm build` and copy `build/` to any static host, at a domain root or under a sub-path. Hosting real data is a decision of its own: see `docs/hosting.md`. The site's own host, a private S3 bucket behind CloudFront in AWS af-south-1 (`infra/`), is deployed from a workstation with `tools/deploy.sh sample` or `tools/deploy.sh real`, and `--dry-run` to see what would go up.
 
 ## Data
 
@@ -101,21 +101,16 @@ Optional. Without it the map draws on a plain background.
 
 The client brief is in the private repo.
 
-## DWS API
+## DWS data
 
-DWS has not published the API, so its address, its parameters and its response format are unknown. The form under each comparison (Data source > DWS API) is ready for it, and what it accepts is an assumption until DWS publishes something. Expect to change it then.
+The browser does not call DWS. DWS refuses networks outside South Africa, so a pipeline in AWS Cape Town pulls each linked gauge's flow from DWS every day into our own store, and the site serves the store under `dws/` (the private hosting plan, phase P4). Data source > DWS (kept current) reads it, in either comparison. Its files are described in `docs/architecture.md` § DWS store.
 
-The DWS API is each comparison's default source at a node with no linked gauge. The Historical Comparison makes one request, to the monthly volumes API. The Real Time Comparison makes two, each with its own address: the daily flow API, for the whole daily record, and the real-time API, for the latest readings. Either can be left blank. The two are drawn together a month at a time, as a linked gauge's daily flow and readings are, with a day in the daily record taken from it and not from the readings. Neither is scaled by a node's factor: like a file, the API gives the node's flow as it is.
+- It is offered at a node with a linked gauge, for that gauge's station, and applies the node's factor exactly as the gauge source does. The factor scales the node's observed flow, never the gauge's own record.
+- The Real Time Comparison reads the station's daily flow and, where DWS has them, its 12-minute readings, drawn a month at a time as a linked gauge's are.
+- The Historical Comparison reads the station's monthly volumes only when the store has them. Until it does, the source says so and cannot be picked, and the linked gauge's monthly record in `gauges.json` is what the comparison uses.
+- Each comparison says when the store last fetched the station and the days it covers, and says so plainly when the pipeline has marked the station out of date.
+- A copy of the site with no store, such as `pnpm dev`, `pnpm preview` or a plain static host, makes one request for `dws/index.json`, gets a 404, and the source says the store isn't there. Everything else works.
 
-Until then, and afterwards, flow can be loaded by hand from a spreadsheet or text file: in each comparison's Data source, or in the Load flow data window in the compliance panel, which takes monthly flow for the Historical Comparison and 12-minute or daily flow for the Real Time Comparison.
+Flow can also be loaded by hand from a spreadsheet or text file: in each comparison's Data source, or in the Load flow data window in the compliance panel, which takes monthly flow for the Historical Comparison and 12-minute or daily flow for the Real Time Comparison. A node with no linked gauge starts there, on Spreadsheet.
 
-Enter the address with `{station}`, `{from}` and `{to}` where they belong; they are filled in as an ISO date and time. The endpoint must allow cross-origin requests from wherever this app is hosted, or be proxied, and a site on `https` can only call an `https` endpoint. The address and station are kept in the browser, separately for each comparison, so don't put a key in the address.
-
-| | Monthly volumes API (Historical) | Daily flow API (Real Time) | Real-time API (Real Time) |
-|---|---|---|---|
-| Request window | The whole record: `{from}` is 1900-01-01, earlier than any series in the real data, and `{to}` is now | The whole record, as for monthly volumes | The last 31 days |
-| Response | A date and a flow for each month, or a year with month columns | A date and a flow for each day, with an optional quality column | A time and a flow |
-| Unit | Mm³ per month unless a column name gives the unit; change it under Values are in | m³/s, as for real time | m³/s. Data that declares Mm³, from a file or the API, is refused: a volume per reading has no defined interval to convert over |
-| Timeout | 180 seconds | 180 seconds | 60 seconds |
-
-The response may be JSON rows (a list, or a list under `data` or `rows`) or CSV. Either way it is read as a file would be. An `error` or `errors` field, an empty list, a web page, or a body that is neither gives a message saying so, and replaces any flow on show. A failed request (a network failure, a timeout or a 4xx or 5xx status) gives a message and leaves the flow on show, with its status line, until it is replaced.
+An older version had a DWS API form, whose addresses it kept in the browser. They are dropped from the browser's storage the first time this version runs.

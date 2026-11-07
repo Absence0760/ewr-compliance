@@ -145,7 +145,10 @@ export interface NodeInfo {
 /** static/data/node-info.json: NodeInfo by node id. A node the workbook records nothing for is absent. */
 export type NodeInfoData = Record<string, NodeInfo>;
 
-/** static/data/flows-<station>.json:the text of a DWS daily file and of the 12-minute readings. */
+/**
+ * static/data/flows-<station>.json, and dws/flows-<station>.json in the DWS store: the text of a DWS daily
+ * file and of the 12-minute readings. Either may be empty.
+ */
 export interface GaugeFlowFile {
 	daily: string;
 	readings: string;
@@ -283,8 +286,8 @@ export interface Notice {
 	text: string;
 }
 
-/** Where observed flow comes from. */
-export type FlowSource = 'sheet' | 'text' | 'api' | 'gauge';
+/** Where observed flow comes from. dws is our own store of DWS flow, kept current: src/lib/ewr/dwsStore.ts. */
+export type FlowSource = 'sheet' | 'text' | 'dws' | 'gauge';
 export type FlowWant = 'monthly' | 'instant';
 export type PeriodPreset = 'full' | '10' | '20' | 'custom';
 

@@ -1,0 +1,22 @@
+{
+	"version": 1,
+	"stations": {
+		"X0H999": {
+			"fetchedAt": "2024-11-02T04:15:00Z",
+			"covers": {
+				"from": "2024-10-01",
+				"to": "2024-10-31"
+			},
+			"stale": false,
+			"monthly": true
+		},
+		"X0H998": {
+			"fetchedAt": "2024-09-30T04:00:00Z",
+			"covers": {
+				"from": "2024-09-01",
+				"to": "2024-09-29"
+			},
+			"stale": true
+		}
+	}
+}

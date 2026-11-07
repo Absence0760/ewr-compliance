@@ -3,6 +3,7 @@
 	import LineChart from '#lib/components/charts/LineChart.svelte';
 	import { timeReadout } from '#lib/components/charts/chart.ts';
 	import { fmt } from '#lib/ewr/format.ts';
+	import { dwsStatus } from '#lib/ewr/dwsStore.ts';
 	import { dailyMeans, isCoded } from '#lib/ewr/parsers.ts';
 	import { app } from '#lib/state/app.svelte.ts';
 	import { countOf, defaultMonth, gaugeName, loadedMonths, monthOf, rtLatest, rtRange, rtRows, rtSeries, unitName, unitTitle } from './compare.ts';
@@ -14,11 +15,11 @@
 
 	const EMPTY_RANGE: [number, number] = [0, 86400000];
 	const r = app.rtView;
-	const api = $derived(r.source === 'api');
-	/** A linked gauge, or the DWS API's daily record and readings, put together the same way. */
-	const gauge = $derived(r.source === 'gauge' ? app.gaugeRt : api ? app.apiRt : null);
-	const link = $derived(r.source === 'gauge' ? app.link : null);
-	const apiStation = $derived(api ? (app.rtApiSlots.daily.flow ? app.rtApiSlots.daily : app.rtApiSlots.readings).name : null);
+	const dws = $derived(r.source === 'dws');
+	/** A linked gauge, or the DWS store's copy of its daily flow and readings, put together and factored the same way. */
+	const gauge = $derived(r.source === 'gauge' ? app.gaugeRt : dws ? app.dwsRt : null);
+	const link = $derived(r.source === 'gauge' || dws ? app.link : null);
+	const stored = $derived(dws && link && app.dwsStation ? dwsStatus(link.station, app.dwsStation) : null);
 	const f = $derived(r.source === 'sheet' || r.source === 'text' ? app.rt.flow : null);
 	const allPoints = $derived(gauge ? gauge.readings : (f?.points ?? []));
 	const daily = $derived(gauge ? gauge.days : dailyMeans(allPoints));
@@ -29,9 +30,7 @@
 	const days = $derived(daily.filter((d) => inMonth(d.t)));
 	const pts = $derived(allPoints.filter((p) => p.v !== null && inMonth(p.t)));
 	const range = $derived(days.length ? rtRange(days, month) : EMPTY_RANGE);
-	const label = $derived(
-		link ? `Daily mean flow, ${gaugeName(link.station, app.factor)}` : apiStation && gauge ? `Daily mean flow, ${apiStation}` : undefined
-	);
+	const label = $derived(link ? `Daily mean flow, ${gaugeName(link.station, app.factor)}` : undefined);
 	const series = $derived(days.length ? rtSeries(app.lines, days, r.showRaw ? pts : null, range, label, app.unit) : []);
 	const latest = $derived(rtLatest(app.lines, pts, app.unit));
 	const u = $derived(unitName(app.unit));
@@ -45,18 +44,20 @@
 
 {#if r.source === 'gauge' && app.flowsError}
 	<div class="notice error" role="alert">{app.flowsError}</div>
+{:else if dws && app.dwsError}
+	<div class="notice error" role="alert">{app.dwsError}</div>
+{/if}
+
+{#if stored}
+	<div class="notice {stored.stale ? '' : 'info'}" role="status"><b>DWS store, {link?.station}.</b> {stored.text}</div>
 {/if}
 
 {#if link && gauge}
 	<div class="notice info" role="status">
-		<b>{link.station}.</b> {countOf(daily.length, 'day')} of flow in {countOf(months.length, 'month')}. {countOf(codedDays, 'day')} with a quality code drawn in their own colour, and {countOf(gauge.missing, 'missing day')} not drawn.
-		<button type="button" onclick={() => app.showGauge(link.station)}>View gauge record</button>
+		<b>{link.station}{dws ? ', from the DWS store' : ''}.</b> {countOf(daily.length, 'day')} of flow in {countOf(months.length, 'month')}. {countOf(codedDays, 'day')} with a quality code drawn in their own colour, and {countOf(gauge.missing, 'missing day')} not drawn.
+		{#if !dws}<button type="button" onclick={() => app.showGauge(link.station)}>View gauge record</button>{/if}
 	</div>
 	<GaugeFactor {link} />
-{:else if api && gauge}
-	<div class="notice info" role="status">
-		<b>{apiStation}, from the DWS API.</b> {countOf(daily.length, 'day')} of flow in {countOf(months.length, 'month')}. {countOf(codedDays, 'day')} with a quality code drawn in their own colour, and {countOf(gauge.missing, 'missing day')} not drawn.
-	</div>
 {/if}
 
 {#if f || gauge}

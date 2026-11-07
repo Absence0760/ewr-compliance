@@ -1,4 +1,4 @@
-import { chip, chooseSource, expect, expectRow, findNode, historical, legend, loadFile, MAP, openNode, panel, select, tableRow, test } from '../support/app.ts';
+import { chip, chooseSource, expect, expectRow, findNode, historical, legend, loadFile, MAP, openNode, panel, select, sourceInUse, sources, tableRow, test } from '../support/app.ts';
 import type { Locator } from '@playwright/test';
 
 // monthly.xlsx: 15 years (k = 1 to 15), a month is k × (i + 1) × 0.1 Mm³ with i = 0 for Oct, and
@@ -149,11 +149,11 @@ test.describe('Historical Comparison', () => {
 			await expectRow(table(hist), 'Nov', { 'Mean Mm³': '1.600' });
 		});
 
-		test('says the monthly API is not established', async ({ page }) => {
+		test('starts on a spreadsheet, and is not offered the DWS store with no linked gauge', async ({ page }) => {
 			const hist = historical(page);
-			await chooseSource(hist, 'DWS API');
-			await expect(hist.getByText('The DWS monthly volumes API is not yet established')).toContainText('the response format is an assumption');
-			await expect(hist.getByLabel('Monthly flow file')).toHaveCount(0);
+			await expect(sourceInUse(hist)).toHaveValue('sheet');
+			await expect(hist.getByLabel('Monthly flow file')).toBeVisible();
+			await expect(sources(hist).getByRole('radio', { name: /^DWS/ })).toHaveCount(0);
 		});
 	});
 

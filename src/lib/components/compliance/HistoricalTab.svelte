@@ -1,5 +1,6 @@
 <script lang="ts">
 	import LineChart from '#lib/components/charts/LineChart.svelte';
+	import { dwsStatus } from '#lib/ewr/dwsStore.ts';
 	import { fmt } from '#lib/ewr/format.ts';
 	import { meanMonthly } from '#lib/ewr/parsers.ts';
 	import { app } from '#lib/state/app.svelte.ts';
@@ -11,7 +12,10 @@
 
 	const h = app.histView;
 	const f = $derived(app.histFlow);
-	const link = $derived(h.source === 'gauge' ? app.link : null);
+	const dws = $derived(h.source === 'dws');
+	/** The gauge's own record, or the DWS store's monthly volumes for it: either is factored to the node. */
+	const link = $derived(h.source === 'gauge' || dws ? app.link : null);
+	const stored = $derived(dws && link && app.dwsStation ? dwsStatus(link.station, app.dwsStation) : null);
 	const keys = $derived(f ? flowKeys(f) : null);
 	const selected = $derived(f ? meanMonthly(f.records, h.from, h.to) : null);
 	const isFull = $derived(!!keys && h.from === keys.first && h.to === keys.last);
@@ -37,10 +41,18 @@
 
 <FlowImport want="monthly" />
 
+{#if dws && app.dwsError}
+	<div class="notice error" role="alert">{app.dwsError}</div>
+{/if}
+
+{#if stored}
+	<div class="notice {stored.stale ? '' : 'info'}" role="status"><b>DWS store, {link?.station}.</b> {stored.text}</div>
+{/if}
+
 {#if link && f && keys}
 	<div class="notice info" role="status">
-		<b>{link.station}.</b> Using {f.months} months, {periodLabel(keys.first, keys.last)}. {f.missing} months flagged # are left out of the means.
-		<button type="button" onclick={() => app.showGauge(link.station)}>View monthly volumes</button>
+		<b>{link.station}{dws ? ', from the DWS store' : ''}.</b> Using {f.months} months, {periodLabel(keys.first, keys.last)}. {f.missing} months flagged # are left out of the means.
+		{#if !dws}<button type="button" onclick={() => app.showGauge(link.station)}>View monthly volumes</button>{/if}
 	</div>
 	<GaugeFactor {link} />
 {/if}

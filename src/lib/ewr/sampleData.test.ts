@@ -3,6 +3,7 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
+import { dwsPath, parseDwsIndex } from './dwsStore.ts';
 import { parseGaugeFlows, parseMon, parseTab } from './parsers.ts';
 import { buildNotices, resolveView } from './resolve.ts';
 import type { EwrNode, GaugeData, IndexData, NodeInfoData } from './types.ts';
@@ -110,5 +111,26 @@ test('no node code, quaternary or file name looks like a real one', () => {
 		assert.match(n.id.split(':')[1], /^(sy[a-z]\d|z\d\d[a-z])$/, n.id);
 		assert.match(n.quat, /^(Z\d\d[A-Z])?$/, n.id);
 		for (const f of n.files) assert.match(f.name, /(^|\/)(SY|sy|Z1)/, f.name);
+	}
+});
+
+const STORE = new URL('../../../e2e/fixtures/sample-store/', import.meta.url);
+const storeFile = (f: string) => JSON.parse(readFileSync(new URL(f, STORE), 'utf8'));
+
+test('the sample DWS store reads, holds only linked gauges, and covers a current station, a stale one and a linked one it lacks', () => {
+	const store = parseDwsIndex(storeFile('index.json'));
+	const linked = (load('gauges.json') as GaugeData).links.map((l) => l.station);
+	const stations = Object.entries(store.stations);
+	for (const [station] of stations) assert.ok(linked.includes(station), station);
+	assert.ok(stations.some(([, e]) => !e.stale && e.monthly));
+	assert.ok(stations.some(([, e]) => e.stale));
+	assert.ok(linked.some((s) => !store.stations[s]));
+	const want = ['index.json', ...stations.flatMap(([s, e]) => [dwsPath.flows(s), ...(e.monthly ? [dwsPath.monthly(s)] : [])].map((p) => p.replace(/^dws\//, '')))];
+	assert.deepEqual(readdirSync(STORE).sort(), want.sort());
+	for (const [station, e] of stations) {
+		const flows = parseGaugeFlows(storeFile(`flows-${station}.json`));
+		const days = flows.daily.map((p) => new Date(p.t).toISOString().slice(0, 10));
+		assert.deepEqual([days[0], days[days.length - 1]], [e.covers.from, e.covers.to], station);
+		if (e.monthly) assert.ok(parseMon(storeFile(`monthly-${station}.json`).monthly).years.length, station);
 	}
 });

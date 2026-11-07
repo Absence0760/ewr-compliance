@@ -1,13 +1,14 @@
 // The one app state. Components read it and call its methods; none fetch data themselves.
 import { asset } from '$app/paths';
 import { ewrLines, gaugeFlow, gaugeSeries, parseGaugeFlows, parseMon, parseRevised, parseTab, ymKey } from '#lib/ewr/parsers.ts';
+import { dwsEntry, dwsOffer, dwsPath, dwsUnavailable, parseDwsIndex, type DwsMonthlyFile, type DwsState, type DwsWant } from '#lib/ewr/dwsStore.ts';
 import { allFiles, buildNotices, resolveView } from '#lib/ewr/resolve.ts';
 import type {
 	EcBasis, EwrNode, EwrSite, Flow, FlowSource, FlowUnit, GaugeData, GaugeFlowFile, GaugeFlows, GaugeLink, GaugeRecord, HistView, IndexData, Issue, NodeChoices, NodeFile, NodeInfo, NodeInfoData, NodeView, Notice, ResolvedLines, RtView, Sheet, YearIs
 } from '#lib/ewr/types.ts';
+import { readStored, STORAGE, writeStored } from './storage.ts';
 
 const slug = (b: string) => b.toLowerCase().replace(/-/g, '');
-const STORAGE = 'ewr';
 
 export interface FlowSlot {
 	sheets: Sheet[];
@@ -51,15 +52,16 @@ class AppState {
 	tab = $state<'hist' | 'rt'>('hist');
 	hist = $state.raw<FlowSlot>(emptySlot('mm3'));
 	rt = $state.raw<FlowSlot>(emptySlot('cumec'));
-	/** A node with no linked gauge starts on the DWS API. */
-	histView = $state<HistView>({ source: 'api', preset: 'full', from: 0, to: 0, overlay: true });
-	rtView = $state<RtView>({ source: 'api', month: 'all', showRaw: false });
-	/** The API addresses and station, kept across reloads. The Real Time Comparison makes two requests. */
-	histApi = $state({ url: '', station: '' });
-	rtApi = $state({ daily: '', readings: '', station: '' });
-	/** What the APIs returned, kept apart from a loaded file so neither shows under the other. */
-	histApiSlot = $state.raw<FlowSlot>(emptySlot('mm3'));
-	rtApiSlots = $state.raw<Record<'daily' | 'readings', FlowSlot>>({ daily: emptySlot('cumec'), readings: emptySlot('cumec') });
+	/** A node starts on its linked gauge where the gauge has data, and otherwise on a spreadsheet. */
+	histView = $state<HistView>({ source: 'sheet', preset: 'full', from: 0, to: 0, overlay: true });
+	rtView = $state<RtView>({ source: 'sheet', month: 'all', showRaw: false });
+
+	/** Our own store of DWS flow, under dws/: its index, read once at start. */
+	dws = $state.raw<DwsState>({ status: 'loading' });
+	/** The store's daily flow and readings, and its monthly volumes, by station, as each is first used. */
+	dwsFlows = $state.raw<Record<string, GaugeFlows>>({});
+	dwsMonthly = $state.raw<Record<string, GaugeRecord>>({});
+	dwsError = $state('');
 
 	lines = $state.raw<ResolvedLines | null>(null);
 	notices = $state.raw<Notice[]>([]);
@@ -88,15 +90,22 @@ class AppState {
 		const flows = this.link && this.flows[this.link.station];
 		return flows ? gaugeSeries(flows, this.factor) : null;
 	});
+	/** The store's monthly volumes for the selected node's gauge, factored to the node like the gauge's own. */
+	dwsHist = $derived.by(() => {
+		const record = this.link && this.dwsMonthly[this.link.station];
+		return record ? gaugeFlow(record, this.factor) : null;
+	});
+	/** The store's daily flow and readings for the selected node's gauge, factored to the node like the gauge's own. */
+	dwsRt = $derived.by(() => {
+		const flows = this.link && this.dwsFlows[this.link.station];
+		return flows ? gaugeSeries(flows, this.factor) : null;
+	});
+	/** The store's entry for the selected node's gauge, once the index is read. */
+	dwsStation = $derived(dwsEntry(this.dws, this.link));
 	/** The observed record the Historical Comparison is using. */
 	histFlow = $derived(
-		this.histView.source === 'gauge' ? this.gaugeFlow : this.histView.source === 'api' ? this.histApiSlot.flow : this.hist.flow
+		this.histView.source === 'gauge' ? this.gaugeFlow : this.histView.source === 'dws' ? this.dwsHist : this.hist.flow
 	);
-	/** The Real Time API's daily record and readings, put together as a gauge's are. Unfactored, like a file. */
-	apiRt = $derived.by(() => {
-		const daily = this.rtApiSlots.daily.flow?.points, readings = this.rtApiSlots.readings.flow?.points;
-		return daily || readings ? gaugeSeries({ daily: daily ?? [], readings: readings ?? [] }) : null;
-	});
 
 	viewOf(n: EwrNode): NodeView {
 		return resolveView(n, this.ecBasis, this.choices[n.id], !!this.uploads[n.id]);
@@ -137,16 +146,39 @@ class AppState {
 		} catch (e) {
 			this.loadError = (e as Error).message;
 		}
+		void this.loadDws();
+	}
+
+	/**
+	 * The store's index. The app works without it: a copy of the site with no store, such as `pnpm dev`, gets a
+	 * 404, and the DWS source then says the store is not there. Revalidated, as the store changes every day.
+	 */
+	private async loadDws(): Promise<void> {
+		try {
+			const res = await fetch(asset(dwsPath.index as never), { cache: 'no-cache' });
+			this.dws = res.ok ? { status: 'ready', index: parseDwsIndex(await res.json()) } : dwsUnavailable(res.status);
+		} catch (e) {
+			this.dws = dwsUnavailable(null, (e as Error).message);
+		}
+		if (this.selected) {
+			this.syncHistSource();
+			this.syncRtSource();
+		}
+	}
+
+	/** Whether the DWS source can be picked for the selected node: while the index is read, it may be. */
+	dwsOk(want: DwsWant): boolean {
+		return dwsOffer(this.dws, this.link, want).ok;
 	}
 
 	private restore() {
 		try {
-			const s = JSON.parse(localStorage.getItem(STORAGE) || '{}');
-			if (s.ecBasis) this.ecBasis = s.ecBasis;
-			if (s.choices) this.choices = s.choices;
-			// An address saved before the two real-time requests was the readings one.
-			if (s.rtApi) this.rtApi = { daily: s.rtApi.daily ?? '', readings: s.rtApi.readings ?? s.rtApi.url ?? '', station: s.rtApi.station ?? '' };
-			if (s.histApi) this.histApi = s.histApi;
+			const raw = localStorage.getItem(STORAGE);
+			const { stored, migrated } = readStored(raw);
+			if (stored.ecBasis) this.ecBasis = stored.ecBasis;
+			if (stored.choices) this.choices = stored.choices;
+			// Drop what an older version kept, such as the DWS API addresses, rather than carry it on.
+			if (migrated) localStorage.setItem(STORAGE, writeStored(stored));
 		} catch {
 			/* storage unavailable: the app works without it */
 		}
@@ -154,7 +186,7 @@ class AppState {
 
 	private persist() {
 		try {
-			localStorage.setItem(STORAGE, JSON.stringify({ ecBasis: this.ecBasis, choices: this.choices, rtApi: this.rtApi, histApi: this.histApi }));
+			localStorage.setItem(STORAGE, writeStored({ ecBasis: this.ecBasis, choices: this.choices }));
 		} catch {
 			/* storage unavailable */
 		}
@@ -222,28 +254,70 @@ class AppState {
 	}
 
 	/**
-	 * A linked gauge is the node's record unless a loaded file or API record is in use. A node with no
-	 * link cannot stay on it, and goes to the API.
+	 * A linked gauge is the node's record unless a loaded file or the DWS store is in use. A node whose gauge
+	 * has no record, or that has no link, cannot stay on it, and goes to the store if it can, or a spreadsheet.
+	 * The store can be kept only for a node whose gauge it holds.
 	 */
 	private syncHistSource() {
 		const h = this.histView;
-		if (h.source === 'gauge' && !this.gaugeFlow) h.source = 'api';
-		else if (this.gaugeFlow && !this.histFlow) h.source = 'gauge';
+		const dws = this.dwsOk('monthly');
+		if (h.source === 'gauge' && !this.gaugeFlow) h.source = dws ? 'dws' : 'sheet';
+		else if (h.source === 'dws' && !dws) h.source = this.gaugeFlow ? 'gauge' : 'sheet';
+		else if (this.gaugeFlow && h.source !== 'dws' && !this.hist.flow) h.source = 'gauge';
 		if (h.source === 'gauge') this.wholeRecord(this.gaugeFlow);
+		if (h.source === 'dws') void this.loadDwsMonthly();
 	}
 
 	private syncRtSource() {
 		const r = this.rtView;
 		const station = this.link && this.flowStations.has(this.link.station) ? this.link.station : null;
-		const inUse = r.source === 'api' ? this.apiRt : r.source === 'gauge' ? null : this.rt.flow;
-		if (r.source === 'gauge' && !station) this.setRtSource('api');
-		else if (station && r.source !== 'gauge' && !inUse) r.source = 'gauge';
+		const dws = this.dwsOk('instant');
+		if (r.source === 'gauge' && !station) this.setRtSource(dws ? 'dws' : 'sheet');
+		else if (r.source === 'dws' && !dws) this.setRtSource(station ? 'gauge' : 'sheet');
+		else if (station && r.source !== 'gauge' && r.source !== 'dws' && !this.rt.flow) r.source = 'gauge';
 		if (station) void this.loadFlows(station);
+		if (r.source === 'dws') void this.loadDwsFlows();
 	}
 
 	setRtSource(source: FlowSource) {
 		this.rtView.source = source;
 		this.rtView.month = 'all';
+		if (source === 'dws') void this.loadDwsFlows();
+	}
+
+	/** Fetch one file of the store, revalidated, or throw with its HTTP status. */
+	private async dwsFile<T>(path: string): Promise<T> {
+		const res = await fetch(asset(path as never), { cache: 'no-cache' });
+		if (!res.ok) throw new Error(`HTTP ${res.status}`);
+		return (await res.json()) as T;
+	}
+
+	/** The store's daily flow and readings for the selected node's gauge, read once. A failure is said, and tried again next time. */
+	async loadDwsFlows(): Promise<void> {
+		const station = this.link?.station;
+		// Not before the index says the store holds it: a store that is not there should cost one request, not one a station.
+		if (!station || this.dwsFlows[station] || !this.dwsStation) return;
+		this.dwsError = '';
+		try {
+			const file = await this.dwsFile<GaugeFlowFile>(dwsPath.flows(station));
+			this.dwsFlows = { ...this.dwsFlows, [station]: parseGaugeFlows(file) };
+		} catch (e) {
+			this.dwsError = `The DWS store's flow for ${station} could not be loaded: ${(e as Error).message}`;
+		}
+	}
+
+	/** The store's monthly volumes for the selected node's gauge, read once, and shown from the whole record. */
+	async loadDwsMonthly(): Promise<void> {
+		const station = this.link?.station;
+		if (!station || this.dwsMonthly[station] || !this.dwsStation?.monthly) return;
+		this.dwsError = '';
+		try {
+			const file = await this.dwsFile<DwsMonthlyFile>(dwsPath.monthly(station));
+			this.dwsMonthly = { ...this.dwsMonthly, [station]: parseMon(file.monthly, file.incomplete) };
+			if (this.histView.source === 'dws' && this.link?.station === station) this.wholeRecord(this.histFlow);
+		} catch (e) {
+			this.dwsError = `The DWS store's monthly volumes for ${station} could not be loaded: ${(e as Error).message}`;
+		}
 	}
 
 	/** Read once. A failed read is said in the panel, and is tried again next time. */
@@ -262,6 +336,7 @@ class AppState {
 	setHistSource(source: FlowSource) {
 		this.histView.source = source;
 		this.wholeRecord(this.histFlow);
+		if (source === 'dws') void this.loadDwsMonthly();
 	}
 
 	/** Open a gauge's record in the panel. A gauge with no record leaves the panel on the node. */
@@ -309,27 +384,6 @@ class AppState {
 	setRt(slot: FlowSlot) {
 		this.rt = slot;
 		if (slot.flow) this.rtView.month = 'all';
-	}
-
-	setHistApi(url: string, station: string) {
-		this.histApi = { url, station };
-		this.persist();
-	}
-
-	setRtApi(daily: string, readings: string, station: string) {
-		this.rtApi = { daily, readings, station };
-		this.persist();
-	}
-
-	/** API data restarts from the whole record, as a file does. */
-	setHistApiSlot(slot: FlowSlot) {
-		this.histApiSlot = slot;
-		this.wholeRecord(slot.flow);
-	}
-
-	setRtApiSlot(call: 'daily' | 'readings', slot: FlowSlot) {
-		this.rtApiSlots = { ...this.rtApiSlots, [call]: slot };
-		this.rtView.month = 'all';
 	}
 
 	openFile(nodeId: string, file: string) {

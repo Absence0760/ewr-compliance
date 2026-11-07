@@ -127,11 +127,11 @@ test.describe('daily flow from a linked gauge', () => {
 		await expect(panel(page).getByRole('table', { name: /^Monthly volumes/ })).toHaveCount(0);
 	});
 
-	test('a node with no gauge goes to the DWS API, with nothing left over', async ({ page }) => {
+	test('a node with no gauge goes to a spreadsheet, with nothing left over', async ({ page }) => {
 		const rt = await atSyq1(page);
 		await findNode(page, 'syt1', 'syt1 / SYN-SITE1');
-		await expect(sourceInUse(rt)).toHaveValue('api');
-		await expect(rt.getByRole('textbox', { name: 'Daily flow API' })).toBeVisible();
+		await expect(sourceInUse(rt)).toHaveValue('sheet');
+		await expect(rt.getByLabel('12-minute flow file')).toBeVisible();
 		await expect(rt.getByLabel('Factor on the gauge record')).toHaveCount(0);
 	});
 });
