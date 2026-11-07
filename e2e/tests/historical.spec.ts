@@ -1,4 +1,4 @@
-import { MAP, chip, expect, expectRow, findNode, historical, legend, loadFile, openNode, panel, select, tableRow, test } from '../support/app.ts';
+import { chip, chooseSource, expect, expectRow, findNode, historical, legend, loadFile, MAP, openNode, panel, select, tableRow, test } from '../support/app.ts';
 import type { Locator } from '@playwright/test';
 
 // monthly.xlsx: 15 years (k = 1 to 15), a month is k × (i + 1) × 0.1 Mm³ with i = 0 for Oct, and
@@ -27,12 +27,14 @@ test.describe('Historical Comparison', () => {
 
 		test('loads a monthly spreadsheet with its month and missing counts', async ({ page }) => {
 			const hist = historical(page);
+			await chooseSource(hist, 'Spreadsheet');
 			await loadFile(hist, 'Monthly flow file', 'monthly.xlsx');
 			await expect(status(hist)).toHaveText(XLSX_READ);
 		});
 
 		test('shows full record means, counting only the years with data', async ({ page }) => {
 			const hist = historical(page);
+			await chooseSource(hist, 'Spreadsheet');
 			await loadFile(hist, 'Monthly flow file', 'monthly.xlsx');
 			await expectRow(table(hist), 'Oct', { 'Mean Mm³': '0.800', Years: '15' });
 			await expectRow(table(hist), 'Nov', {
@@ -44,6 +46,7 @@ test.describe('Historical Comparison', () => {
 
 		test('the last 10 years preset sets the period and moves the means', async ({ page }) => {
 			const hist = historical(page);
+			await chooseSource(hist, 'Spreadsheet');
 			await loadFile(hist, 'Monthly flow file', 'monthly.xlsx');
 			await expect(hist.getByRole('textbox', { name: 'From' })).toHaveValue('2005-10');
 			await select(hist, /^Period/).selectOption({ label: 'Last 10 years' });
@@ -55,6 +58,7 @@ test.describe('Historical Comparison', () => {
 
 		test('status text follows the period', async ({ page }) => {
 			const hist = historical(page);
+			await chooseSource(hist, 'Spreadsheet');
 			await loadFile(hist, 'Monthly flow file', 'monthly.xlsx');
 			await expectRow(table(hist), 'Oct', { 'Status of mean': 'Below Drought EWR' });
 			await expectRow(table(hist), 'Nov', { 'Status of mean': 'Below EWR' });
@@ -65,6 +69,7 @@ test.describe('Historical Comparison', () => {
 
 		test('a shorter period is drawn with the full record over it', async ({ page }) => {
 			const hist = historical(page);
+			await chooseSource(hist, 'Spreadsheet');
 			await loadFile(hist, 'Monthly flow file', 'monthly.xlsx');
 			const keys = legend(hist, 'Historical Comparison');
 			await expect(keys.getByRole('button', { name: 'Observed, Oct 2005 to Sep 2020' })).toBeVisible();
@@ -78,6 +83,7 @@ test.describe('Historical Comparison', () => {
 
 		test('a custom period can be typed in', async ({ page }) => {
 			const hist = historical(page);
+			await chooseSource(hist, 'Spreadsheet');
 			await loadFile(hist, 'Monthly flow file', 'monthly.xlsx');
 			await hist.getByRole('textbox', { name: 'From' }).fill('2018-10');
 			await hist.getByRole('textbox', { name: 'From' }).blur();
@@ -88,6 +94,7 @@ test.describe('Historical Comparison', () => {
 
 		test('the Mm³ unit gives one mean column, not the same one twice', async ({ page }) => {
 			const hist = historical(page);
+			await chooseSource(hist, 'Spreadsheet');
 			await loadFile(hist, 'Monthly flow file', 'monthly.xlsx');
 			await select(panel(page), /Units/).selectOption({ label: 'Mm³ per month' });
 			await expect(hist.getByRole('columnheader', { name: 'Mean Mm³' })).toHaveCount(1);
@@ -97,7 +104,7 @@ test.describe('Historical Comparison', () => {
 
 		test('reads flags and a blank month from a text file', async ({ page }) => {
 			const hist = historical(page);
-			await select(hist, /Data source/).selectOption({ label: 'Text file' });
+			await chooseSource(hist, 'Text file');
 			await loadFile(hist, 'Monthly flow file', 'monthly-flagged.txt');
 			await expect(status(hist)).toHaveText(TEXT_READ);
 			await expectRow(table(hist), 'Oct', { 'Mean Mm³': '2.500', Years: '2' });
@@ -107,7 +114,7 @@ test.describe('Historical Comparison', () => {
 
 		test('a junk file gets an error, not a result', async ({ page }) => {
 			const hist = historical(page);
-			await select(hist, /Data source/).selectOption({ label: 'Text file' });
+			await chooseSource(hist, 'Text file');
 			await loadFile(hist, 'Monthly flow file', 'junk.txt');
 			await expect(hist.getByRole('alert')).toHaveText(
 				'junk.txt. No flow table found in "junk.txt". Expected a row of month names above year rows, or Date and Flow columns.'
@@ -118,16 +125,17 @@ test.describe('Historical Comparison', () => {
 
 		test('a readings file is sent to the other comparison', async ({ page }) => {
 			const hist = historical(page);
-			await select(hist, /Data source/).selectOption({ label: 'Text file' });
+			await chooseSource(hist, 'Text file');
 			await loadFile(hist, 'Monthly flow file', 'readings-12min.csv');
 			await expect(hist.getByRole('alert')).toContainText('Use it in the Real Time Comparison.');
 		});
 
 		test('a bad file replaces a good one rather than leaving it on show', async ({ page }) => {
 			const hist = historical(page);
+			await chooseSource(hist, 'Spreadsheet');
 			await loadFile(hist, 'Monthly flow file', 'monthly.xlsx');
 			await expect(status(hist)).toHaveText(XLSX_READ);
-			await select(hist, /Data source/).selectOption({ label: 'Text file' });
+			await chooseSource(hist, 'Text file');
 			await loadFile(hist, 'Monthly flow file', 'junk.txt');
 			await expect(hist.getByRole('alert')).toBeVisible();
 			await expect(hist.getByRole('columnheader', { name: 'Mean Mm³' })).toHaveCount(0);
@@ -135,6 +143,7 @@ test.describe('Historical Comparison', () => {
 
 		test('the workbook sheet with monthly data is chosen for this comparison', async ({ page }) => {
 			const hist = historical(page);
+			await chooseSource(hist, 'Spreadsheet');
 			await loadFile(hist, 'Monthly flow file', 'multi-sheet.xlsx');
 			await expect(select(hist, /^Sheet/)).toHaveValue('Monthly');
 			await expectRow(table(hist), 'Nov', { 'Mean Mm³': '1.600' });
@@ -142,8 +151,8 @@ test.describe('Historical Comparison', () => {
 
 		test('says the monthly API is not established', async ({ page }) => {
 			const hist = historical(page);
-			await select(hist, /Data source/).selectOption({ label: 'API (not yet established)' });
-			await expect(hist.getByText('The DWS monthly API is not yet established')).toContainText('the response format is an assumption');
+			await chooseSource(hist, 'DWS API');
+			await expect(hist.getByText('The DWS monthly volumes API is not yet established')).toContainText('the response format is an assumption');
 			await expect(hist.getByLabel('Monthly flow file')).toHaveCount(0);
 		});
 	});
@@ -151,6 +160,7 @@ test.describe('Historical Comparison', () => {
 	test('flow loaded first carries across nodes', async ({ page }) => {
 		await page.goto(MAP);
 		const hist = historical(page);
+		await chooseSource(hist, 'Spreadsheet');
 		await loadFile(hist, 'Monthly flow file', 'monthly.xlsx');
 		await expect(status(hist)).toHaveText(XLSX_READ);
 
@@ -166,6 +176,7 @@ test.describe('Historical Comparison', () => {
 	test('a Revised node gives the Urgent status at the selected percentile', async ({ page }) => {
 		await openNode(page, 'syr1');
 		const hist = historical(page);
+		await chooseSource(hist, 'Spreadsheet');
 		await loadFile(hist, 'Monthly flow file', 'monthly.xlsx');
 		await select(panel(page), /^EWR percentile/).selectOption('10');
 		await expectRow(table(hist), 'May', { 'Mean Mm³': '6.400', 'Status of mean': 'Urgent action required' });

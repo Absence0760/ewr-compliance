@@ -1,4 +1,4 @@
-import { MAP, expect, fixture, openNode, panel, realTime, historical, select, test } from '../support/app.ts';
+import { expect, fixture, historical, MAP, openNode, panel, realTime, sourceInUse, test } from '../support/app.ts';
 import type { Page } from '@playwright/test';
 
 // The Load flow data window: the same importers as each comparison's Data source, in a window of their own.
@@ -24,7 +24,7 @@ test.describe('the Load flow data window', () => {
 		await expect(w).toBeHidden();
 		await expect(page.getByRole('tab', { name: 'Historical Comparison' })).toHaveAttribute('aria-selected', 'true');
 		const hist = historical(page);
-		await expect(select(hist, /Data source/)).toHaveValue('sheet');
+		await expect(sourceInUse(hist)).toHaveValue('sheet');
 		await expect(hist.getByRole('status').first()).toHaveText(XLSX_READ);
 	});
 
@@ -32,14 +32,14 @@ test.describe('the Load flow data window', () => {
 		// syq1 opens on its gauge, X0H999.
 		await openNode(page, 'syq1');
 		await page.getByRole('tab', { name: 'Real Time Comparison' }).click();
-		await expect(select(realTime(page), /Data source/)).toHaveValue('gauge');
+		await expect(sourceInUse(realTime(page))).toHaveValue('gauge');
 
 		const w = await openWindow(page);
 		await w.getByLabel('Choose a 12-minute or daily flow file').setInputFiles(fixture('readings-12min.csv'));
 		await expect(w.getByRole('status')).toHaveText(CSV_READ);
 		await w.getByRole('button', { name: 'Show in the Real Time Comparison' }).click();
 		const rt = realTime(page);
-		await expect(select(rt, /Data source/)).toHaveValue('text');
+		await expect(sourceInUse(rt)).toHaveValue('text');
 		await expect(rt.getByRole('status').first()).toHaveText(CSV_READ);
 	});
 

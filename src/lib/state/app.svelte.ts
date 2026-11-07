@@ -3,7 +3,7 @@ import { asset } from '$app/paths';
 import { ewrLines, gaugeFlow, gaugeSeries, parseGaugeFlows, parseMon, parseRevised, parseTab, ymKey } from '#lib/ewr/parsers.ts';
 import { allFiles, buildNotices, resolveView } from '#lib/ewr/resolve.ts';
 import type {
-	EcBasis, EwrNode, EwrSite, Flow, FlowSource, FlowUnit, FlowWant, GaugeData, GaugeFlowFile, GaugeFlows, GaugeLink, GaugeRecord, HistView, IndexData, Issue, NodeChoices, NodeFile, NodeInfo, NodeInfoData, NodeView, Notice, ResolvedLines, RtView, Sheet, YearIs
+	EcBasis, EwrNode, EwrSite, Flow, FlowSource, FlowUnit, GaugeData, GaugeFlowFile, GaugeFlows, GaugeLink, GaugeRecord, HistView, IndexData, Issue, NodeChoices, NodeFile, NodeInfo, NodeInfoData, NodeView, Notice, ResolvedLines, RtView, Sheet, YearIs
 } from '#lib/ewr/types.ts';
 
 const slug = (b: string) => b.toLowerCase().replace(/-/g, '');
@@ -51,10 +51,15 @@ class AppState {
 	tab = $state<'hist' | 'rt'>('hist');
 	hist = $state.raw<FlowSlot>(emptySlot('mm3'));
 	rt = $state.raw<FlowSlot>(emptySlot('cumec'));
-	histView = $state<HistView>({ source: 'sheet', preset: 'full', from: 0, to: 0, overlay: true });
-	rtView = $state<RtView>({ source: 'sheet', month: 'all', showRaw: false });
-	rtApi = $state({ url: '', station: '' });
+	/** A node with no linked gauge starts on the DWS API. */
+	histView = $state<HistView>({ source: 'api', preset: 'full', from: 0, to: 0, overlay: true });
+	rtView = $state<RtView>({ source: 'api', month: 'all', showRaw: false });
+	/** The API addresses and station, kept across reloads. The Real Time Comparison makes two requests. */
 	histApi = $state({ url: '', station: '' });
+	rtApi = $state({ daily: '', readings: '', station: '' });
+	/** What the APIs returned, kept apart from a loaded file so neither shows under the other. */
+	histApiSlot = $state.raw<FlowSlot>(emptySlot('mm3'));
+	rtApiSlots = $state.raw<Record<'daily' | 'readings', FlowSlot>>({ daily: emptySlot('cumec'), readings: emptySlot('cumec') });
 
 	lines = $state.raw<ResolvedLines | null>(null);
 	notices = $state.raw<Notice[]>([]);
@@ -84,7 +89,14 @@ class AppState {
 		return flows ? gaugeSeries(flows, this.factor) : null;
 	});
 	/** The observed record the Historical Comparison is using. */
-	histFlow = $derived(this.histView.source === 'gauge' ? this.gaugeFlow : this.hist.flow);
+	histFlow = $derived(
+		this.histView.source === 'gauge' ? this.gaugeFlow : this.histView.source === 'api' ? this.histApiSlot.flow : this.hist.flow
+	);
+	/** The Real Time API's daily record and readings, put together as a gauge's are. Unfactored, like a file. */
+	apiRt = $derived.by(() => {
+		const daily = this.rtApiSlots.daily.flow?.points, readings = this.rtApiSlots.readings.flow?.points;
+		return daily || readings ? gaugeSeries({ daily: daily ?? [], readings: readings ?? [] }) : null;
+	});
 
 	viewOf(n: EwrNode): NodeView {
 		return resolveView(n, this.ecBasis, this.choices[n.id], !!this.uploads[n.id]);
@@ -132,7 +144,8 @@ class AppState {
 			const s = JSON.parse(localStorage.getItem(STORAGE) || '{}');
 			if (s.ecBasis) this.ecBasis = s.ecBasis;
 			if (s.choices) this.choices = s.choices;
-			if (s.rtApi) this.rtApi = s.rtApi;
+			// An address saved before the two real-time requests was the readings one.
+			if (s.rtApi) this.rtApi = { daily: s.rtApi.daily ?? '', readings: s.rtApi.readings ?? s.rtApi.url ?? '', station: s.rtApi.station ?? '' };
 			if (s.histApi) this.histApi = s.histApi;
 		} catch {
 			/* storage unavailable: the app works without it */
@@ -208,19 +221,23 @@ class AppState {
 		void this.refresh();
 	}
 
-	/** A linked gauge is the node's record unless a loaded file is in use; a node with no link cannot stay on it. */
+	/**
+	 * A linked gauge is the node's record unless a loaded file or API record is in use. A node with no
+	 * link cannot stay on it, and goes to the API.
+	 */
 	private syncHistSource() {
 		const h = this.histView;
-		if (h.source === 'gauge' && !this.gaugeFlow) h.source = 'sheet';
-		else if (this.gaugeFlow && h.source !== 'api' && !this.hist.flow) h.source = 'gauge';
+		if (h.source === 'gauge' && !this.gaugeFlow) h.source = 'api';
+		else if (this.gaugeFlow && !this.histFlow) h.source = 'gauge';
 		if (h.source === 'gauge') this.wholeRecord(this.gaugeFlow);
 	}
 
 	private syncRtSource() {
 		const r = this.rtView;
 		const station = this.link && this.flowStations.has(this.link.station) ? this.link.station : null;
-		if (r.source === 'gauge' && !station) this.setRtSource('sheet');
-		else if (station && r.source !== 'api' && !this.rt.flow) r.source = 'gauge';
+		const inUse = r.source === 'api' ? this.apiRt : r.source === 'gauge' ? null : this.rt.flow;
+		if (r.source === 'gauge' && !station) this.setRtSource('api');
+		else if (station && r.source !== 'gauge' && !inUse) r.source = 'gauge';
 		if (station) void this.loadFlows(station);
 	}
 
@@ -294,10 +311,25 @@ class AppState {
 		if (slot.flow) this.rtView.month = 'all';
 	}
 
-	setApi(want: FlowWant, url: string, station: string) {
-		if (want === 'instant') this.rtApi = { url, station };
-		else this.histApi = { url, station };
+	setHistApi(url: string, station: string) {
+		this.histApi = { url, station };
 		this.persist();
+	}
+
+	setRtApi(daily: string, readings: string, station: string) {
+		this.rtApi = { daily, readings, station };
+		this.persist();
+	}
+
+	/** API data restarts from the whole record, as a file does. */
+	setHistApiSlot(slot: FlowSlot) {
+		this.histApiSlot = slot;
+		this.wholeRecord(slot.flow);
+	}
+
+	setRtApiSlot(call: 'daily' | 'readings', slot: FlowSlot) {
+		this.rtApiSlots = { ...this.rtApiSlots, [call]: slot };
+		this.rtView.month = 'all';
 	}
 
 	openFile(nodeId: string, file: string) {

@@ -184,10 +184,11 @@ describe('API', () => {
 		);
 	});
 
-	it('asks for 31 days in real time and the whole record for monthly', () => {
+	it('asks for 31 days of real-time readings, and the whole record of monthly volumes and daily flow', () => {
 		const now = new Date('2025-12-02T00:00:00Z');
-		expect(apiWindow('instant', now)).toEqual({ from: new Date('2025-11-01T00:00:00Z'), to: now });
+		expect(apiWindow('readings', now)).toEqual({ from: new Date('2025-11-01T00:00:00Z'), to: now });
 		expect(apiWindow('monthly', now)).toEqual({ from: new Date('1900-01-01T00:00:00Z'), to: now });
+		expect(apiWindow('daily', now)).toEqual({ from: new Date('1900-01-01T00:00:00Z'), to: now });
 	});
 
 	it('stops a request that cannot be right', () => {
@@ -204,41 +205,61 @@ describe('API', () => {
 				{ time: '2025-11-26T00:00:00', flow: 0.93 },
 				{ time: '2025-11-26T00:12:00', flow: 0.92 }
 			]);
-			const s = importApi(body, 'X0H001', 'instant');
+			const s = importApi(body, 'X0H001', 'readings');
 			expect(s.name).toBe('X0H001');
 			expect(s.unitIn).toBe('cumec');
 			expect(s.flow?.points?.map((p) => p.v)).toEqual([0.93, 0.92]);
 		});
 
 		it('reads rows wrapped in data', () => {
-			const s = importApi(JSON.stringify({ data: [{ date: '2025-11-26 00:00', flow: 1.5 }, { date: '2025-11-26 00:12', flow: 1.4 }] }), '', 'instant');
+			const s = importApi(JSON.stringify({ data: [{ date: '2025-11-26 00:00', flow: 1.5 }, { date: '2025-11-26 00:12', flow: 1.4 }] }), '', 'readings');
 			expect(s.name).toBe('API');
 			expect(s.flow?.points).toHaveLength(2);
 		});
 
 		it('keeps a flow column the first row leaves out', () => {
 			const body = JSON.stringify([{ date: '2025-11-26 00:00' }, { date: '2025-11-26 00:12', flow: 1.4 }, { date: '2025-11-26 00:24', flow: 1.3 }]);
-			expect(importApi(body, '', 'instant').flow?.points?.map((p) => p.v)).toEqual([null, 1.4, 1.3]);
+			expect(importApi(body, '', 'readings').flow?.points?.map((p) => p.v)).toEqual([null, 1.4, 1.3]);
 		});
 
 		it('refuses readings that declare Mm³', () => {
 			const body = JSON.stringify([{ date: '2025-11-26 00:00', 'Flow Mm3': 1 }, { date: '2025-11-26 00:12', 'Flow Mm3': 1 }]);
-			const s = importApi(body, 'X0H001', 'instant');
+			const s = importApi(body, 'X0H001', 'readings');
 			expect(s.flow).toBeNull();
 			expect(s.message).toEqual({ level: 'error', text: MM3_REFUSED });
 		});
 
 		it('takes readings that name no unit as m³/s', () => {
 			const body = JSON.stringify([{ date: '2025-11-26 00:00', flow: 1 }, { date: '2025-11-26 00:12', flow: 1 }]);
-			const s = importApi(body, '', 'instant');
+			const s = importApi(body, '', 'readings');
 			expect(s.unitIn).toBe('cumec');
 			expect(s.flow?.points).toHaveLength(2);
 		});
 
 		it('says when the rows are monthly', () => {
-			const s = importApi(JSON.stringify(matrixRows), '', 'instant');
+			const s = importApi(JSON.stringify(matrixRows), '', 'readings');
 			expect(s.flow).toBeNull();
 			expect(s.message?.text).toContain('monthly values only');
+		});
+	});
+
+	describe('daily flow', () => {
+		it('reads a day a row as m³/s, and counts days', () => {
+			const body = JSON.stringify([{ date: '2025-10-01', flow: 2.5, quality: 1 }, { date: '2025-10-02', flow: null, quality: 170 }, { date: '2025-10-03', flow: 2.1, quality: 1 }]);
+			const s = importApi(body, 'X0H001', 'daily');
+			expect(s.unitIn).toBe('cumec');
+			expect(s.flow?.points?.map((p) => p.v)).toEqual([2.5, null, 2.1]);
+			expect(s.message).toEqual({ level: 'info', text: 'Read 2 days, 2025-10-01 to 2025-10-03.' });
+		});
+
+		it('counts one day as one day', () => {
+			const body = JSON.stringify([{ time: '2025-10-01T00:00:00', flow: 2 }, { time: '2025-10-01T12:00:00', flow: 2 }]);
+			expect(importApi(body, 'X0H001', 'daily').message?.text).toBe('Read 1 day, 2025-10-01 to 2025-10-01.');
+		});
+
+		it('refuses daily flow in Mm³, as real-time readings are', () => {
+			const body = JSON.stringify([{ date: '2025-10-01', 'Flow Mm3': 1 }, { date: '2025-10-02', 'Flow Mm3': 1 }]);
+			expect(importApi(body, '', 'daily').message).toEqual({ level: 'error', text: MM3_REFUSED });
 		});
 	});
 
@@ -290,7 +311,7 @@ describe('API', () => {
 	});
 
 	describe('a response that holds no flow', () => {
-		const wants = ['instant', 'monthly'] as const;
+		const wants = ['readings', 'monthly'] as const;
 		const problem = (body: string) => {
 			const [a, b] = wants.map((want) => importApi(body, 'X0H001', want));
 			for (const s of [a, b]) {
@@ -392,14 +413,15 @@ describe('API', () => {
 	});
 
 	it('gives a whole record longer than 31 days of readings', () => {
-		expect(apiTimeoutMs('instant')).toBe(60_000);
+		expect(apiTimeoutMs('readings')).toBe(60_000);
 		expect(apiTimeoutMs('monthly')).toBe(180_000);
+		expect(apiTimeoutMs('daily')).toBe(180_000);
 	});
 
 	it('says how long it waited when the real timeout signal fires', async () => {
 		const signal = AbortSignal.timeout(1);
 		await new Promise((done) => signal.addEventListener('abort', done));
-		expect(apiRequestFailure(signal.reason, 'instant')).toBe('API request failed: no full response within 60 seconds. The server may be slow or not responding.');
+		expect(apiRequestFailure(signal.reason, 'readings')).toBe('API request failed: no full response within 60 seconds. The server may be slow or not responding.');
 		expect(apiRequestFailure(signal.reason, 'monthly')).toContain('within 180 seconds');
 	});
 });

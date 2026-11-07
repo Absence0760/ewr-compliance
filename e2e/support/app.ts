@@ -92,6 +92,14 @@ export const mapRegion = (page: Page) => page.getByRole('region', { name: 'Map o
 export const panel = (page: Page) => page.getByRole('complementary', { name: 'Compliance' });
 export const select = (scope: Page | Locator, name: string | RegExp) => scope.getByRole('combobox', { name });
 
+/** A comparison's Data source: radio buttons, each named by its label and then a line on what it holds. */
+export const sources = (scope: Locator) => scope.getByRole('group', { name: 'Data source' });
+const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export const source = (scope: Locator, label: string) => sources(scope).getByRole('radio', { name: new RegExp(`^${escape(label)} `) });
+export const chooseSource = (scope: Locator, label: string) => source(scope, label).check();
+/** The source in use, whose value is gauge, api, sheet or text. */
+export const sourceInUse = (scope: Locator) => sources(scope).getByRole('radio', { checked: true });
+
 /** The panel's chip, for example `chip(page, 'EC in use')`, which reads "EC in use D". */
 export const chip = (page: Page, name: string) => panel(page).getByText(new RegExp(`^${name}`));
 

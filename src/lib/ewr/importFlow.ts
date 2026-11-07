@@ -1,7 +1,7 @@
 // Reads observed flow from a file or an API body into a FlowSlot. Pure: no DOM and no app state.
 // xlsx is loaded on demand so it stays out of the first page bundle.
 import { CALENDAR } from './format.ts';
-import { buildFlow, dayRows, detectLayout, isDay, isMon, monRows, parseDay, parseDelimited, parseMon } from './parsers.ts';
+import { buildFlow, dailyMeans, dayRows, detectLayout, isDay, isMon, monRows, parseDay, parseDelimited, parseMon } from './parsers.ts';
 import type { FlowSlot } from '#lib/state/app.svelte.ts';
 import type { Cell, FlowUnit, FlowWant, Sheet } from './types.ts';
 
@@ -95,21 +95,33 @@ export function pickSheet(slot: FlowSlot, name: string, want: FlowWant): FlowSlo
 	return applyImport({ ...slot, sheet, unitIn: defaultUnit(sheet, want) }, want);
 }
 
-/** Real time asks for the last 31 days. */
+/**
+ * The DWS APIs, none established yet: monthly volumes for the Historical Comparison, and for the Real
+ * Time Comparison the daily flow record and the latest real-time readings, as two requests.
+ */
+export type ApiCall = 'monthly' | 'daily' | 'readings';
+
+export const API_CALL: Record<ApiCall, { want: FlowWant; name: string }> = {
+	monthly: { want: 'monthly', name: 'Monthly volumes API' },
+	daily: { want: 'instant', name: 'Daily flow API' },
+	readings: { want: 'instant', name: 'Real-time API' }
+};
+
+/** Real-time readings are asked for the last 31 days. */
 export const API_DAYS = 31;
 
 /** A whole record is far larger than 31 days of readings, so it gets longer. */
-const API_TIMEOUT_INSTANT_MS = 60_000;
-const API_TIMEOUT_MONTHLY_MS = 180_000;
+const API_TIMEOUT_READINGS_MS = 60_000;
+const API_TIMEOUT_RECORD_MS = 180_000;
 
-export const apiTimeoutMs = (want: FlowWant) => (want === 'monthly' ? API_TIMEOUT_MONTHLY_MS : API_TIMEOUT_INSTANT_MS);
+export const apiTimeoutMs = (call: ApiCall) => (call === 'readings' ? API_TIMEOUT_READINGS_MS : API_TIMEOUT_RECORD_MS);
 
-/** Monthly asks for the whole record. Every series in static/data starts in 1920 or later, so {from} cuts nothing off. */
+/** A record is asked for whole. Every series in static/data starts in 1920 or later, so {from} cuts nothing off. */
 const RECORD_START = Date.UTC(1900, 0, 1);
 
 /** The period an API request asks for. */
-export function apiWindow(want: FlowWant, now: Date): { from: Date; to: Date } {
-	const from = want === 'monthly' ? RECORD_START : now.getTime() - API_DAYS * 86400000;
+export function apiWindow(call: ApiCall, now: Date): { from: Date; to: Date } {
+	const from = call === 'readings' ? now.getTime() - API_DAYS * 86400000 : RECORD_START;
 	return { from: new Date(from), to: now };
 }
 
@@ -195,14 +207,20 @@ export function apiSheet(body: string): { sheet: Sheet; problem: string } {
 }
 
 /**
- * A fetched body into a fresh slot. Real-time flow is m³/s, as the brief says, and a response
- * declaring Mm³ is refused. Monthly flow is Mm³ per month unless the response names its unit, and
- * the user can change that.
+ * A fetched body into a fresh slot. Real-time and daily flow is m³/s, as the brief says, and a response
+ * declaring Mm³ is refused. Monthly flow is Mm³ per month unless the response names its unit, and the
+ * user can change that. Daily flow is counted in days.
  */
-export function importApi(body: string, station: string, want: FlowWant): FlowSlot {
+export function importApi(body: string, station: string, call: ApiCall): FlowSlot {
+	const want = API_CALL[call].want;
 	const { sheet, problem } = apiSheet(body);
 	const slot: FlowSlot = { sheets: [sheet], sheet, name: station || 'API', unitIn: defaultUnit(sheet, want), yearIs: 'start', flow: null, message: null };
-	return problem ? { ...slot, message: flowMessage('error', problem) } : applyImport(slot, want);
+	if (problem) return { ...slot, message: flowMessage('error', problem) };
+	const out = applyImport(slot, want);
+	if (call !== 'daily' || !out.flow?.points) return out;
+	const days = dailyMeans(out.flow.points);
+	const day = (t: number) => new Date(t).toISOString().slice(0, 10);
+	return { ...out, message: flowMessage('info', `Read ${days.length.toLocaleString()} day${days.length === 1 ? '' : 's'}, ${day(days[0].t)} to ${day(days[days.length - 1].t)}.`) };
 }
 
 /** A non-2xx response, with whatever the body says about it. */
@@ -212,7 +230,7 @@ export function apiHttpFailure(status: number, body: string): string {
 }
 
 /** fetch rejects with a TypeError, and no detail, when a server is out of reach or refuses CORS. */
-export function apiRequestFailure(err: Error, want: FlowWant): string {
-	if (err.name === 'TimeoutError') return `API request failed: no full response within ${apiTimeoutMs(want) / 1000} seconds. The server may be slow or not responding.`;
+export function apiRequestFailure(err: Error, call: ApiCall): string {
+	if (err.name === 'TimeoutError') return `API request failed: no full response within ${apiTimeoutMs(call) / 1000} seconds. The server may be slow or not responding.`;
 	return `API request failed: ${err.message}.${err instanceof TypeError ? ' The address may be wrong, the server down, or it may not allow cross-origin requests from this site.' : ''}`;
 }

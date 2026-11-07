@@ -102,17 +102,19 @@ The client brief is in the private repo.
 
 ## DWS API
 
-DWS has not published the API, so its address, its parameters and its response format are unknown. The form under each comparison (Data source > API) is ready for it, and what it accepts is an assumption until DWS publishes something. Expect to change it then.
+DWS has not published the API, so its address, its parameters and its response format are unknown. The form under each comparison (Data source > DWS API) is ready for it, and what it accepts is an assumption until DWS publishes something. Expect to change it then.
+
+The DWS API is each comparison's default source at a node with no linked gauge. The Historical Comparison makes one request, to the monthly volumes API. The Real Time Comparison makes two, each with its own address: the daily flow API, for the whole daily record, and the real-time API, for the latest readings. Either can be left blank. The two are drawn together a month at a time, as a linked gauge's daily flow and readings are, with a day in the daily record taken from it and not from the readings. Neither is scaled by a node's factor: like a file, the API gives the node's flow as it is.
 
 Until then, and afterwards, flow can be loaded by hand from a spreadsheet or text file: in each comparison's Data source, or in the Load flow data window in the compliance panel, which takes monthly flow for the Historical Comparison and 12-minute or daily flow for the Real Time Comparison.
 
 Enter the address with `{station}`, `{from}` and `{to}` where they belong; they are filled in as an ISO date and time. The endpoint must allow cross-origin requests from wherever this app is hosted, or be proxied, and a site on `https` can only call an `https` endpoint. The address and station are kept in the browser, separately for each comparison, so don't put a key in the address.
 
-| | Historical Comparison | Real Time Comparison |
-|---|---|---|
-| Request window | The whole record: `{from}` is 1900-01-01, earlier than any series in the real data, and `{to}` is now | The last 31 days |
-| Response | A date and a flow for each month, or a year with month columns | A time and a flow |
-| Unit | Mm³ per month unless a column name gives the unit; change it under Values are in | m³/s. Data that declares Mm³, from a file or the API, is refused: a volume per reading has no defined interval to convert over |
-| Timeout | 180 seconds | 60 seconds |
+| | Monthly volumes API (Historical) | Daily flow API (Real Time) | Real-time API (Real Time) |
+|---|---|---|---|
+| Request window | The whole record: `{from}` is 1900-01-01, earlier than any series in the real data, and `{to}` is now | The whole record, as for monthly volumes | The last 31 days |
+| Response | A date and a flow for each month, or a year with month columns | A date and a flow for each day, with an optional quality column | A time and a flow |
+| Unit | Mm³ per month unless a column name gives the unit; change it under Values are in | m³/s, as for real time | m³/s. Data that declares Mm³, from a file or the API, is refused: a volume per reading has no defined interval to convert over |
+| Timeout | 180 seconds | 180 seconds | 60 seconds |
 
 The response may be JSON rows (a list, or a list under `data` or `rows`) or CSV. Either way it is read as a file would be. An `error` or `errors` field, an empty list, a web page, or a body that is neither gives a message saying so, and replaces any flow on show. A failed request (a network failure, a timeout or a 4xx or 5xx status) gives a message and leaves the flow on show, with its status line, until it is replaced.

@@ -14,9 +14,12 @@
 
 	const EMPTY_RANGE: [number, number] = [0, 86400000];
 	const r = app.rtView;
-	const gauge = $derived(r.source === 'gauge' ? app.gaugeRt : null);
+	const api = $derived(r.source === 'api');
+	/** A linked gauge, or the DWS API's daily record and readings, put together the same way. */
+	const gauge = $derived(r.source === 'gauge' ? app.gaugeRt : api ? app.apiRt : null);
 	const link = $derived(r.source === 'gauge' ? app.link : null);
-	const f = $derived(gauge ? null : app.rt.flow);
+	const apiStation = $derived(api ? (app.rtApiSlots.daily.flow ? app.rtApiSlots.daily : app.rtApiSlots.readings).name : null);
+	const f = $derived(r.source === 'sheet' || r.source === 'text' ? app.rt.flow : null);
 	const allPoints = $derived(gauge ? gauge.readings : (f?.points ?? []));
 	const daily = $derived(gauge ? gauge.days : dailyMeans(allPoints));
 	const months = $derived(loadedMonths(daily));
@@ -26,7 +29,9 @@
 	const days = $derived(daily.filter((d) => inMonth(d.t)));
 	const pts = $derived(allPoints.filter((p) => p.v !== null && inMonth(p.t)));
 	const range = $derived(days.length ? rtRange(days, month) : EMPTY_RANGE);
-	const label = $derived(link ? `Daily mean flow, ${gaugeName(link.station, app.factor)}` : undefined);
+	const label = $derived(
+		link ? `Daily mean flow, ${gaugeName(link.station, app.factor)}` : apiStation && gauge ? `Daily mean flow, ${apiStation}` : undefined
+	);
 	const series = $derived(days.length ? rtSeries(app.lines, days, r.showRaw ? pts : null, range, label, app.unit) : []);
 	const latest = $derived(rtLatest(app.lines, pts, app.unit));
 	const u = $derived(unitName(app.unit));
@@ -48,6 +53,10 @@
 		<button type="button" onclick={() => app.showGauge(link.station)}>View gauge record</button>
 	</div>
 	<GaugeFactor {link} />
+{:else if api && gauge}
+	<div class="notice info" role="status">
+		<b>{apiStation}, from the DWS API.</b> {countOf(daily.length, 'day')} of flow in {countOf(months.length, 'month')}. {countOf(codedDays, 'day')} with a quality code drawn in their own colour, and {countOf(gauge.missing, 'missing day')} not drawn.
+	</div>
 {/if}
 
 {#if f || gauge}

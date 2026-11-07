@@ -32,7 +32,7 @@ The app opens on South Africa's six Water Management Areas of 2023 (`/`): a bann
 
 ## Loading flow by hand
 
-Observed flow comes from a linked gauge, the DWS API once it exists, or a file. A file can be loaded in each comparison's Data source, or in the Load flow data window, opened from the compliance panel: monthly flow for the Historical Comparison, and 12-minute or daily flow for the Real Time Comparison, chosen or dropped. The window uses the same importer (`importFile`) and puts the file in use in its comparison, in place of a gauge or the API. Sheet, units and year are then set in the comparison. A file is read in the browser and never sent anywhere.
+Observed flow comes from a linked gauge, the DWS API once it exists, or a file. Each comparison's Data source lists these as radio buttons, each saying what it holds (`FlowImport.svelte`). A node with no linked gauge starts on the DWS API. The API's data is kept apart from a loaded file's (`histApiSlot`, `rtApiSlots`), so switching source shows each one's own. The Real Time Comparison's two API requests, daily flow and real-time readings, are put together by `gaugeSeries`, as a gauge's are (`apiRt`), and shown a month at a time; README § DWS API. A file can be loaded in each comparison's Data source, or in the Load flow data window, opened from the compliance panel: monthly flow for the Historical Comparison, and 12-minute or daily flow for the Real Time Comparison, chosen or dropped. The window uses the same importer (`importFile`) and puts the file in use in its comparison, in place of a gauge or the API. Sheet, units and year are then set in the comparison. A file is read in the browser and never sent anywhere.
 
 ## Gauge records
 

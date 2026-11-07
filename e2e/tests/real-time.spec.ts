@@ -1,4 +1,4 @@
-import { chip, expect, expectRow, legend, loadFile, openNode, realTime, select, showRealTime, test } from '../support/app.ts';
+import { chip, chooseSource, expect, expectRow, legend, loadFile, openNode, realTime, select, showRealTime, test } from '../support/app.ts';
 import type { Locator, Page } from '@playwright/test';
 
 // readings-12min.csv: 120 readings a day, alternating 0.01 under and over the day's mean.
@@ -17,7 +17,7 @@ const stat = (rt: Locator, name: string | RegExp) => rt.getByText(name).locator(
 
 async function loadCsv(page: Page) {
 	const rt = realTime(page);
-	await select(rt, /Data source/).selectOption({ label: 'Text file' });
+	await chooseSource(rt, 'Text file');
 	await loadFile(rt, '12-minute flow file', 'readings-12min.csv');
 	await expect(rt.getByRole('status').first()).toHaveText(CSV_READ);
 	return rt;
@@ -89,6 +89,7 @@ test.describe('Real Time Comparison', () => {
 
 	test('finds the 12-minute sheet of a workbook, whatever its position', async ({ page }) => {
 		const rt = realTime(page);
+		await chooseSource(rt, 'Spreadsheet');
 		await loadFile(rt, '12-minute flow file', 'multi-sheet.xlsx');
 		await expect(rt.getByRole('status').first()).toHaveText(SHEET_READ);
 		const sheet = select(rt, /^Sheet/);
@@ -102,6 +103,7 @@ test.describe('Real Time Comparison', () => {
 
 	test('another sheet can be chosen, and says when it will not do', async ({ page }) => {
 		const rt = realTime(page);
+		await chooseSource(rt, 'Spreadsheet');
 		await loadFile(rt, '12-minute flow file', 'multi-sheet.xlsx');
 		const sheet = select(rt, /^Sheet/);
 		await sheet.selectOption('Monthly');
@@ -115,13 +117,14 @@ test.describe('Real Time Comparison', () => {
 
 	test('a monthly file is sent to the other comparison', async ({ page }) => {
 		const rt = realTime(page);
+		await chooseSource(rt, 'Spreadsheet');
 		await loadFile(rt, '12-minute flow file', 'monthly.xlsx');
 		await expect(rt.getByRole('alert')).toContainText('use the Historical Comparison for it.');
 	});
 
 	test('readings in Mm³ are refused, not plotted as m³/s', async ({ page }) => {
 		const rt = realTime(page);
-		await select(rt, /Data source/).selectOption({ label: 'Text file' });
+		await chooseSource(rt, 'Text file');
 		const csv = ['Date,Time,Flow (Mm3)', '2025-11-29,00:00,0.5', '2025-11-29,00:12,0.5', '2025-11-29,00:24,0.5'].join('\n');
 		await rt.getByLabel('12-minute flow file').setInputFiles({ name: 'readings-mm3.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
 		await expect(rt.getByRole('alert')).toHaveText('readings-mm3.csv. This data is in Mm³. The Real Time Comparison needs flow in m³/s, so it was not loaded.');
@@ -136,17 +139,18 @@ test.describe('Real Time Comparison', () => {
 
 	test('a junk file gets an error', async ({ page }) => {
 		const rt = realTime(page);
-		await select(rt, /Data source/).selectOption({ label: 'Text file' });
+		await chooseSource(rt, 'Text file');
 		await loadFile(rt, '12-minute flow file', 'junk.txt');
 		await expect(rt.getByRole('alert')).toContainText('No flow table found in "junk.txt".');
 	});
 
 	test('choosing the API says it is not established', async ({ page }) => {
 		const rt = realTime(page);
-		await select(rt, /Data source/).selectOption({ label: 'API (not yet established)' });
-		await expect(rt.getByText('The DWS real-time API is not yet established')).toContainText('the response format is an assumption');
+		await chooseSource(rt, 'DWS API');
+		await expect(rt.getByText('The DWS daily flow and real-time APIs are not yet established')).toContainText('the response format is an assumption');
 		await expect(rt.getByLabel('12-minute flow file')).toHaveCount(0);
-		await rt.getByRole('button', { name: 'Load last 31 days' }).click();
-		await expect(rt.getByRole('alert')).toHaveText('Enter the API address first.');
+		await expect(rt.getByRole('textbox', { name: 'Daily flow API' })).toBeVisible();
+		await rt.getByRole('button', { name: 'Load daily and real-time flow' }).click();
+		await expect(rt.getByRole('alert')).toHaveText('Enter the daily flow API address, the real-time API address, or both.');
 	});
 });

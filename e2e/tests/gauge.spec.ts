@@ -1,4 +1,4 @@
-import { expect, expectRow, findNode, historical, legend, loadFile, mapRegion, openNode, panel, select, test } from '../support/app.ts';
+import { chooseSource, expect, expectRow, findNode, historical, legend, loadFile, mapRegion, openNode, panel, sourceInUse, sources, test } from '../support/app.ts';
 import type { Page } from '@playwright/test';
 
 // X0H999 in the sample: year k = 0 to 2 from 2001/2002, month i = 0 for Oct: (k + 1) × (i + 1) × 0.1 Mm³.
@@ -50,7 +50,7 @@ test.describe('a linked gauge', () => {
 	test('its node opens on the gauge record with the factor applied, by default', async ({ page }) => {
 		await openNode(page, 'syq1');
 		const hist = historical(page);
-		await expect(select(hist, /Data source/)).toHaveValue('gauge');
+		await expect(sourceInUse(hist)).toHaveValue('gauge');
 		await expect(hist.getByRole('status').first()).toContainText('X0H999. Using 34 months, Oct 2001 to Sep 2004. 2 months flagged # are left out of the means.');
 		await expect(hist.getByLabel('Factor on the gauge record')).toHaveValue('0.5');
 		await expect(hist.getByText('Invented: the gauge is upstream of the node')).toBeVisible();
@@ -99,7 +99,7 @@ test.describe('a linked gauge', () => {
 		// Jan: 4, 8 is out, 12, so 8.000 over 2. Mar: 6, 12, then -99.999, so 9.000 over 2.
 		await openNode(page, 'syb1');
 		const hist = historical(page);
-		await expect(select(hist, /Data source/)).toHaveValue('gauge');
+		await expect(sourceInUse(hist)).toHaveValue('gauge');
 		await expectRow(compare(page), 'Oct', { 'Mean Mm³': '2.000', Years: '3' });
 		await expectRow(compare(page), 'Nov', { 'Mean Mm³': '4.000', Years: '3' });
 		await expectRow(compare(page), 'Jan', { 'Mean Mm³': '8.000', Years: '2' });
@@ -115,21 +115,22 @@ test.describe('a linked gauge', () => {
 		await openNode(page, 'syq1');
 		await findNode(page, 'syt1', 'syt1 / SYN-SITE1');
 		const hist = historical(page);
-		await expect(select(hist, /Data source/)).toHaveValue('sheet');
-		await expect(select(hist, /Data source/).getByRole('option', { name: /Linked gauge/ })).toHaveCount(0);
+		await expect(sourceInUse(hist)).toHaveValue('api');
+		await expect(sources(hist).getByRole('radio', { name: /Linked gauge/ })).toHaveCount(0);
 		await expect(hist.getByLabel('Factor on the gauge record')).toHaveCount(0);
 	});
 
 	test('a loaded file is kept over the gauge, and the source can go back to the gauge', async ({ page }) => {
 		await openNode(page, 'syt1', 'syt1 / SYN-SITE1');
 		const hist = historical(page);
+		await chooseSource(hist, 'Spreadsheet');
 		await loadFile(hist, 'Monthly flow file', 'monthly.xlsx');
 		await expect(hist.getByRole('status').first()).toContainText('monthly.xlsx. Read 179 months');
 		await findNode(page, 'syq1');
-		await expect(select(hist, /Data source/)).toHaveValue('sheet');
+		await expect(sourceInUse(hist)).toHaveValue('sheet');
 		await expectRow(compare(page), 'Oct', { 'Mean Mm³': '0.800', Years: '15' });
 
-		await select(hist, /Data source/).selectOption({ label: 'Linked gauge, X0H999' });
+		await chooseSource(hist, 'Linked gauge, X0H999');
 		await expectRow(compare(page), 'Oct', { 'Mean Mm³': '0.100', Years: '3' });
 		await expect(hist.getByRole('textbox', { name: 'From' })).toHaveValue('2001-10');
 	});

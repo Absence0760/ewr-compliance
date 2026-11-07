@@ -1,4 +1,4 @@
-import { API_STUB, expect, expectRow, historical, loadFile, openNode, panel, realTime, select, showRealTime, test } from '../support/app.ts';
+import { API_STUB, chooseSource, expect, expectRow, historical, loadFile, openNode, panel, realTime, select, showRealTime, test } from '../support/app.ts';
 import type { Locator, Page, Route } from '@playwright/test';
 
 const MM3_REFUSED = 'This data is in Mm³. The Real Time Comparison needs flow in m³/s, so it was not loaded.';
@@ -53,9 +53,10 @@ async function answer(page: Page, respond: (route: Route) => Promise<void>) {
 	return urls;
 }
 
-async function load(scope: Locator, page: Page, button: string) {
-	await select(scope, /Data source/).selectOption({ label: 'API (not yet established)' });
-	await scope.getByRole('textbox', { name: 'Endpoint' }).fill(new URL(TEMPLATE, page.url()).href.replace(/%7B/g, '{').replace(/%7D/g, '}'));
+/** The Historical Comparison has one address, the monthly volumes API; the Real Time Comparison is given the real-time one. */
+async function load(scope: Locator, page: Page, button: string, address = button === 'Load full record' ? 'Monthly volumes API' : 'Real-time API') {
+	await chooseSource(scope, 'DWS API');
+	await scope.getByRole('textbox', { name: address }).fill(new URL(TEMPLATE, page.url()).href.replace(/%7B/g, '{').replace(/%7D/g, '}'));
 	await scope.getByRole('textbox', { name: 'Station' }).fill('X0H001');
 	await scope.getByRole('button', { name: button }).click();
 }
@@ -166,7 +167,7 @@ test.describe('Flow from an API', () => {
 			const hist = historical(page);
 			await loadHist(page);
 			await expect(status(hist)).toHaveText('Loading…');
-			await select(hist, /Data source/).selectOption({ label: 'Spreadsheet' });
+			await chooseSource(hist, 'Spreadsheet');
 			await loadFile(hist, 'Monthly flow file', 'monthly.xlsx');
 			await expectRow(table(hist), 'Oct', { 'Mean Mm³': '0.800' });
 			await fireTimeout(page, 180_000);
@@ -177,8 +178,8 @@ test.describe('Flow from an API', () => {
 		test('an address with no scheme is refused before any request', async ({ page }) => {
 			const urls = await answer(page, (route) => route.fulfill({ json: MATRIX }));
 			const hist = historical(page);
-			await select(hist, /Data source/).selectOption({ label: 'API (not yet established)' });
-			await hist.getByRole('textbox', { name: 'Endpoint' }).fill('stub-api/flow');
+			await chooseSource(hist, 'DWS API');
+			await hist.getByRole('textbox', { name: 'Monthly volumes API' }).fill('stub-api/flow');
 			await hist.getByRole('button', { name: 'Load full record' }).click();
 			await expect(hist.getByRole('alert')).toHaveText('The API address must start with http:// or https://.');
 			expect(urls).toHaveLength(0);
@@ -189,7 +190,7 @@ test.describe('Flow from an API', () => {
 			const hist = historical(page);
 			await loadHist(page);
 			await expect(hist.getByRole('alert')).toBeVisible();
-			await select(hist, /Data source/).selectOption({ label: 'Spreadsheet' });
+			await chooseSource(hist, 'Spreadsheet');
 			await loadFile(hist, 'Monthly flow file', 'monthly.xlsx');
 			await expect(hist.getByRole('alert')).toHaveCount(0);
 			await expectRow(table(hist), 'Oct', { 'Mean Mm³': '0.800' });
@@ -201,17 +202,17 @@ test.describe('Flow from an API', () => {
 		await answer(page, (route) => route.fulfill({ json: MATRIX }));
 		await load(hist, page, 'Load full record');
 		await expect(hist.getByRole('status').first()).toHaveText(MATRIX_READ);
-		const address = await hist.getByRole('textbox', { name: 'Endpoint' }).inputValue();
+		const address = await hist.getByRole('textbox', { name: 'Monthly volumes API' }).inputValue();
 
 		await showRealTime(page);
 		const rt = realTime(page);
-		await select(rt, /Data source/).selectOption({ label: 'API (not yet established)' });
-		await expect(rt.getByRole('textbox', { name: 'Endpoint' })).toHaveValue('');
+		await chooseSource(rt, 'DWS API');
+		await expect(rt.getByRole('textbox', { name: 'Real-time API' })).toHaveValue('');
 
 		await page.reload();
 		await expect(panel(page)).toBeVisible();
-		await select(hist, /Data source/).selectOption({ label: 'API (not yet established)' });
-		await expect(hist.getByRole('textbox', { name: 'Endpoint' })).toHaveValue(address);
+		await chooseSource(hist, 'DWS API');
+		await expect(hist.getByRole('textbox', { name: 'Monthly volumes API' })).toHaveValue(address);
 		await expect(hist.getByRole('textbox', { name: 'Station' })).toHaveValue('X0H001');
 	});
 
@@ -223,20 +224,52 @@ test.describe('Flow from an API', () => {
 		const urls = await answer(page, (route) => route.fulfill({ json: readings }));
 		await showRealTime(page);
 		const rt = realTime(page);
-		await load(rt, page, 'Load last 31 days');
-		await expect(rt.getByRole('status').first()).toHaveText('X0H001. Read 240 readings, 2025-11-29 to 2025-11-30.');
+		await load(rt, page, 'Load daily and real-time flow');
+		await expect(rt.getByRole('status').first()).toHaveText('Real-time API, X0H001. Read 240 readings, 2025-11-29 to 2025-11-30.');
 		const span = Date.parse(urls[0].searchParams.get('to')!) - Date.parse(urls[0].searchParams.get('from')!);
 		expect(span).toBe(31 * 86400000);
+	});
+
+	test('the Real Time Comparison asks the daily flow API for the whole record, and draws it with the readings', async ({ page }) => {
+		// Oct 1 and 2 from the daily record, and Nov 29 from two readings of 0.5 m³/s.
+		const days = [{ date: '2025-10-01', flow: 2 }, { date: '2025-10-02', flow: 4 }];
+		const readings = [{ time: '2025-11-29T00:00:00', flow: 0.5 }, { time: '2025-11-29T00:12:00', flow: 0.5 }];
+		const urls = await answer(page, (route) => route.fulfill({ json: route.request().url().includes('/daily?') ? days : readings }));
+		await showRealTime(page);
+		const rt = realTime(page);
+		await chooseSource(rt, 'DWS API');
+		const address = (path: string) => new URL(`${API_STUB}${path}?station={station}&from={from}&to={to}`, page.url()).href.replace(/%7B/g, '{').replace(/%7D/g, '}');
+		await rt.getByRole('textbox', { name: 'Station' }).fill('X0H001');
+		await rt.getByRole('textbox', { name: 'Daily flow API' }).fill(address('daily'));
+		await rt.getByRole('textbox', { name: 'Real-time API' }).fill(address('flow'));
+		await rt.getByRole('button', { name: 'Load daily and real-time flow' }).click();
+
+		await expect(rt.getByRole('status').filter({ hasText: 'Daily flow API, X0H001.' })).toHaveText('Daily flow API, X0H001. Read 2 days, 2025-10-01 to 2025-10-02.');
+		await expect(rt.getByRole('status').filter({ hasText: 'X0H001, from the DWS API.' })).toContainText('3 days of flow in 2 months.');
+		const daily = urls.find((u) => u.pathname.endsWith('/daily'))!;
+		expect(daily.searchParams.get('from')).toMatch(/^1900-01-01/);
+		await expect(rt.getByText(/^Latest reading,/)).toBeVisible();
+	});
+
+	test('one real-time API can be left blank, and a blank form says what it needs', async ({ page }) => {
+		await answer(page, (route) => route.fulfill({ json: [{ time: '2025-10-01T00:00:00', flow: 2 }, { time: '2025-10-01T12:00:00', flow: 2 }] }));
+		await showRealTime(page);
+		const rt = realTime(page);
+		await chooseSource(rt, 'DWS API');
+		await rt.getByRole('button', { name: 'Load daily and real-time flow' }).click();
+		await expect(rt.getByRole('alert')).toHaveText('Enter the daily flow API address, the real-time API address, or both.');
+		await load(rt, page, 'Load daily and real-time flow', 'Daily flow API');
+		await expect(rt.getByRole('status').filter({ hasText: 'Daily flow API, X0H001.' })).toContainText('Read 1 day');
 	});
 
 	test('the Real Time Comparison times out after 60 seconds', async ({ page }) => {
 		await answer(page, hang);
 		await showRealTime(page);
 		const rt = realTime(page);
-		await load(rt, page, 'Load last 31 days');
-		await expect(rt.getByRole('status').first()).toHaveText('Loading…');
+		await load(rt, page, 'Load daily and real-time flow');
+		await expect(rt.getByRole('status').first()).toHaveText('Real-time API: Loading…');
 		await fireTimeout(page, 60_000);
-		await expect(rt.getByRole('alert')).toHaveText('API request failed: no full response within 60 seconds. The server may be slow or not responding.');
+		await expect(rt.getByRole('alert')).toHaveText('Real-time API: API request failed: no full response within 60 seconds. The server may be slow or not responding.');
 	});
 
 	test('the Real Time Comparison refuses readings in Mm³ from the API', async ({ page }) => {
@@ -244,8 +277,8 @@ test.describe('Flow from an API', () => {
 		await answer(page, (route) => route.fulfill({ json: rows }));
 		await showRealTime(page);
 		const rt = realTime(page);
-		await load(rt, page, 'Load last 31 days');
-		await expect(rt.getByRole('alert')).toHaveText(`X0H001. ${MM3_REFUSED}`);
+		await load(rt, page, 'Load daily and real-time flow');
+		await expect(rt.getByRole('alert')).toHaveText(`Real-time API, X0H001. ${MM3_REFUSED}`);
 		await expect(rt.getByRole('table')).toHaveCount(0);
 	});
 
@@ -253,7 +286,7 @@ test.describe('Flow from an API', () => {
 		await answer(page, (route) => route.fulfill({ json: MATRIX }));
 		await showRealTime(page);
 		const rt = realTime(page);
-		await load(rt, page, 'Load last 31 days');
+		await load(rt, page, 'Load daily and real-time flow');
 		await expect(rt.getByRole('alert')).toContainText('This data has monthly values only.');
 	});
 });

@@ -1,4 +1,4 @@
-import { expect, expectRow, findNode, legend, openNode, panel, realTime, select, showRealTime, tableRow, test } from '../support/app.ts';
+import { chooseSource, expect, expectRow, findNode, legend, openNode, panel, realTime, select, showRealTime, sourceInUse, sources, tableRow, test } from '../support/app.ts';
 import type { Locator, Page } from '@playwright/test';
 
 // X0H999 in the sample. Jan 2003 is day d × 0.1 m³/s, except that day 4 is missing (code 170), day 7
@@ -22,7 +22,7 @@ async function atSyq1(page: Page) {
 test.describe('daily flow from a linked gauge', () => {
 	test('its node opens on the gauge, on the latest month with most of its days, with the factor applied', async ({ page }) => {
 		const rt = await atSyq1(page);
-		await expect(select(rt, /Data source/)).toHaveValue('gauge');
+		await expect(sourceInUse(rt)).toHaveValue('gauge');
 		await expect(rt.getByRole('status').first()).toContainText('X0H999. 35 days of flow in 3 months. 1 day with a quality code drawn in their own colour, and 1 missing day not drawn.');
 		await expect(month(rt)).toHaveValue('2003-01');
 		await expect(month(rt).getByRole('option')).toHaveText(['Mar 2003', 'Feb 2003', 'Jan 2003']);
@@ -119,19 +119,19 @@ test.describe('daily flow from a linked gauge', () => {
 		await openNode(page, 'syr2');
 		const rt = realTime(page);
 		const hist = panel(page).getByRole('tabpanel', { name: 'Historical Comparison' });
-		await expect(select(hist, /Data source/).getByRole('option', { name: /Linked gauge/ })).toHaveCount(0);
+		await expect(sources(hist).getByRole('radio', { name: /Linked gauge/ })).toHaveCount(0);
 		await showRealTime(page);
-		await expect(select(rt, /Data source/)).toHaveValue('gauge');
+		await expect(sourceInUse(rt)).toHaveValue('gauge');
 		await rt.getByRole('button', { name: 'View gauge record' }).click();
 		await expect(panel(page).getByRole('table', { name: 'Daily flow, Jan 2003' })).toBeVisible();
 		await expect(panel(page).getByRole('table', { name: /^Monthly volumes/ })).toHaveCount(0);
 	});
 
-	test('a node with no gauge goes back to file loading, with nothing left over', async ({ page }) => {
+	test('a node with no gauge goes to the DWS API, with nothing left over', async ({ page }) => {
 		const rt = await atSyq1(page);
 		await findNode(page, 'syt1', 'syt1 / SYN-SITE1');
-		await expect(select(rt, /Data source/)).toHaveValue('sheet');
-		await expect(rt.getByLabel('12-minute flow file')).toBeVisible();
+		await expect(sourceInUse(rt)).toHaveValue('api');
+		await expect(rt.getByRole('textbox', { name: 'Daily flow API' })).toBeVisible();
 		await expect(rt.getByLabel('Factor on the gauge record')).toHaveCount(0);
 	});
 });
@@ -140,7 +140,7 @@ test('a daily file can be loaded by hand, and its codes are kept', async ({ page
 	await openNode(page, 'syt1', 'syt1 / SYN-SITE1');
 	await showRealTime(page);
 	const rt = realTime(page);
-	await select(rt, /Data source/).selectOption({ label: 'Text file' });
+	await chooseSource(rt, 'Text file');
 	const row = (date: string, v: string, code: string) => `${date}${v.padStart(10)}${code.padStart(6)}`;
 	const text = ['DATE     D AVG F/R  QUAL', row('20030101', '1.000', '1'), row('20030102', '', '170'), row('20030103', '3.000', '91')].join('\r\n');
 	await rt.getByLabel('12-minute flow file').setInputFiles({ name: 'X0H001.day', mimeType: 'text/plain', buffer: Buffer.from(text) });

@@ -114,7 +114,7 @@ The site's own origin covers `data/`, `geo/`, and `tiles/` when the base map is 
 | `https://services3.arcgis.com` | DWS quaternary catchments and basin boundaries |
 | `https://services8.arcgis.com` | Flow gauges |
 | The host of `VITE_TILES_URL`, if it is elsewhere | Base map and label fonts |
-| The address typed under Data source > API, on either comparison | The DWS API |
+| The addresses typed under Data source > DWS API, on either comparison | The DWS APIs |
 
 The last one is why `connect-src` is two schemes and not this list. A user types the address, so no build can know it, and a list would refuse it. The form accepts `http` as well as `https`, so the policy does too. The cost is that the policy does not stop a script that has got into the page from sending data elsewhere: `script-src` is what guards against that getting in.
 
