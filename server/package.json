@@ -1,0 +1,30 @@
+{
+	"name": "ewr-compliance-server",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "The sign-in and user API Lambda (infra/auth.tf), on auth-kit. Its own package, so the public app installs without auth-kit.",
+	"packageManager": "pnpm@10.34.9",
+	"engines": {
+		"node": ">=24"
+	},
+	"scripts": {
+		"check": "tsc --noEmit",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"build": "node scripts/build.mjs"
+	},
+	"dependencies": {
+		"@absence0760/auth-kit": "github:Absence0760/auth-kit#v0.1.1",
+		"@aws-sdk/client-dynamodb": "3.1164.0",
+		"@aws-sdk/client-secrets-manager": "3.1164.0",
+		"@aws-sdk/client-sesv2": "3.1164.0",
+		"@aws-sdk/lib-dynamodb": "3.1164.0"
+	},
+	"devDependencies": {
+		"@types/node": "24.12.2",
+		"esbuild": "0.28.2",
+		"typescript": "6.0.3",
+		"vitest": "5.0.3"
+	}
+}
