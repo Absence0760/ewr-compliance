@@ -28,6 +28,14 @@ test.describe('the Load flow data window', () => {
 		await expect(hist.getByRole('status').first()).toHaveText(XLSX_READ);
 	});
 
+	test('says where 12-minute readings stop, under that kind only', async ({ page }) => {
+		await page.goto(MAP);
+		const w = await openWindow(page);
+		const note = /12-minute readings for about the last month only/;
+		await expect(w.getByRole('region', { name: '12-minute or daily flow for the Real Time Comparison' })).toContainText(note);
+		await expect(w.getByRole('region', { name: 'Monthly flow for the Historical Comparison' })).not.toContainText(note);
+	});
+
 	test('loads 12-minute readings into the Real Time Comparison, in place of a linked gauge', async ({ page }) => {
 		// syq1 opens on its gauge, X0H999.
 		await openNode(page, 'syq1');

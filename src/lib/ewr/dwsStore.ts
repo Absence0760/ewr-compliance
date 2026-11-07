@@ -61,12 +61,15 @@ export function parseDwsIndex(json: unknown): DwsIndex {
 	return { version: DWS_STORE_VERSION, stations };
 }
 
-/** Why the store could not be read. A 404 is a copy of the site without one, such as `pnpm dev` or `pnpm preview`. */
+/**
+ * Why the store could not be read. A 404 is a copy of the site without one: `pnpm dev`, `pnpm preview`, or the hosted
+ * site before DWS grants access and the pipeline is turned on, when loading a file is the way to add flow.
+ */
 export const dwsUnavailable = (status: number | null, message = ''): DwsState => ({
 	status: 'unavailable',
 	reason:
 		status === 404
-			? 'This copy of the site has no DWS store.'
+			? 'DWS data is not connected to this site yet. Load a file instead.'
 			: status !== null
 				? `The DWS store could not be read: HTTP ${status}.`
 				: `The DWS store could not be read: ${message}`

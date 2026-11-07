@@ -12,7 +12,7 @@
 	let { open = $bindable(false) }: { open?: boolean } = $props();
 
 	const ACCEPT = '.xlsx,.xlsm,.xlsb,.xls,.ods,.txt,.csv,.tsv,.dat,.prn,.mrv,.mon,.day';
-	const KINDS: { want: FlowWant; tab: 'hist' | 'rt'; title: string; tabName: string; what: string }[] = [
+	const KINDS: { want: FlowWant; tab: 'hist' | 'rt'; title: string; tabName: string; what: string; note?: string }[] = [
 		{
 			want: 'monthly',
 			tab: 'hist',
@@ -25,7 +25,8 @@
 			tab: 'rt',
 			title: '12-minute or daily flow',
 			tabName: 'Real Time Comparison',
-			what: 'A DWS daily file (.day), or a spreadsheet or text table of dated readings in m³/s, such as 12-minute telemetry.'
+			what: 'A DWS daily file (.day), or a spreadsheet or text table of dated readings in m³/s, such as 12-minute telemetry.',
+			note: 'DWS publishes 12-minute readings for about the last month only, until its hydrologists verify them into daily flow. For earlier months, load a daily file.'
 		}
 	];
 
@@ -100,6 +101,7 @@
 		<section aria-labelledby="load-{k.want}">
 			<h3 id="load-{k.want}">{k.title} <span class="muted">for the {k.tabName}</span></h3>
 			<p class="muted">{k.what}</p>
+			{#if k.note}<p class="muted">{k.note}</p>{/if}
 			<div
 				class="drop"
 				class:over={over === k.want}

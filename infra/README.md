@@ -274,7 +274,7 @@ Sign in at `https://<domain>/` with that address, open Users, and add a second a
 
 **H11. The DWS store (P4).** One at a time, each when the last is done. What each part does, and what its alarms mean: `docs/hosting.md` § The DWS store.
 
-Before step 1: DWS's written permission to store its verified daily flow for this tool, through the client's hydrologist (`docs/hosting.md` § The DWS store). Record it in the private plan, and keep the letter with the client's records, never in this repo. Without it, stop here: the site works without the store, which the app then shows as unavailable.
+Not before DWS grants API access: an application was sent on 2026-11-07 (`docs/hosting.md` § The DWS store). The site goes live without this step, and comes back to it when access arrives. Record the grant in the private plan, and keep the letter with the client's records, never in this repo. If the grant is for an API rather than the HyData page `pipeline/src/hydata.ts` reads, the pipeline changes first.
 
 1. Set `dws_enabled = true` in `prod.tfvars` (and `dws_contact`, a mailbox DWS can write to before blocking us, if you want one in the user agent), then plan and apply as in H6. That makes the bucket, the pipeline (which fails until its code is deployed), the backfill and the empty DWS API key secret. The daily rule is made disabled.
 2. Deploy the pipeline as in H10: add the tag rule `pipeline@*` to the `production` environment's deployment branches and tags, set the variable, and publish a release and approve it.

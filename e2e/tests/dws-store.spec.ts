@@ -115,10 +115,10 @@ test.describe('the DWS store, kept current', () => {
 		await openNode(page, 'syq1');
 		const hist = historical(page);
 		await expect(source(hist, DWS_SOURCE)).toBeDisabled();
-		await expect(detail(hist, DWS_SOURCE)).toHaveText('This copy of the site has no DWS store.');
+		await expect(detail(hist, DWS_SOURCE)).toHaveText('DWS data is not connected to this site yet. Load a file instead.');
 		await expect(hist.getByRole('alert')).toHaveCount(0);
 		await showRealTime(page);
-		await expect(detail(realTime(page), DWS_SOURCE)).toHaveText('This copy of the site has no DWS store.');
+		await expect(detail(realTime(page), DWS_SOURCE)).toHaveText('DWS data is not connected to this site yet. Load a file instead.');
 		await expect(sourceInUse(realTime(page))).toHaveValue('gauge');
 		expect(asked).toHaveLength(1);
 	});

@@ -106,7 +106,7 @@ The client brief is in the private repo.
 
 ## DWS data
 
-The browser does not call DWS. DWS refuses networks outside South Africa, so a pipeline in AWS Cape Town pulls each linked gauge's flow from DWS every day into our own store, and the site serves the store under `dws/` (the private hosting plan, phase P4). Data source > DWS (kept current) reads it, in either comparison. Its files, and the pipeline that writes them (`pipeline/`), are described in `docs/architecture.md` § DWS store.
+The browser does not call DWS. DWS refuses networks outside South Africa, so a pipeline in AWS Cape Town pulls each linked gauge's flow from DWS every day into our own store, and the site serves the store under `dws/` (the private hosting plan, phase P4). The store waits for DWS to grant API access, applied for on 2026-11-07: until then the hosted site has none, says DWS data is not connected yet, and flow is loaded by hand (below; `docs/hosting.md` § The DWS store). Data source > DWS (kept current) reads it, in either comparison. Its files, and the pipeline that writes them (`pipeline/`), are described in `docs/architecture.md` § DWS store.
 
 - It is offered at a node with a linked gauge, for that gauge's station, and applies the node's factor exactly as the gauge source does. The factor scales the node's observed flow, never the gauge's own record.
 - The Real Time Comparison reads the station's daily flow and, where DWS has them, its 12-minute readings, drawn a month at a time as a linked gauge's are.
@@ -114,6 +114,6 @@ The browser does not call DWS. DWS refuses networks outside South Africa, so a p
 - Each comparison says when the store last fetched the station and the days it covers, and says so plainly when the pipeline has marked the station out of date.
 - A copy of the site with no store, such as `pnpm dev`, `pnpm preview` or a plain static host, makes one request for `dws/index.json`, gets a 404, and the source says the store isn't there. Everything else works.
 
-Flow can also be loaded by hand from a spreadsheet or text file: in each comparison's Data source, or in the Load flow data window in the compliance panel, which takes monthly flow for the Historical Comparison and 12-minute or daily flow for the Real Time Comparison. A node with no linked gauge starts there, on Spreadsheet.
+Flow can also be loaded by hand from a spreadsheet or text file: in each comparison's Data source, or in the Load flow data window in the compliance panel, which takes monthly flow for the Historical Comparison and 12-minute or daily flow for the Real Time Comparison. A node with no linked gauge starts there, on Spreadsheet. DWS publishes 12-minute (real-time) readings for about the last month only; its hydrologists then verify them into daily flow, so earlier months come from a daily file. The window says so.
 
 An older version had a DWS API form, whose addresses it kept in the browser. They are dropped from the browser's storage the first time this version runs.

@@ -31,7 +31,7 @@ describe('parseDwsIndex', () => {
 
 describe('dwsUnavailable', () => {
 	it('says a 404 is a copy of the site with no store, and anything else could not be read', () => {
-		expect(dwsUnavailable(404)).toEqual({ status: 'unavailable', reason: 'This copy of the site has no DWS store.' });
+		expect(dwsUnavailable(404)).toEqual({ status: 'unavailable', reason: 'DWS data is not connected to this site yet. Load a file instead.' });
 		expect(dwsUnavailable(500)).toEqual({ status: 'unavailable', reason: 'The DWS store could not be read: HTTP 500.' });
 		expect(dwsUnavailable(null, 'Failed to fetch')).toEqual({ status: 'unavailable', reason: 'The DWS store could not be read: Failed to fetch' });
 	});
@@ -56,7 +56,7 @@ describe('dwsOffer', () => {
 	});
 
 	it('says why it cannot be picked: no store, or nothing for this gauge', () => {
-		expect(dwsOffer(dwsUnavailable(404), link('X0H001'), 'instant')).toEqual({ ok: false, detail: 'This copy of the site has no DWS store.' });
+		expect(dwsOffer(dwsUnavailable(404), link('X0H001'), 'instant')).toEqual({ ok: false, detail: 'DWS data is not connected to this site yet. Load a file instead.' });
 		expect(dwsOffer(ready, link('X0H009'), 'instant')).toEqual({ ok: false, detail: 'The store holds nothing for X0H009 yet.' });
 	});
 
