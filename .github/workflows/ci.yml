@@ -184,8 +184,8 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-          cache: pnpm
-          cache-dependency-path: server/pnpm-lock.yaml
+          # No `cache: pnpm`: the store would hold the private auth-kit, and a cache entry written on
+          # main can be restored by any run on this public repo, a fork PR's included.
 
       - name: Install
         if: steps.token.outputs.available == 'true'
