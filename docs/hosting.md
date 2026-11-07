@@ -2,7 +2,19 @@
 
 > **Superseded.** The Cloudflare design described here is being replaced by hosting on AWS af-south-1, with sign-in and user management from the shared private package `auth-kit`, per the private hosting plan (phases P1–P6). Nothing is live. This document stays as it is until P6 rewrites it; don't extend the Cloudflare code.
 
-The app is a folder of static files, plus `functions/`, the access check that Cloudflare Pages runs in front of them. `tools/deploy.sh` deploys it there: § Build.
+The app is a folder of static files. `tools/deploy.sh` deploys it to the AWS site of § AWS, as built so far. The Cloudflare sections below describe `functions/`, the access check Pages would have run, which P3 removes.
+
+## AWS, as built so far (P1, P2)
+
+`infra/` holds the Terraform; `infra/README.md` has the operator's steps, one command at a time, and what each file makes. Nothing is applied yet.
+
+- **Account and region.** The `ewr-compliance` sub-account, made by the estate bootstrap. The workload is in af-south-1, and `aws_region` refuses anything else unless `data_outside_south_africa` is set. Terraform state is in the bootstrap's us-east-1 bucket, named in the gitignored `infra/backend.config`; the values are in `infra-secrets`.
+- **Alerts and cost.** Two SNS topics mail the operator; monthly and daily budgets; Cost Anomaly Detection once turned on.
+- **Deploy role.** The bootstrap's OIDC role, for the `production` environment only. It gets a policy only once P3 or P4 names Lambdas, and then only to update their code. It can never write the site bucket: the site and its data go up only from the workstation.
+- **The site** (`site_enabled`). A private, versioned S3 bucket read by CloudFront through OAC. Every path needs CloudFront signed cookies (the default behaviour trusts one key group) except `/signin/*`. The viewer-request function sends a request without a live `CloudFront-Policy` cookie to `/signin/?next=…`, or answers `401` JSON when it carries `X-Requested-With`, and serves a folder path its `index.html` (with a `301` to add the slash). CloudFront's own `403`, for a cookie whose signature fails, shows the sign-in page. The private key that signs the cookies is in a Secrets Manager secret Terraform creates empty; the operator puts it in from a file. `/api/*` joins the distribution in P3. WAF limits each address on every path and, more tightly, on `/api/auth/*`. Price class All, for South African edges.
+- **Headers.** A response-headers policy sets what `static/_headers` set on Pages, plus HSTS, and `infra/tests/security_headers.tftest.hcl` pins it. `Cache-Control` is set per object by `tools/deploy.sh` instead: § Headers.
+
+Until P3 adds `static/signin/`, the sign-in page doesn't exist, so the site is closed to everyone, which is the safe way round.
 
 ## The data is the decision
 
@@ -144,9 +156,9 @@ pnpm build
 
 Use `pnpm data:sample` in place of `pnpm data:private` for a trial build. With neither, the build still succeeds but the app cannot start, because it needs `data/index.json`.
 
-On Cloudflare Pages, deploy with `tools/deploy.sh sample` (the synthetic sample, to test the site and its gate) or `tools/deploy.sh real` (the real data, from the private repo beside this one or `EWR_PRIVATE_DIR`), from the operator's workstation and never from CI. It uses wrangler's own login, `pnpm wrangler login`, and never handles a token. It builds a clean, temporary worktree of freshly fetched `origin/main`, never the working tree, with no base map and no `BASE_PATH`. Before uploading, `tools/deploy-check.mjs` refuses a build with a file over 25 MiB, more than 20,000 files, data that does not match the mode, a `tiles/` folder, a `_worker.js` or `_routes.json`, or no `functions/_middleware.ts`, and compiles `functions/` to check that `_middleware` runs on every path. It warns when `_headers` is missing. `--dry-run` stops there and says what would go up; it needs no login. A `real` deploy asks for the project name to be typed before uploading, unless given `--yes`.
+Deploy with `tools/deploy.sh sample` (the synthetic sample, to test the site and its gate) or `tools/deploy.sh real` (the real data, from the private repo beside this one or `EWR_PRIVATE_DIR`), from the operator's workstation and never from CI. It builds a clean, temporary worktree of freshly fetched `origin/main`, never the working tree, with no base map and no `BASE_PATH`. Before uploading, `tools/deploy-check.mjs` refuses a build whose data does not match the mode, with no `data/index.json`, with a `tiles/` folder or with a `_headers` file, and warns when there is no `signin/index.html`. A `real` deploy asks for the project name to be typed before uploading, unless given `--yes`.
 
-The script runs `pnpm wrangler pages deploy build --project-name ewr-compliance --branch main` from the worktree's root, which is how `functions/` goes up with the files. **A deploy without `functions/` has no list check, and anyone who completes Access's code gets in.** Before uploading, the script reminds the operator that Fail closed must be set in both environments and that superseded deployments should be deleted (§ Every deployment stays live). It fails if wrangler does not report uploading the Functions bundle, and says to roll back and then delete that deployment, since a rollback leaves it live at its `<hash>` URL. After each deploy, check that its Functions tab lists `_middleware`, and run the checks at the end of § Access control.
+The upload is `aws s3 sync` with the operator's SSO profile (`ewr-compliance`, or `AWS_PROFILE`), to the bucket and distribution from `terraform output` in `infra/` or from `EWR_SITE_BUCKET` and `EWR_DISTRIBUTION_ID`. It goes in two cache passes: `_app/immutable/` as `public, max-age=31536000, immutable`, then everything else, with `--delete`, as `private, no-cache`. `.mjs` files go up as `text/javascript`. The previous build's chunks are deleted only after the pages that named them are replaced, then the whole distribution is invalidated. The script never reads or prints a credential. `--dry-run` builds and checks, prints the commands, and stops; it needs no AWS login when both environment variables are set. After a deploy, run the checks in `infra/README.md` § After a deploy.
 
 Elsewhere, upload the contents of `build/`, not the folder itself. That is about 30 MB with the real data and the rivers, or about 295 MB with the base map.
 
@@ -195,11 +207,11 @@ None are required. These matter when the host allows them:
 
 A page is a folder's address, such as `/nodes/`, so a rule for `*.html` alone misses every page but `404.html`.
 
-On Cloudflare Pages, `static/_headers` sets all but the first two rows, which Pages does itself: it serves `.mjs` as JavaScript and compresses text. `pnpm build` copies it to `build/_headers`, and `src/headers.test.ts` pins its rules. Pages applies it to the files `functions/_middleware.ts` passes on with `ctx.next()`, but not to a response a Function makes itself, such as the sign-in refusal or `api/`. Those set `X-Content-Type-Options` and `frame-ancestors` themselves, in `functions/lib/gate.ts`, and the refusal page carries its own policy, `default-src 'none'; style-src 'unsafe-inline'`. Its paths are from the domain root, so a build with `BASE_PATH` needs them prefixed. Elsewhere, take the file as the list to set.
+On AWS, the CloudFront response-headers policy (`infra/security_headers.tf`) sets the last three rows, with HSTS, on every response; `tools/deploy.sh` sets each object's `Cache-Control` and the `.mjs` type as it uploads; and CloudFront compresses text (CachingOptimized). `static/_headers`, the Pages version, is gone, and `infra/tests/security_headers.tftest.hcl` pins the policy in place of `src/headers.test.ts`. On Cloudflare Pages, which this section described until P2, `_headers` set all but the first two rows, and Pages did those itself. Pages applies it to the files `functions/_middleware.ts` passes on with `ctx.next()`, but not to a response a Function makes itself, such as the sign-in refusal or `api/`. Those set `X-Content-Type-Options` and `frame-ancestors` themselves, in `functions/lib/gate.ts`, and the refusal page carries its own policy, `default-src 'none'; style-src 'unsafe-inline'`. On any other host, take the table as the list to set.
 
 Pages keeps every uploaded file in its own cache until the next deploy, behind the middleware, which still checks each request. A cache rule on the domain sits in front of the middleware, and could serve a page or data file to someone it never checked: add none. Cloudflare does not cache HTML or JSON unless a rule tells it to, and does not store a `private` response.
 
-Serve the site over `https`. The browser's Copy needs a secure context. A browser refuses an `http` API from an `https` page whatever the policy says.
+Serve the site over `https`. The browser's Copy needs a secure context.
 
 ## Content security policy
 
@@ -212,21 +224,18 @@ Every built page carries the policy as a meta tag, with the hash of its own star
 | `style-src` | `'self' 'unsafe-inline'` | Svelte templates and MapLibre set style attributes, and the browser drops them without this. |
 | `img-src` | `'self' data:` | MapLibre's control icons. |
 | `worker-src` | `'self'` | The MapLibre worker. |
-| `connect-src` | `'self' https: http:` | See below. |
+| `connect-src` | `'self'` and the origins below | See below. |
 | `base-uri`, `form-action`, `object-src` | `'self'`, `'none'`, `'none'` | |
 
-The site's own origin covers `data/`, `geo/`, and `tiles/` when the base map is uploaded. The origins the browser needs beyond it are:
+The site's own origin covers `data/`, `geo/`, the DWS store under `dws/`, and `tiles/` when the base map is uploaded. The browser does not call DWS: the store is ours, served from the site (`docs/architecture.md` § DWS store). The origins it needs beyond the site, and all that `connect-src` allows, are:
 
 | Origin | For |
 |---|---|
 | `https://services3.arcgis.com` | DWS quaternary catchments and basin boundaries |
 | `https://services8.arcgis.com` | Flow gauges |
-| The host of `VITE_TILES_URL`, if it is elsewhere | Base map and label fonts |
-| The addresses typed under Data source > DWS API, on either comparison | The DWS APIs |
+| The host of `VITE_TILES_URL` or `VITE_TILES_GLYPHS_URL`, when either is a full `https` URL elsewhere | Base map and label fonts |
 
-The last one is why `connect-src` is two schemes and not this list. A user types the address, so no build can know it, and a list would refuse it. The form accepts `http` as well as `https`, so the policy does too. The cost is that the policy does not stop a script that has got into the page from sending data elsewhere: `script-src` is what guards against that getting in.
-
-Once the DWS API has a fixed address, change `connect-src` in `vite.config.ts` to the list above, and test the address box against it: anything else typed there will then be refused, and `apiInputProblem` in `src/lib/ewr/importFlow.ts` should say so.
+`src/csp.ts` builds this list at build time, reading the two tile settings from the environment or `.env` files, and `src/csp.test.ts` pins it. So a script that got into the page could not send a loaded flow file to another site, and `hosting.spec.ts` checks that the built page refuses one. A new origin the app needs goes in `src/csp.ts`, or the browser refuses it and the Playwright suite fails on the console error.
 
 ## Live DWS boundaries and gauges
 

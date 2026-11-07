@@ -93,12 +93,15 @@ test.describe('content security policy', () => {
 	const fetchFrom = (page: Page, url: string) =>
 		page.evaluate((u) => fetch(u).then((r) => r.status, (e: Error) => e.name), url);
 
-	// An API address is typed in by the user, so no list of origins can hold it. The form takes both schemes.
-	plain('allows an API on any address', async ({ page }) => {
+	// The browser calls this site, which serves the DWS store, and the ArcGIS services, and nowhere else.
+	// So a script that got into the page could not send a loaded flow file away. src/csp.ts builds the list.
+	plain('lets the page reach the ArcGIS services and no other site', async ({ page }) => {
 		await page.route(DWS, (route) => route.fulfill({ json: { type: 'FeatureCollection', features: [] } }));
-		await page.route(/^https?:\/\/api\.example\.test\//, (route) => route.fulfill({ status: 204 }));
+		await page.route(/^https?:\/\/elsewhere\.example\.test\//, (route) => route.fulfill({ status: 204 }));
 		await page.goto('nodes/');
-		expect(await fetchFrom(page, 'https://api.example.test/flow')).toBe(204);
-		expect(await fetchFrom(page, 'http://api.example.test/flow')).toBe(204);
+		expect(await fetchFrom(page, 'https://services3.arcgis.com/x/query')).toBe(200);
+		expect(await fetchFrom(page, 'https://services8.arcgis.com/x/query')).toBe(200);
+		expect(await fetchFrom(page, 'https://elsewhere.example.test/flow')).toBe('TypeError');
+		expect(await fetchFrom(page, 'http://elsewhere.example.test/flow')).toBe('TypeError');
 	});
 });

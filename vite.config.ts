@@ -1,8 +1,10 @@
 import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
+import { loadEnv } from 'vite';
 import { configDefaults, defineConfig } from 'vitest/config';
+import { connectSrc } from './src/csp.ts';
 
-export default defineConfig(({ command }) => ({
+export default defineConfig(({ command, mode }) => ({
 	plugins: [
 		sveltekit({
 			// A static site: there is no server, and flow files stay in the browser.
@@ -23,8 +25,8 @@ export default defineConfig(({ command }) => ({
 								// MapLibre's controls are data: images.
 								'img-src': ['self', 'data:'],
 								'worker-src': ['self'],
-								// Schemes and not a list, because the API address is typed in by the user.
-								'connect-src': ['self', 'https:', 'http:'],
+								// The site, which serves the DWS store under dws/, and the ArcGIS services: src/csp.ts.
+								'connect-src': connectSrc({ ...loadEnv(mode, process.cwd(), 'VITE_TILES_'), ...process.env }) as never,
 								'base-uri': ['self'],
 								'form-action': ['none'],
 								'object-src': ['none']
