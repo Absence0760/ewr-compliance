@@ -15,6 +15,11 @@
 #                var.auth_enabled (P3). Unsigned at the edge: the API checks
 #                its own session cookie on every call, and /api/auth/* must
 #                answer someone not signed in.
+#   /dws/*     → the DWS store's bucket (dws.tf) through OAC, only with
+#                var.dws_enabled (P4). Signed exactly as the default: the
+#                same key group and function. origin_path /serve, so
+#                /dws/index.json is the key serve/dws/index.json; the bucket
+#                lets CloudFront read serve/dws/* and nothing else.
 #
 # Signed cookies: the API (P3) signs a 15-minute custom policy for
 # https://<domain>/* with the private key in the signing-key secret below,
@@ -26,7 +31,8 @@
 #
 # A missing object: the bucket policy grants ListBucket, so S3 answers 404, not
 # 403, and a CloudFront 403 always means "not signed" (the custom error
-# response below turns it into the sign-in page).
+# response below turns it into the sign-in page). Under /dws/ alone a missing
+# file is a 403 too: CloudFront may not list the store (dws.tf).
 # ----------------------------------------------------------------------------
 
 locals {
@@ -39,6 +45,9 @@ locals {
 
   # The API (auth.tf) and its /api/* behaviour.
   api_enabled = var.site_enabled && var.auth_enabled
+
+  # The DWS store (dws.tf) and its /dws/* behaviour.
+  dws_served = var.site_enabled && var.dws_enabled
 }
 
 # --- Bucket ----------------------------------------------------------------------
@@ -307,7 +316,17 @@ resource "aws_cloudfront_distribution" "site" {
     }
   }
 
-  # Every path but the two below: signed cookies only.
+  dynamic "origin" {
+    for_each = local.dws_served ? [1] : []
+    content {
+      domain_name              = aws_s3_bucket.dws[0].bucket_regional_domain_name
+      origin_id                = "s3-dws"
+      origin_path              = "/serve"
+      origin_access_control_id = aws_cloudfront_origin_access_control.site[0].id
+    }
+  }
+
+  # Every path but the ones below: signed cookies only.
   default_cache_behavior {
     target_origin_id           = "s3-site"
     viewer_protocol_policy     = "redirect-to-https"
@@ -339,6 +358,29 @@ resource "aws_cloudfront_distribution" "site" {
     function_association {
       event_type   = "viewer-request"
       function_arn = aws_cloudfront_function.site_request[0].arn
+    }
+  }
+
+  # /dws/* -> the DWS store (P4), signed as the default behaviour is. The
+  # pipeline writes its files `private, no-cache`, so CloudFront keeps them for
+  # CachingOptimized's minimum second, and the app revalidates the index.
+  dynamic "ordered_cache_behavior" {
+    for_each = local.dws_served ? [1] : []
+    content {
+      path_pattern               = "/dws/*"
+      target_origin_id           = "s3-dws"
+      viewer_protocol_policy     = "redirect-to-https"
+      allowed_methods            = ["GET", "HEAD", "OPTIONS"]
+      cached_methods             = ["GET", "HEAD"]
+      compress                   = true
+      cache_policy_id            = local.cache_policy_caching_optimized
+      response_headers_policy_id = aws_cloudfront_response_headers_policy.site[0].id
+      trusted_key_groups         = [aws_cloudfront_key_group.signing[0].id]
+
+      function_association {
+        event_type   = "viewer-request"
+        function_arn = aws_cloudfront_function.site_request[0].arn
+      }
     }
   }
 

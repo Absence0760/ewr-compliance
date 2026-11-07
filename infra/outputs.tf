@@ -53,3 +53,23 @@ output "ses_identity" {
   description = "The SES domain identity; H8 checks its DKIM status reads SUCCESS."
   value       = local.api_enabled ? aws_sesv2_email_identity.domain[0].email_identity : null
 }
+
+output "dws_bucket" {
+  description = "The DWS store's bucket: tools/dws-stations.sh uploads config/stations.json to it."
+  value       = var.dws_enabled ? aws_s3_bucket.dws[0].bucket : null
+}
+
+output "dws_function_name" {
+  description = "The DWS pipeline Lambda, which deploy-lambdas.yml updates."
+  value       = var.dws_enabled ? aws_lambda_function.dws[0].function_name : null
+}
+
+output "dws_backfill_state_machine_arn" {
+  description = "The backfill the operator starts with tools/dws-backfill-plan.mjs's input."
+  value       = var.dws_enabled ? aws_sfn_state_machine.dws_backfill[0].arn : null
+}
+
+output "dws_api_key_secret_arn" {
+  description = "The empty secret the operator puts the DWS API key into, once DWS issues one."
+  value       = var.dws_enabled ? aws_secretsmanager_secret.dws_api_key[0].arn : null
+}

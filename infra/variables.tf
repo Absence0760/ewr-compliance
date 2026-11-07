@@ -135,7 +135,7 @@ variable "cloudfront_requests_alarm_per_5min" {
 # --- Deploy role (oidc.tf) ---------------------------------------------------
 
 variable "deploy_lambda_functions" {
-  description = "More Lambda functions CI may update the code of, through the bootstrap deploy role (P4's pipeline). The API (auth.tf) is added by itself when auth_enabled. With neither, the deploy policy isn't created at all. The role never gets S3 write: the data goes up only from the workstation (tools/deploy.sh)."
+  description = "More Lambda functions CI may update the code of, through the bootstrap deploy role. The API (auth.tf) and the DWS pipeline (dws.tf) are added by themselves when auth_enabled and dws_enabled. With none, the deploy policy isn't created at all. The role never gets S3 write: the data goes up only from the workstation (tools/deploy.sh)."
   type        = list(string)
   default     = []
 
@@ -299,5 +299,68 @@ variable "api_reserved_concurrency" {
   validation {
     condition     = var.api_reserved_concurrency == null ? true : (var.api_reserved_concurrency >= 1 && var.api_reserved_concurrency <= 50)
     error_message = "null, or between 1 and 50."
+  }
+}
+
+# --- DWS store (dws.tf, dws_backfill.tf) -------------------------------------
+
+variable "dws_enabled" {
+  description = "Create the DWS store (P4): its bucket, the pipeline Lambda and its DLQ, the empty DWS API key secret, the backfill state machine, their alarms, and with site_enabled the signed /dws/* behaviour. Off by default. The daily pulls stay off until dws_schedule_enabled."
+  type        = bool
+  default     = false
+}
+
+variable "dws_schedule_enabled" {
+  description = "Turn the daily pull on: the EventBridge rule's state, and the lag alarm with it. Off until the pipeline's code is deployed (H10) and the station list uploaded (H11), so the rule never runs the stub and the lag alarm doesn't fire from the first apply."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.dws_schedule_enabled || var.dws_enabled
+    error_message = "dws_schedule_enabled needs dws_enabled: the rule runs the pipeline Lambda."
+  }
+}
+
+variable "dws_contact" {
+  description = "A mailbox the pipeline names in its User-Agent, so DWS can write before blocking us. Optional: empty sends the project's URL only. Set in infra-secrets, never in this repo."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.dws_contact == "" || can(regex("^[^@\\s<>()]+@[^@\\s<>()]+\\.[^@\\s<>().]+$", var.dws_contact))
+    error_message = "dws_contact is empty or a mailbox (name@domain.tld)."
+  }
+}
+
+variable "dws_lag_alarm_days" {
+  description = "Alarm when the oldest listed station's last current pull is more than this many days old, or the daily run published no lag for two days. The pipeline marks a station stale after 3 days (pipeline/src/run.ts STALE_AFTER_DAYS)."
+  type        = number
+  default     = 3
+
+  validation {
+    condition     = var.dws_lag_alarm_days >= 1 && var.dws_lag_alarm_days <= 30
+    error_message = "Between 1 and 30 days."
+  }
+}
+
+variable "dws_backfill_wait_seconds" {
+  description = "The backfill's pause after each window. A window is one request a station, a second apart, so 60 keeps DWS's load from a backfill near that of the daily run."
+  type        = number
+  default     = 60
+
+  validation {
+    condition     = var.dws_backfill_wait_seconds >= 30 && var.dws_backfill_wait_seconds <= 3600
+    error_message = "Between 30 and 3600 seconds."
+  }
+}
+
+variable "dws_log_retention_days" {
+  description = "Days the pipeline's logs are kept. They name a station only beside a failed page's fixed label."
+  type        = number
+  default     = 90
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731], var.dws_log_retention_days)
+    error_message = "One of CloudWatch's retention periods, up to 731 days."
   }
 }
