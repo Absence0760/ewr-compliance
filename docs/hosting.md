@@ -1,8 +1,8 @@
 # Hosting
 
-The app is a folder of static files, `server/` is the sign-in API in front of it, and `pipeline/` keeps the DWS store it reads. `tools/deploy.sh` deploys the files to the AWS site below; CI deploys the API and the pipeline (`.github/workflows/deploy-lambdas.yml`). Nothing is live yet: the private hosting plan's phase P6 follows.
+The app is a folder of static files, `server/` is the sign-in API in front of it, and `pipeline/` keeps the DWS store it reads. `tools/deploy.sh` deploys the files to the AWS site below; CI deploys the API and the pipeline (`.github/workflows/deploy-lambdas.yml`). Every phase of the private hosting plan is built (P1 to P6) and checked offline; nothing is applied yet. Going live is the operator's steps in order, with the checks at the end: § Deploy readiness.
 
-## AWS, as built so far (P1 to P4)
+## AWS
 
 `infra/` holds the Terraform; `infra/README.md` has the operator's steps, one command at a time, and what each file makes. Nothing is applied yet.
 
@@ -10,7 +10,7 @@ The app is a folder of static files, `server/` is the sign-in API in front of it
 - **Alerts and cost.** Two SNS topics mail the operator; monthly and daily budgets; Cost Anomaly Detection once turned on.
 - **Deploy role.** The bootstrap's OIDC role, for the `production` environment only. It may update the code of the API (once `auth_enabled`), of the DWS pipeline (once `dws_enabled`) and of any Lambda in `deploy_lambda_functions`, and nothing else. It can never write the site bucket: the site and its data go up only from the workstation.
 - **The site** (`site_enabled`). A private, versioned S3 bucket read by CloudFront through OAC. Every path needs CloudFront signed cookies (the default behaviour trusts one key group) except `/signin/*`. The viewer-request function sends a request without a live `CloudFront-Policy` cookie to `/signin/?next=…`, or answers `401` JSON when it carries `X-Requested-With`, and serves a folder path its `index.html` (with a `301` to add the slash). CloudFront's own `403`, for a cookie whose signature fails, shows the sign-in page. The private key that signs the cookies is in a Secrets Manager secret Terraform creates empty; the operator puts it in from a file. `/api/*` goes to the API (§ Access control). WAF limits each address on every path and, more tightly, on `/api/auth/*`. Price class All, for South African edges.
-- **Headers.** A response-headers policy sets what `static/_headers` set on Pages, plus HSTS, and `infra/tests/security_headers.tftest.hcl` pins it. `Cache-Control` is set per object by `tools/deploy.sh` instead: § Headers.
+- **Headers.** A response-headers policy sets the headers below (the retired `static/_headers` file's), plus HSTS, and `infra/tests/security_headers.tftest.hcl` pins it. `Cache-Control` is set per object by `tools/deploy.sh` instead: § Headers.
 - **Sign-in** (`auth_enabled`, `infra/auth.tf`). The API Lambda, the user table and SES: § Access control.
 - **The DWS store** (`dws_enabled`, `infra/dws.tf`, `infra/dws_backfill.tf`). The store's bucket, the pipeline Lambda, its daily rule and its backfill, served signed under `/dws/*`: § The DWS store.
 
@@ -29,9 +29,9 @@ DWS answers only South African networks, so the app's "DWS (kept current)" sourc
 
 A build publishes whatever is in `static/data`. This repo holds only the synthetic sample, which is invented, so a build of it shows made-up nodes and numbers and is no use for real compliance work.
 
-A real deployment must run `pnpm data:private` before `pnpm build`, on a machine that has the private repo. **That publishes the real data.** Every file in `static/data` is copied into `build/data/` and can be downloaded by anyone who can load the site, whatever the app shows. Those files are not under the MIT licence and all rights remain with their owners: read `NOTICE.md`. So hosting real data needs the operator's decision first, and if the site must be private, the host needs its own access control. The private repository being private does not make the host private.
+A real deployment must run `pnpm data:private` before `pnpm build`, on a machine that has the private repo. **That publishes the real data.** Every file in `static/data` is copied into `build/data/` and can be downloaded by anyone who can load the site, whatever the app shows. Those files are not under the MIT licence and all rights remain with their owners: read `NOTICE.md`. So hosting real data needs the operator's decision first, and the client's agreement (H12). On AWS every file is behind the sign-in (§ Access control); on any other host, the host needs its own access control. The private repository being private does not make the host private.
 
-CI builds the sample only and has no access to the private repo, so a real build cannot come from it as things stand.
+CI builds the sample only and has no access to the private repo, so a real build never comes from it: `tools/deploy.sh real` builds it on the operator's workstation.
 
 ## Access control
 
@@ -43,7 +43,7 @@ Nobody reaches a file of the site, `data/` included, without CloudFront signed c
 - **Mail** goes from `no-reply@<domain>` through SES in af-south-1, DKIM-signed, over TLS only.
 - **Keys.** The code key, the session key and the CloudFront origin secret are Terraform `random_password`s in the API's runtime secret (state holds them, encrypted, as the estate standard allows); the CloudFront private key is the operator's, put in by hand (H7). None is in the Lambda's environment, which the CI deploy role can read.
 
-The cookies are strictly necessary to reach the site, so they need no consent banner. The app itself sets none.
+**Cookies.** The site sets these and no others: the session cookie `__Host-ewr_session` (HttpOnly, Secure, SameSite=Strict, 7 days) and the four CloudFront cookies (`CloudFront-Policy`, `CloudFront-Signature`, `CloudFront-Key-Pair-Id`, `CloudFront-Hash-Algorithm`, 15 minutes), all set by the API. They are strictly necessary to reach the site, so they need no consent banner. The app's own code reads and writes no cookie, and there are no analytics; its settings are in `localStorage`, never sent anywhere.
 
 ### First admin, and recovery
 
@@ -67,20 +67,11 @@ tools/clear-lock
 
 They need `server/` installed (`cd server && pnpm install --frozen-lockfile`, which needs read access to `auth-kit`) and `terraform -chdir=infra output users_table` to work.
 
-### Before going live
-
-- From a browser that is not signed in, `data/index.json` gets the sign-in page (or 401 JSON with `X-Requested-With`), and so does `/nodes/`.
-- An address not on the list gets the same "a code is on its way" and no email.
-- Signing in opens the page asked for; Sign out, then the browser's back button, gets the sign-in page.
-- A user removed on the Users page gets 401 from `/api/me` at once.
-- A request straight to the Function URL (shown on the Lambda console), past CloudFront, gets 404: the origin secret is checked.
-- SES is out of the sandbox and the identity's DKIM reads SUCCESS (H8).
-
 ### Personal data
 
-The site's personal data is the list (email address, admin flag, who added them and when), the audit log (time, actor's address, action, target's address; a failed sign-in by an unlisted address is recorded as an HMAC, never the address), the sign-in emails SES sends, and the API's logs, which hold opaque ids and no address. The privacy notice at `privacy/`, linked from the app bar of every page, says so: its text is `static/data/privacy.md` in the private repo, which `pnpm data:private` copies in (`docs/architecture.md` § Privacy notice). Before the real deploy, fill its placeholders and get the client's agreement with the private repo's `docs/hosting-consent.md` (P6).
+The site's personal data is the list (email address, admin flag, who added them and when), the audit log (time, actor's address, action, target's address; sign-ins, wrong codes and lockouts too, and an attempt by an unlisted address is recorded as an HMAC, never the address), the sign-in emails SES sends, and the API's logs, which hold opaque ids and no address. No IP address is stored with any of it: CloudFront keeps no access log, and WAF only its sampled requests, which AWS holds for three hours. All of it is stored in af-south-1; a request passes, encrypted, through the CloudFront edge nearest the person, which can be outside South Africa and caches only the site's files, never `/api/*`. The privacy notice at `privacy/`, linked from the app bar of every page, says so: its text is `static/data/privacy.md` in the private repo, which `pnpm data:private` copies in (`docs/architecture.md` § Privacy notice). Before the real deploy, fill its placeholders and get the client's agreement with the private repo's `docs/hosting-consent.md` (H12). Its periods are pinned by the private repo's `tests/unit/privacy.test.ts` to `auth-kit`, `server/` and `infra/`, so a change here that the notice doesn't follow fails `pnpm test:private`.
 
-**Retention.** Audit rows carry a TTL of 24 months (`auth-kit`'s `AUDIT_RETENTION_MONTHS`), and DynamoDB deletes them within days of it, so the notice says "about 24 months". Codes, throttles and revocations expire within days. Point-in-time recovery keeps deleted items restorable for 35 days. The site bucket keeps replaced and deleted file versions for 30 days. The API's logs are kept 90 days (`api_log_retention_days`).
+**Retention.** Audit rows carry a TTL of 24 months (`auth-kit`'s `AUDIT_RETENTION_MONTHS`), and DynamoDB deletes them within days of it, so the notice says "about 24 months". Codes, throttles and revocations expire within days. Point-in-time recovery keeps deleted items restorable for 35 days. The site bucket keeps replaced and deleted file versions for 30 days. The API's logs are kept 90 days (`api_log_retention_days`), and so are the pipeline's (`dws_log_retention_days`), which hold no personal data. An address whose code bounced or was marked as spam stays on SES's account-level suppression list until the operator removes it.
 
 **Deletion on request.** The operator erases the address everywhere: the user, if still listed (refused if they are the last admin), their code and throttle, and the address in every audit row and in other users' "added by", replaced by `erased:<hmac>`:
 
@@ -210,3 +201,45 @@ BASE_PATH=/ewr pnpm build && BASE_PATH=/ewr pnpm preview
 ```
 
 Then open http://localhost:7790/ewr/. `pnpm test:e2e` does this on a stricter server through `e2e/tests/hosting.spec.ts`, against the sample. After uploading, load `nodes/` directly, press reload, confirm the map shows nodes, and confirm the browser console is clean.
+
+## Deploy readiness
+
+The operator's steps from nothing to live, in the order they must run. The numbers are the private plan's (issue 12); each step's commands, one at a time, are in `infra/README.md` § Operator steps. Every step is the operator's: a session never runs anything that touches AWS, a credential or a key. Tick each in the plan as it is done.
+
+| Step | What | Flags in `prod.tfvars` afterwards |
+|---|---|---|
+| H0 | Read access to `auth-kit`: the fine-grained token as the Actions and Dependabot secret `AUTH_KIT_READ_TOKEN`. Needed before CI can build `server/` and before H9 | all off |
+| H1 | `infra-secrets/ewr-compliance/bootstrap.tfvars`, committed and pushed | — |
+| H2 | `aws sso login` as `mgmt` and `dns-parent` | — |
+| H3 | `new-project-account.sh ewr-compliance`, `--plan` first (Runbook A) | — |
+| H4 | Enable af-south-1 for the account; wait for `ENABLED` | — |
+| H5 | Identity Center assignment, the `ewr-compliance` SSO profile, IAM access to billing | — |
+| H6 | `backend.config`, `prod.tfvars`, `init`, `plan`, `apply` (P1). Confirm both SNS subscription emails; both budgets listed | all off |
+| H7 | The CloudFront key pair: public key in `cloudfront_public_keys`, apply, private key into its secret from the file. `tools/deploy.sh sample`, then § After a deploy in `infra/README.md`; note whether the edge function or the signature check runs first. Shred the key file | `site_enabled = true` |
+| H8 | Apply the sign-in, request SES production access, wait for DKIM `SUCCESS` | `auth_enabled = true` |
+| H10 | `production` environment reviewer and tag rules, `AWS_DEPLOY_ROLE_ARN`, `AWS_REGION`, `API_FUNCTION_NAME`; release `api@X.Y.Z` and approve it. `api/me` answers 401 JSON, not 503 | unchanged |
+| H9 | `tools/first-admin` with your address; sign in; add a second admin on the Users page | unchanged |
+| H11 | Apply the store; `DWS_FUNCTION_NAME`, release `pipeline@X.Y.Z`; `tools/dws-stations.sh`; one pull by hand (Q1's test request); the backfill; then the daily schedule. The DWS API key from a file, when it exists | `dws_enabled = true`, then `dws_schedule_enabled = true` once the backfill is done |
+| H12 | Fill the privacy notice's placeholders (private repo `static/data/privacy.md`) and send the client `docs/hosting-consent.md`; keep the reply in the plan | unchanged |
+| H13 | Once the client agrees: `tools/deploy.sh real`, then every check below | unchanged |
+| H14 | Registry rows in `project-mgmt` (`vendor-accounts`, `architecture`) and the `templates` `estate-map` | unchanged |
+
+H10 comes before H9 because the first admin signs in through the deployed API. `deploy_lambda_functions` stays empty: the API and the pipeline are granted by their own flags. `cost_anomaly_threshold_usd` is optional, at any point after H6.
+
+### Go-live checks
+
+After H13, with `<domain>` the site's domain. Say what each showed in the plan.
+
+- **Signed out, everything is closed.** From a private window, `https://<domain>/`, `/nodes/` and `/data/index.json` each end on the sign-in page with `?next=` naming the path. `curl -sI https://<domain>/data/index.json` gives `302` to `/signin/?next=%2Fdata%2Findex.json`, and `curl -s -H 'X-Requested-With: XMLHttpRequest' https://<domain>/data/index.json` gives the `401` JSON. (If the H7 note says CloudFront checks the signature first, both are a `403` serving the sign-in page instead: still closed.)
+- **The DWS store is signed too.** The same two `curl`s on `https://<domain>/dws/index.json` give the same answers; signed in, the app's Data source offers "DWS (kept current)" at a linked node, with its `fetchedAt`.
+- **An address off the list gets nothing.** It gets the same "a code is on its way" as a listed one, takes as long, and no email arrives. An audit row records it only as an HMAC (`GET /api/audit`, as an admin).
+- **Signing in and out.** Signing in opens the page asked for. Sign out, then the browser's back button, gets the sign-in page.
+- **Removing a user.** A user removed on the Users page gets `401` from `/api/me` at once (their next click in the app sends them to sign in), and their file cookies stop working within 15 minutes.
+- **A lapsed file cookie.** A signed-in tab left open past 15 minutes, with the laptop asleep, keeps working when it comes back: the app renews the cookies, or sends the person to sign in, never a page that fails to start.
+- **Past CloudFront.** A request straight to the API's Function URL (Lambda console) gets `404`: the origin secret is checked.
+- **Headers.** `curl -sI https://<domain>/signin/` shows `strict-transport-security`, `x-content-type-options: nosniff`, `content-security-policy: frame-ancestors 'none'` and `referrer-policy: strict-origin-when-cross-origin`; a signed `.mjs` under `_app/immutable/workers/` is `text/javascript` with the immutable `Cache-Control` (`infra/README.md` § After a deploy). The browser console is clean on `/`, a WMA's map and `/nodes/`.
+- **Mail.** `DkimAttributes.Status` reads `SUCCESS` and `ProductionAccessEnabled` is `true` (H8's commands). The code's email arrives from `no-reply@<domain>` and passes DKIM in the receiving mailbox's headers.
+- **Alarms reach the operator.** Every subscription on both topics (`terraform -chdir=infra output alerts_topic_arns`) is confirmed, none `PendingConfirmation`: `aws sns list-subscriptions-by-topic --topic-arn <arn> --region <its region> --profile ewr-compliance --query 'Subscriptions[].SubscriptionArn'`. The alarms in CloudWatch, af-south-1 and us-east-1, are `OK` or `INSUFFICIENT_DATA`, none `ALARM`.
+- **Budgets.** Both budgets are listed (H6's command), and Cost Anomaly Detection is on if `cost_anomaly_threshold_usd` is set.
+- **The privacy notice.** `/privacy/` shows the real notice with no `[` placeholder left, and its date.
+- **The real data.** The map shows the nodes, a node's comparisons draw, and the build `tools/deploy.sh real` uploaded is `origin/main`'s (it prints the commit).

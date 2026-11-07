@@ -18,7 +18,7 @@ The agent's other areas (`uploads`, `ci`, `public-repo`) have no command of thei
 | Command | What it checks |
 |---|---|
 | [/audit/third-party-data-flows](third-party-data-flows.md) | Every outbound request, and that a loaded file stays in the browser |
-| [/audit/cookie-consent](cookie-consent.md) | No cookies, no third-party origins, only the app's own `localStorage` |
+| [/audit/cookie-consent](cookie-consent.md) | Only the sign-in's strictly necessary cookies, no third-party origins but ArcGIS, only the app's own `localStorage` |
 | [/audit/accessibility](accessibility.md) | WCAG 2.2 AA, the map and charts first |
 
 ### Dependencies (`general-purpose`)

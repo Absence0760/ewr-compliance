@@ -1,13 +1,14 @@
 ---
-description: Check that the app still sets no cookies and loads no third-party script, font or tracker, so no consent banner is needed — via compliance-auditor
+description: Check that the site still sets only its strictly necessary sign-in cookies and loads no third-party script, font or tracker, so no consent banner is needed — via compliance-auditor
 ---
 
-The recorded position is no cookies, no analytics and no third-party origins, with the app's own preferences in `localStorage` (`src/lib/state/app.svelte.ts`), so no banner. The host's access gateway sets a strictly necessary sign-in cookie (`docs/hosting.md` § Access control); that is expected and not a finding. A finding is anything the app itself adds.
+The recorded position is strictly necessary cookies only, no analytics and no third-party origin but the ArcGIS layers, with the app's own preferences in `localStorage` (`src/lib/state/storage.ts`), so no banner. The sign-in API (`server/`) sets the HttpOnly session cookie and the four CloudFront signed cookies that every file needs (`docs/hosting.md` § Access control); those are expected and not a finding, as long as their names, scope and lifetimes match the docs and the privacy notice. A finding is any other cookie, anything the app itself stores that identifies a person, or a tracker.
 
 ## Procedure
 
 1. Spawn one **`compliance-auditor`** agent with the prompt `Audit area: cookie-consent.` It checks, with `file:line` evidence:
-   - any `document.cookie`, and every `localStorage` / `sessionStorage` key, and whether it could identify a person;
+   - every `Set-Cookie` the API sends (`server/src/`), and any `document.cookie` in `src/` or `static/signin/`;
+   - every `localStorage` / `sessionStorage` key, and whether it could identify a person;
    - any `<script>`, font, image or `fetch` to another origin.
 2. Relay its report as is: findings most severe first, then Clean.
 

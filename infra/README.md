@@ -16,7 +16,7 @@ This repo is public. The account ID stays in `backend.config` (gitignored), and 
 | `alarms.tf` | Alert topics in af-south-1 and us-east-1, mailing `budget_alert_email`; monthly and daily budgets; Cost Anomaly Detection (off until turned on); the CloudFront 5xx and request-flood alarms |
 | `site.tf` | With `site_enabled`: the private bucket (versioned, old versions kept 30 days), OAC, the us-east-1 certificate validated in the delegated zone, the key group from `cloudfront_public_keys`, the empty signing-key secret, the distribution (PriceClass_All; default behaviour signed; `/signin/*` unsigned; `/api/*` to the API once `auth_enabled`; `/dws/*` to the DWS store, signed, once `dws_enabled`) and its DNS records |
 | `edge_functions.tf` | The viewer-request function: unsigned or expired requests get a 302 to `/signin/` (or 401 JSON with `X-Requested-With`), folder paths get `index.html` |
-| `security_headers.tf` | The response-headers policies: what `static/_headers` set on Pages, plus HSTS |
+| `security_headers.tf` | The response-headers policies: the site's headers (those the retired `static/_headers` file set) plus HSTS, and the API's |
 | `waf.tf` | Per-IP rate limits, `/api/auth/*` and every path, and the blocked-requests alarm |
 | `auth.tf` | With `auth_enabled` (P3): the user table (`auth-kit`'s single table: PITR, TTL on `ttl`, deletion protection), the API Lambda (stub code, which CI replaces) and its Function URL, its runtime secret (the code and session keys and the origin secret, `random_password`s written write-only), its role (`auth-kit`'s actions on the table, SES as `no-reply@` only, its two secrets, its log group), SES (configuration set, DKIM, MAIL FROM, DMARC), and the API-error, bounce, complaint and `auth.locked` alarms |
 | `dws.tf` | With `dws_enabled` (P4): the DWS store's bucket (versioned, old versions kept 30 days; CloudFront may read `serve/dws/*` only), the pipeline Lambda (stub code, which CI replaces; no async retries; a DLQ), its role (its bucket prefixes, the lease key, the DWS API key secret, its log group, its metric namespace; no delete), the empty DWS API key secret, the daily EventBridge rule (DISABLED until `dws_schedule_enabled`), and the lag (with the schedule), stopped, failed and DLQ alarms |
@@ -36,7 +36,7 @@ From the repo root. It copies `infra/` to a temporary directory and runs fmt, va
 
 ## Operator steps
 
-One at a time, each when the last is done. The steps by number are the plan's (H0–H10). Every command is the operator's: Claude never runs anything that touches a credential or a key.
+One at a time, each when the last is done. The steps by number are the plan's (H0–H14); the order they run in, the feature flag each turns on, and the go-live checks are `docs/hosting.md` § Deploy readiness. Every command is the operator's: Claude never runs anything that touches a credential or a key.
 
 **H1. Bootstrap tfvars.** In `infra-secrets`, from the template, then fill in `project = "ewr-compliance"`, a new `account_email`, `region = "us-east-1"`, `create_subdomain = true`, `parent_domain`, `github_repo`, and `github_subject_prefix` from the second command. Commit and push it: the bootstrap refuses one that isn't.
 
@@ -270,6 +270,16 @@ aws secretsmanager put-secret-value --secret-id ewr-compliance/dws-api-key --sec
 ```
 shred -u ~/dws-api-key.txt
 ```
+
+**H12. The privacy notice and the client's consent.** In the private repo, fill the placeholders of `static/data/privacy.md` and of `docs/hosting-consent.md` with the same values, run `pnpm test:private` here (its periods are pinned to the code), and send the client the consent text. Keep the reply in the plan.
+
+**H13. Go live.** Once the client agrees, deploy the real data, then run every check in `docs/hosting.md` § Deploy readiness, Go-live checks.
+
+```
+cd ~/github/ewr-compliance && tools/deploy.sh real
+```
+
+**H14. Registry.** Add the project's rows to `project-mgmt` (`docs/vendor-accounts.md`, `docs/architecture.md`) and to `templates`' `docs/estate-map.md`.
 
 ## Rotating the signing key
 

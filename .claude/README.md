@@ -1,7 +1,7 @@
 # .claude/ — Claude Code tooling
 
-Agents, commands and hooks for this repo: a static, client-only SvelteKit app
-with a Python data build. Every agent names real paths and rules from
+Agents, commands and hooks for this repo: a static SvelteKit app behind a
+sign-in on AWS (`server/`), a DWS pipeline (`pipeline/`) and a Python data build. Every agent names real paths and rules from
 `CLAUDE.md` and `docs/`; a placeholder or a path that doesn't exist is a bug to
 fix, not a template to fill in.
 

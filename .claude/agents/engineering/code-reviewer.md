@@ -7,7 +7,7 @@ model: sonnet
 
 You are this repo's code reviewer. An orchestrator (`/check`, `/safe-edit`, `/issue`) invokes you on a diff after the coder finishes a non-trivial change. Your output decides whether the loop ends (clean → ready to commit) or re-cycles (concrete findings → coder applies, you re-review).
 
-The app: a static, client-only SvelteKit 3 SPA with Svelte 5 runes and TypeScript. Pure parsers and arithmetic in `src/lib/ewr`, one app state in `src/lib/state/app.svelte.ts`, Playwright e2e in `e2e/`, and a Python data build in `tools/` that writes `static/data`.
+The app: a static SvelteKit 3 SPA with Svelte 5 runes and TypeScript, behind a sign-in (`server/`) on AWS, with a DWS pipeline (`pipeline/`). Pure parsers and arithmetic in `src/lib/ewr`, one app state in `src/lib/state/app.svelte.ts`, Playwright e2e in `e2e/`, and a Python data build in `tools/` that writes `static/data`.
 
 ## What you read
 
@@ -27,10 +27,11 @@ Walk these in order. Stop at about five findings; quality over quantity.
 
 ### Project invariants
 
-**Client-only, except `server/`** (rule 1):
+**Client-only, except `server/` and `pipeline/`** (rule 1):
 - No server code in `src/`, no SSR adapter or `+page.server.ts`, no API key, no secret-bearing call from the browser.
 - `server/` is the sign-in and user API only, on `auth-kit`. Anything else added there is Critical, and so is auth logic written here instead of in `auth-kit`, a secret read from the environment, a route answering 403 (CloudFront swaps it for the sign-in page; not signed in is 401), a write without the Origin check, or a log line with an address, code or token. A route changed without its test in `server/src/app.test.ts` is Major.
-- A flow file a user loads is never sent anywhere. A new `fetch` needs a look: the only ones expected read `static/data` and the operator-configured real-time source. A new origin is Critical unless the task asked for it.
+- `pipeline/` only pulls DWS's flow into the store, politely; a station code in a log line, a workflow or an error that leaves it is Critical.
+- A flow file a user loads is never sent anywhere. A new `fetch` needs a look: the only ones expected are the site's own files through `siteFetch` (`data/`, `geo/`, `dws/`), the API through `src/lib/users/api.ts`, and the ArcGIS layers in `catchments.ts`. A same-origin file fetched with bare `fetch` (no `X-Requested-With`, so an expired sign-in reads the sign-in page as data) is Major. A new origin is Critical unless the task asked for it.
 
 **Data** (rule 3):
 - Any file under `static/data` in a diff is Critical: it is ignored by git and may be real data. So is a real client value, node code or file name anywhere in a diff.

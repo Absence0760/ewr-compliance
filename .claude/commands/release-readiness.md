@@ -7,7 +7,7 @@ Run the go/no-go checklist before a release. Report it; never tag, push or publi
 
 ## How releases work here
 
-There is no deploy target yet. A release is a tag `vX.Y.Z` on `main`, matching `version` in `package.json`, and the static `build/` that `pnpm build` produces from it, which goes on any static host.
+A release is a tag `vX.Y.Z` on `main`, matching `version` in `package.json`. The deploy target is the AWS site in af-south-1 (`docs/hosting.md`): the operator deploys the static build from the workstation with `tools/deploy.sh real`, and CI deploys the API and the pipeline on `api@X.Y.Z` and `pipeline@X.Y.Z` releases. This command never deploys; before a first deploy, also walk `docs/hosting.md` § Deploy readiness and report which of its checks are not yet done.
 
 ## Procedure
 
@@ -21,7 +21,7 @@ git log -1 --format='%h %s' origin/main
 gh run list --branch main --workflow ci.yml --limit 1 --json status,conclusion,headSha
 ```
 
-Red if `CI gate` on `origin/main`'s head isn't `completed/success`.
+Red if `CI gate` on `origin/main`'s head isn't `completed/success`. `server/` and `pipeline/` ship separately: if either changed since its last `api@`/`pipeline@` release, say so (amber).
 
 ### 2. What would ship
 
@@ -39,7 +39,7 @@ With no earlier release, compare against the first commit and say so. Then `git 
 
 ### 4. The brief
 
-Walk `../ewr-compliance-private/docs/requirements.md` against the app. Anything it asks for that isn't built is amber, named. A wrong line name or default is red. The real-time API is still to be established, so its absence is expected: say so.
+Walk `../ewr-compliance-private/docs/requirements.md` against the app. Anything it asks for that isn't built is amber, named. A wrong line name or default is red. The DWS store holds daily flow only until the plan's Q1 is answered: monthly volumes and 12-minute readings from DWS are expected to be missing, so say so.
 
 ### 5. Open signals (amber, never blocking)
 

@@ -103,7 +103,7 @@ A copy served without the API, such as `pnpm dev`, `pnpm preview` or the e2e ser
 
 ## Hosting on AWS
 
-Phases P1 to P4 of the private hosting plan, in `infra/` (Terraform, flat `*.tf`, applied by the operator from the workstation, never by CI). What each file makes, and the operator's steps: `infra/README.md`. What the host does: `docs/hosting.md` § AWS, as built so far.
+The private hosting plan, in `infra/` (Terraform, flat `*.tf`, applied by the operator from the workstation, never by CI). What each file makes, and the operator's steps: `infra/README.md`. What the host does: `docs/hosting.md` § AWS; the order to go live in, and the checks after: § Deploy readiness there.
 
 - **Skeleton (P1).** Providers for af-south-1 and us-east-1, `default_tags`, the S3 backend whose bucket is in the gitignored `backend.config`, alert topics, budgets, and the lookup of the bootstrap's OIDC deploy role with a postcondition on its trust. The deploy role is never given S3 or CloudFront; it may update the code of the API, the DWS pipeline and any Lambda named in `deploy_lambda_functions`.
 - **Gated site (P2, `site_enabled`).** A private bucket behind CloudFront (OAC). The default behaviour trusts one key group, so every path needs CloudFront signed cookies, which the API signs from P3; `/signin/*` is the one unsigned path. The viewer-request function (`infra/edge_functions.tf`, run as code by `tools/edge-functions.test.ts`) redirects a request with no live session to `/signin/`, or answers 401 JSON to one with `X-Requested-With`, and serves folder paths their `index.html`. A response-headers policy replaces `static/_headers`, and WAF rate-limits each address.
