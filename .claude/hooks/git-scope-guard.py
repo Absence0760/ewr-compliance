@@ -295,8 +295,8 @@ def _check_clean(args):
     return None
 
 
-# Off for now: pushes may go straight to main, until the tracking issue turns it back on.
-MAIN_PUSH_GATE = False
+# On: every change reaches main through a PR (CLAUDE.md), which branch protection also enforces.
+MAIN_PUSH_GATE = True
 PROTECTED = {"main", "refs/heads/main", "master", "refs/heads/master"}
 # Options whose value is the next argument (--signed and --force-with-lease
 # only take one in their `=` form).

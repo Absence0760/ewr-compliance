@@ -63,7 +63,7 @@ The numbers are checked against the brief and a reference compliance workbook, b
 
 Several Claude sessions may share this checkout, its working tree and its git index. `.claude/hooks/git-scope-guard.py` enforces these rules; if it denies a command, use the scoped alternative its message names.
 
-- **The PR gate is off for now: changes may go straight to `main`.** Run `pnpm check`, `pnpm test` and `pnpm test:e2e` before pushing. Restoring the gate is tracked in issue 1. No `Co-Authored-By` or generated-by trailer in commits or PR bodies.
+- **Every change reaches `main` through a PR; never push or commit on `main`.** Branch protection requires it, admins included, with `CI gate` green and linear history (squash or rebase). Work in a worktree off `origin/main`, one per PR branch. Run `pnpm check`, `pnpm test` and `pnpm test:e2e` before pushing. Don't merge your own PR unless the operator asks. No `Co-Authored-By` or generated-by trailer in commits or PR bodies.
 - **PR titles are conventional commits:** `<type>(<scope>): <subject>`, type one of feat, fix, chore, docs, refactor, test, perf, ci, build, revert; the subject starts lowercase and doesn't end with a period. CI's `pr-title-lint` fails anything else, and the hook refuses such a `gh pr create/edit --title`.
 - **Commit path-scoped, always:** `git commit -m "…" -- <paths>`. Bare `git commit`, `git add -u/-A/.`, `git commit -a` and `--amend` with staged changes are blocked.
 - **Only touch what your task owns**, and never whole-tree: no `git add .`, `checkout/restore .`, `reset --hard`, `git rm .`, `git stash`, `git clean -f`.

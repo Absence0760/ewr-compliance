@@ -84,13 +84,19 @@ cd ~/github/templates && ./scripts/new-project-account.sh ewr-compliance
 
 The account's details are in the summary it prints at the end: keep the account ID (H4) and the deploy role's ARN (H10) to hand, and record nothing from it in this repo.
 
-Keep the branch protection stage 4 made (the plan's Q5): production deploys `origin/main`, so a change should pass CI before it reaches `main`, not after. Straight after, close issue 1 by its checklist: turn the hook's main-push gate back on (`MAIN_PUSH_GATE = True` in `.claude/hooks/git-scope-guard.py`, `MAIN = "deny"` in its test, and run the test), and put back `CLAUDE.md`'s rule that every change reaches `main` through a PR, in one PR, the first through the gate. Check the lock is there:
+Stage 4's GitHub settings were applied ahead of it on 2026-11-07 (the plan's Q5, issue 1): `main`'s protection (a PR for every change, enforced on admins, `CI gate` required, linear history) and the `production` environment, with you as its required reviewer and deployment rules for `main` and tags `api@*` and `pipeline@*`. Stage 4 sets the same protection and reviewer again, which changes nothing. Check both afterwards:
 
 ```
 gh api repos/Absence0760/ewr-compliance/branches/main/protection --jq '.required_status_checks.contexts, .enforce_admins.enabled'
 ```
 
 It should list `CI gate`, then `true`.
+
+```
+gh api repos/Absence0760/ewr-compliance/environments/production/deployment-branch-policies --jq '.branch_policies[] | "\(.type) \(.name)"'
+```
+
+It should list `branch main`, `tag api@*` and `tag pipeline@*`. If stage 4's environment update cleared them, add each back: `gh api -X POST repos/Absence0760/ewr-compliance/environments/production/deployment-branch-policies -f name='api@*' -f type=tag` (and the same for `main` with `type=branch`, and `pipeline@*`).
 
 **H4. Enable af-south-1** for the new account, from the management account, then check it reads `ENABLED` (it takes a few minutes). The management account can change another account's regions only once trusted access for AWS Account Management is on in the organisation. Turn it on once (it is harmless if it already is):
 
@@ -240,7 +246,7 @@ It should print `SUCCESS`. Until production access is granted, SES delivers only
 aws sesv2 get-account --region af-south-1 --profile ewr-compliance --query 'ProductionAccessEnabled'
 ```
 
-**H10. Deploy the API.** In GitHub, check the `production` environment H3 made has you as its required reviewer, and set its deployment branches and tags to `main` and tags `api@*`. Then set the Actions secret `AWS_DEPLOY_ROLE_ARN` to the bootstrap's `ewr-compliance-deploy` role (the ARN in H3's summary; the command prompts for it), and the variables `AWS_REGION` = `af-south-1` and `API_FUNCTION_NAME` = the second command's output. Then publish a release and approve its deploy:
+**H10. Deploy the API.** In GitHub, check the `production` environment still has you as its required reviewer and its deployment rules (`main`, and tags `api@*` and `pipeline@*`: the checks after H3). Then set the Actions secret `AWS_DEPLOY_ROLE_ARN` to the bootstrap's `ewr-compliance-deploy` role (the ARN in H3's summary; the command prompts for it), and the variables `AWS_REGION` = `af-south-1` and `API_FUNCTION_NAME` = the second command's output. Then publish a release and approve its deploy:
 
 ```
 gh secret set AWS_DEPLOY_ROLE_ARN --repo Absence0760/ewr-compliance --app actions
@@ -277,7 +283,7 @@ Sign in at `https://<domain>/` with that address, open Users, and add a second a
 Not before DWS grants API access: an application was sent on 2026-11-07 (`docs/hosting.md` § The DWS store). The site goes live without this step, and comes back to it when access arrives. Record the grant in the private plan, and keep the letter with the client's records, never in this repo. If the grant is for an API rather than the HyData page `pipeline/src/hydata.ts` reads, the pipeline changes first.
 
 1. Set `dws_enabled = true` in `prod.tfvars` (and `dws_contact`, a mailbox DWS can write to before blocking us, if you want one in the user agent), then plan and apply as in H6. That makes the bucket, the pipeline (which fails until its code is deployed), the backfill and the empty DWS API key secret. The daily rule is made disabled.
-2. Deploy the pipeline as in H10: add the tag rule `pipeline@*` to the `production` environment's deployment branches and tags, set the variable, and publish a release and approve it.
+2. Deploy the pipeline as in H10 (the `production` environment already allows tags `pipeline@*`): set the variable, and publish a release and approve it.
 
 ```
 gh variable set DWS_FUNCTION_NAME --body ewr-compliance-dws --repo Absence0760/ewr-compliance
