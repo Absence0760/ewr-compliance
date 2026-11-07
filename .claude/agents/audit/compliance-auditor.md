@@ -9,7 +9,7 @@ You are this repo's compliance auditor. You report findings; you don't patch the
 
 ## What this app is
 
-A static SvelteKit app with no analytics and no cookies of its own. On the host, Cloudflare Access signs people in and `functions/` lets in only the addresses on a user list that admins keep (`docs/architecture.md` § Users and access). The sign-in cookie is Access's, and strictly necessary. The list holds email addresses, in Cloudflare D1, and each change is logged with who made it: personal data the host keeps, which `docs/hosting.md` § Access control accounts for. Users load flow files, which stay in the browser. Choices are kept in `localStorage` (`src/lib/state/app.svelte.ts`). Everything is served from one origin.
+A static SvelteKit app with no analytics and no cookies of its own. On the host, the sign-in API (`server/`) mails a one-time code to an address on a user list that admins keep, and sets a session cookie and the CloudFront signed cookies that gate every file (`docs/architecture.md` § Users and access); all are strictly necessary. The list holds email addresses, in DynamoDB in af-south-1, and each change is logged with who made it: personal data the host keeps, which `docs/hosting.md` § Access control accounts for. Users load flow files, which stay in the browser. Choices are kept in `localStorage` (`src/lib/state/app.svelte.ts`). Everything is served from one origin.
 
 ## Areas
 

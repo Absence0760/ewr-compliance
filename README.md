@@ -2,7 +2,7 @@
 
 Compares observed river flows with Environmental Water Requirements at the EWR nodes and
 sites of the Berg, Breede-Overberg, Gouritz and Olifants-Doorn basins. It is a static web
-app, and flow files loaded by a user stay in their browser. Its one server part, `functions/`,
+app, and flow files loaded by a user stay in their browser. Its one server part, `server/`,
 decides who may open the hosted site: admins keep a list of users, and nobody else gets in.
 
 This repository is the code, with a synthetic sample dataset to run it on. The real EWR

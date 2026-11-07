@@ -1,20 +1,17 @@
 # Hosting
 
-> **Superseded.** The Cloudflare design described here is being replaced by hosting on AWS af-south-1, with sign-in and user management from the shared private package `auth-kit`, per the private hosting plan (phases P1–P6). Nothing is live. This document stays as it is until P6 rewrites it; don't extend the Cloudflare code.
+The app is a folder of static files, and `server/` is the sign-in API in front of it. `tools/deploy.sh` deploys the files to the AWS site below; CI deploys the API (`.github/workflows/deploy-lambdas.yml`). Nothing is live yet: the private hosting plan's phases P4 to P6 follow.
 
-The app is a folder of static files. `tools/deploy.sh` deploys it to the AWS site of § AWS, as built so far. The Cloudflare sections below describe `functions/`, the access check Pages would have run, which P3 removes.
-
-## AWS, as built so far (P1, P2)
+## AWS, as built so far (P1 to P3)
 
 `infra/` holds the Terraform; `infra/README.md` has the operator's steps, one command at a time, and what each file makes. Nothing is applied yet.
 
 - **Account and region.** The `ewr-compliance` sub-account, made by the estate bootstrap. The workload is in af-south-1, and `aws_region` refuses anything else unless `data_outside_south_africa` is set. Terraform state is in the bootstrap's us-east-1 bucket, named in the gitignored `infra/backend.config`; the values are in `infra-secrets`.
 - **Alerts and cost.** Two SNS topics mail the operator; monthly and daily budgets; Cost Anomaly Detection once turned on.
-- **Deploy role.** The bootstrap's OIDC role, for the `production` environment only. It gets a policy only once P3 or P4 names Lambdas, and then only to update their code. It can never write the site bucket: the site and its data go up only from the workstation.
-- **The site** (`site_enabled`). A private, versioned S3 bucket read by CloudFront through OAC. Every path needs CloudFront signed cookies (the default behaviour trusts one key group) except `/signin/*`. The viewer-request function sends a request without a live `CloudFront-Policy` cookie to `/signin/?next=…`, or answers `401` JSON when it carries `X-Requested-With`, and serves a folder path its `index.html` (with a `301` to add the slash). CloudFront's own `403`, for a cookie whose signature fails, shows the sign-in page. The private key that signs the cookies is in a Secrets Manager secret Terraform creates empty; the operator puts it in from a file. `/api/*` joins the distribution in P3. WAF limits each address on every path and, more tightly, on `/api/auth/*`. Price class All, for South African edges.
+- **Deploy role.** The bootstrap's OIDC role, for the `production` environment only. It may update the code of the API (once `auth_enabled`) and of any Lambda in `deploy_lambda_functions`, and nothing else. It can never write the site bucket: the site and its data go up only from the workstation.
+- **The site** (`site_enabled`). A private, versioned S3 bucket read by CloudFront through OAC. Every path needs CloudFront signed cookies (the default behaviour trusts one key group) except `/signin/*`. The viewer-request function sends a request without a live `CloudFront-Policy` cookie to `/signin/?next=…`, or answers `401` JSON when it carries `X-Requested-With`, and serves a folder path its `index.html` (with a `301` to add the slash). CloudFront's own `403`, for a cookie whose signature fails, shows the sign-in page. The private key that signs the cookies is in a Secrets Manager secret Terraform creates empty; the operator puts it in from a file. `/api/*` goes to the API (§ Access control). WAF limits each address on every path and, more tightly, on `/api/auth/*`. Price class All, for South African edges.
 - **Headers.** A response-headers policy sets what `static/_headers` set on Pages, plus HSTS, and `infra/tests/security_headers.tftest.hcl` pins it. `Cache-Control` is set per object by `tools/deploy.sh` instead: § Headers.
-
-Until P3 adds `static/signin/`, the sign-in page doesn't exist, so the site is closed to everyone, which is the safe way round.
+- **Sign-in** (`auth_enabled`, `infra/auth.tf`). The API Lambda, the user table and SES: § Access control.
 
 ## The data is the decision
 
@@ -26,123 +23,56 @@ CI builds the sample only and has no access to the private repo, so a real build
 
 ## Access control
 
-> **Superseded,** as noted at the top: on AWS, sign-in and the user list come from `auth-kit`, and the Cloudflare Access, D1 and Functions setup below goes in P3.
+Nobody reaches a file of the site, `data/` included, without CloudFront signed cookies, and only the API (`server/`, on the private package `auth-kit`) issues them: to an address on the site's list, after a 6-digit code sent to it. How it works: `docs/architecture.md` § Users and access. What Terraform makes: `infra/auth.tf`.
 
-The decision: only people on the site's list of users can load any of its files. The list is kept by the site's admins, in the app. The operator adds the first admin once; after that, admins add and remove users and make other admins. Design: `docs/architecture.md` § Users and access.
+- **The list** is one DynamoDB table in af-south-1 (`ewr-compliance-users`): users, the admin count, codes and throttles (keyed by an HMAC of the address, so a stranger's address is never stored), revoked sessions, and the audit log. Admins keep it on the Users page; every change is one transaction with its audit row, and the site always keeps an admin.
+- **Codes** are valid 10 minutes, spent after 3 wrong tries, at most one a minute and 10 a day an address; 5 wrong codes in a row lock the address for a while (`auth.locked` alarms). Nothing says whether an address is listed, by answer or by timing.
+- **Sessions** are an HttpOnly `__Host-` cookie for 7 days. The files' cookies last 15 minutes and the app renews them while it is open. Every API call re-reads the user: a removed user is refused by the API at once, and the files close to them within 15 minutes (Q3 in the plan accepts that).
+- **Mail** goes from `no-reply@<domain>` through SES in af-south-1, DKIM-signed, over TLS only.
+- **Keys.** The code key, the session key and the CloudFront origin secret are Terraform `random_password`s in the API's runtime secret (state holds them, encrypted, as the estate standard allows); the CloudFront private key is the operator's, put in by hand (H7). None is in the Lambda's environment, which the CI deploy role can read.
 
-The host is Cloudflare Pages, because the check runs there, in front of every file:
+The cookies are strictly necessary to reach the site, so they need no consent banner. The app itself sets none.
 
-- **Cloudflare Access** signs people in with a one-time code sent to their email address, so nobody has a password and none is stored. Its policy includes only the Access group `ewr-compliance-users`, which the site keeps in step with the list, and Access sends a code only to an address its policy allows: a stranger gets none, takes no seat and never reaches a Function. The list in D1 stays the source of truth; the group follows it.
-- **`functions/_middleware.ts`** runs before every request, `data/` included. It verifies the Access token and looks the address up in the list, the inner check that holds even if the group falls out of step. Anyone not on it gets a page saying so, and an admin removing someone takes effect on that person's next request, not when their sign-in expires.
-- **Keeping the group in step** (`functions/lib/accessGroup.ts`): after an admin adds or removes someone, the site replaces the group's include rules with the whole list, through the Cloudflare API, and on a removal then ends that person's Access sessions (`revoke_user`), which otherwise stay valid until they expire. Making or unmaking an admin leaves the group alone. If the API call fails, the change is still saved and the Users page says Access was not updated, with a Sync with Access button that sends the whole list again. Without the three settings below the site saves changes but does not touch the group, and the Users page says so. An Access group holds at most 1,000 rules, so the site refuses a 1,001st user.
-- **Cloudflare D1** holds the list and a log of every change, with who made it. It names people, so it is never copied into a repo.
+### First admin, and recovery
 
-Settings the Pages project needs (dashboard, Settings):
-
-| Setting | Value |
-|---|---|
-| Variable `ACCESS_TEAM_DOMAIN` | The Zero Trust team domain, `<team>.cloudflareaccess.com` |
-| Variable `ACCESS_AUD` | The Application Audience (AUD) tags of the site's two Access applications, the site and its deployment previews, separated by a comma |
-| D1 binding `USERS_DB` | The user database, with `migrations/0001_users.sql` applied |
-| Variable `CF_ACCOUNT_ID` | The Cloudflare account ID |
-| Variable `ACCESS_GROUP_ID` | The ID of the Access group `ewr-compliance-users` (Zero Trust > Access > Access groups, the group's page) |
-| Secret `CF_API_TOKEN` | An API token with one permission, **Access: Organizations, Identity Providers, and Groups Write**, on this one account and no other. The operator makes it (My Profile > API Tokens > Create Custom Token) and sets it as a secret, in the dashboard (Settings > Variables and Secrets, type Secret) or with `pnpm wrangler pages secret put CF_API_TOKEN --project-name ewr-compliance`, which prompts for it. Never as a plain variable, and never in a file |
-| Functions failure mode | **Fail closed** (Settings > Runtime > Fail open / closed). Fail open serves the files without the check once the free daily limit is used up |
-
-Set the variables, the binding and the failure mode for both of the project's environments, Production and Preview: Pages keeps them apart, and a preview without the variables or binding refuses everyone. They reach only deployments made after the change: Cloudflare says to redeploy for a binding to take effect, so deploy again after changing any of them.
-
-The failure mode matters because the daily limit of 100,000 Functions requests is the account's, shared with every Worker and Pages project on it, and resets at midnight UTC. With the policy limited to the group only a listed user can send requests at all, but a listed user's compromised mailbox would still be enough to use it up. Fail open would then serve every file, `data/` included, with no check at all. Cloudflare's docs do not say which mode a new project starts with, so check it reads Fail closed in both environments rather than assume it. Without either variable, or the binding, every request is refused with "not set up". If Access's keys cannot be fetched, requests are refused with "Sign-in unavailable" until they can. The first admin, once, by the operator:
+The operator adds the first admin once, with their own AWS profile (H9 in `infra/README.md`); admins add everyone else on the Users page. Each tool asks for the address and never takes it as an argument:
 
 ```
-pnpm wrangler d1 execute ewr-compliance-users --remote --command "INSERT INTO users (email, admin, added_by, added_at) VALUES ('<address>', 1, 'operator', datetime('now'))"
+tools/first-admin
 ```
 
-The address in lowercase: the table refuses any other, because a mixed-case address would never match a sign-in. A typo there locks nobody in or out for good: run it again with the right address.
-
-### Setting up, in this order
-
-1. Create the Pages project as Direct Upload, `pnpm wrangler pages project create ewr-compliance --production-branch main`, and never connect it to Git. A Git-connected project builds a preview of every commit to every branch by default, Dependabot's included, and each would run that branch's `functions/` against the same `USERS_DB`.
-2. Create the Access group `ewr-compliance-users` (Zero Trust > Access > Access groups), including one rule, Emails, with the operator's own address: the same address, lowercase, as the first admin in step 6. Note its ID for `ACCESS_GROUP_ID`. The site replaces the group's include rules from then on, keeping its name and any exclude or require rules.
-3. Create the two Access applications (§ Access, as built) and note both AUD tags.
-4. Create the database and apply the schema: `pnpm wrangler d1 create ewr-compliance-users`, then `pnpm wrangler d1 execute ewr-compliance-users --remote --file migrations/0001_users.sql`.
-5. Set the variables, the `USERS_DB` binding, the `CF_API_TOKEN` secret and Fail closed, in Production and in Preview.
-6. Add the first admin, with the command above.
-7. Only then deploy, starting with `tools/deploy.sh sample`. Sign in as the first admin and press Sync with Access on the Users page once, which checks the token.
-
-### Access, as built
-
-In the dashboard, by the route Cloudflare's Pages known-issues page gives:
-
-- Pages project > Settings > General > Enable access policy. Edit the application it makes and delete the `*` from its hostname, so it covers `ewr-compliance.pages.dev`. Enable the setting again, so a second application covers `*.ewr-compliance.pages.dev`, the hash and preview URLs.
-- Both applications: policy Allow, Include the Access group `ewr-compliance-users`, never Everyone; One-time PIN as the only login method; session 24 hours. Note each one's Application Audience (AUD) tag for `ACCESS_AUD`.
-- Zero Trust > Settings > Admin controls > Remove inactive users from seats: set a period (one month is the shortest). Off by default, so a seat is otherwise held for good.
-
-It is set in the dashboard, not Terraform, because the provider's `cloudflare_pages_project` has open bugs that break a Direct Upload project's plans: cloudflare/terraform-provider-cloudflare #7303, #7449 and #7288.
-
-### Every deployment stays live
-
-Each deployment stays reachable at its own `<hash>.ewr-compliance.pages.dev` URL, with its own `functions/`, its own data, and the settings it was deployed with, after a newer one or a rollback replaces it at the main address. Access covers those URLs too, but an old deployment keeps whatever it had: an older gate, data since withdrawn. After any deploy that changes `functions/`, the data or a setting, delete the superseded deployments, in the dashboard (Deployments, the deployment's menu) or with `pnpm wrangler pages deployment list --project-name ewr-compliance` and `pnpm wrangler pages deployment delete <id> --project-name ewr-compliance`.
-
-### Admins, the log and backups
-
-If no admin can reach the site, the operator makes one again, straight in D1:
+If no admin can sign in (an admin locked out by someone failing codes against their address, or the last admin gone), the break-glass makes a listed address an admin again and clears its lockout, and is audited:
 
 ```
-pnpm wrangler d1 execute ewr-compliance-users --remote --command "UPDATE users SET admin = 1 WHERE email = '<address>'"
+tools/recover-admin
 ```
 
-The log of changes, newest first:
+They need `server/` installed (`cd server && pnpm install --frozen-lockfile`, which needs read access to `auth-kit`) and `terraform -chdir=infra output users_table` to work.
 
-```
-pnpm wrangler d1 execute ewr-compliance-users --remote --command "SELECT * FROM audit ORDER BY id DESC LIMIT 50"
-```
+### Before going live
 
-Both print email addresses into the terminal, so run them only when needed.
-
-D1 Time Travel is the backup, always on: it can restore the database to any point in the last 7 days on Workers Free, or 30 on Workers Paid, with `pnpm wrangler d1 time-travel restore ewr-compliance-users --timestamp=<unix seconds or RFC 3339>`. `wrangler d1 export` writes the list, which is personal data, to the workstation: don't, unless it is needed, and delete the file after.
-
-The sign-in cookie is Access's and strictly necessary to reach the site, so it needs no consent banner. The app itself still sets no cookie. The list is personal data the operator keeps for the client: email addresses, who added whom and when.
-
-Before going live, check:
-
-- From a browser that is not signed in, `data/index.json` gets the sign-in page.
-- An address not on the list is sent no code, for `data/index.json` as well as the home page.
-- Adding a user puts their address in the group (Zero Trust > Access > Access groups); removing one takes it out and shuts them out on their next request.
-- Sync with Access on the Users page reports the number of addresses listed, not an error.
-- A `<hash>.ewr-compliance.pages.dev` URL and a preview URL behave the same, signed out and as an address not on the list.
-- The failure mode reads Fail closed in both Production and Preview.
-- The deployment list holds only the deployments meant to be there.
+- From a browser that is not signed in, `data/index.json` gets the sign-in page (or 401 JSON with `X-Requested-With`), and so does `/nodes/`.
+- An address not on the list gets the same "a code is on its way" and no email.
+- Signing in opens the page asked for; Sign out, then the browser's back button, gets the sign-in page.
+- A user removed on the Users page gets 401 from `/api/me` at once.
+- A request straight to the Function URL (shown on the Lambda console), past CloudFront, gets 404: the origin secret is checked.
+- SES is out of the sandbox and the identity's DKIM reads SUCCESS (H8).
 
 ### Personal data
 
-The site's only personal data is the list of users (email address, admin flag, who added them and when), the audit log of changes (time, actor's address, action, target's address), Cloudflare Access's own sign-in records, and the email with the code Access sends. The privacy notice at `privacy/`, linked from the app bar of every page, says so: its text is `static/data/privacy.md` in the private repo, which `pnpm data:private` copies in (`docs/architecture.md` § Privacy notice). Before the real deploy, fill its placeholders, and get the client's agreement to hosting outside South Africa with the private repo's `docs/hosting-consent.md`.
+The site's personal data is the list (email address, admin flag, who added them and when), the audit log (time, actor's address, action, target's address; a failed sign-in by an unlisted address is recorded as an HMAC, never the address), the sign-in emails SES sends, and the API's logs, which hold opaque ids and no address. The privacy notice at `privacy/`, linked from the app bar of every page, says so: its text is `static/data/privacy.md` in the private repo, which `pnpm data:private` copies in (`docs/architecture.md` § Privacy notice). Before the real deploy, fill its placeholders and get the client's agreement with the private repo's `docs/hosting-consent.md` (P6).
 
-**Retention.** Audit rows older than 24 months (`AUDIT_RETENTION_MONTHS` in `functions/lib/d1.ts`) are deleted by every change, in the same batch as the change and its own row. If the notice's period changes, change the constant with it: the private repo's `tests/unit/privacy.test.ts` checks they agree.
+**Retention.** Audit rows carry a TTL of 24 months (`auth-kit`'s `AUDIT_RETENTION_MONTHS`), and DynamoDB deletes them within days of it, so the notice says "about 24 months". Codes, throttles and revocations expire within days. Point-in-time recovery keeps deleted items restorable for 35 days. The site bucket keeps replaced and deleted file versions for 30 days. The API's logs are kept 90 days (`api_log_retention_days`).
 
-**Deletion on request.** An admin removes the person on the Users page, which deletes their row in `users`. For a full erasure the operator then takes their address out of the audit log, and out of `added_by` on the users they added. An `add` row's target is the address, or the address followed by ` (admin)`, so the command matches those two exactly and nothing else, never a longer address that starts the same:
+**Deletion on request.** The operator erases the address everywhere: the user, if still listed (refused if they are the last admin), their code and throttle, and the address in every audit row and in other users' "added by", replaced by `erased:<hmac>`:
 
 ```
-pnpm wrangler d1 execute ewr-compliance-users --remote --command "UPDATE audit SET target = CASE WHEN target IN ('<address>', '<address> (admin)') THEN 'erased' ELSE target END, actor = CASE WHEN actor = '<address>' THEN 'erased' ELSE actor END WHERE target IN ('<address>', '<address> (admin)') OR actor = '<address>'; UPDATE users SET added_by = 'erased' WHERE added_by = '<address>'"
+tools/erase-user
 ```
 
-The address in lowercase, as the list keeps it. Then Cloudflare: Zero Trust > Team & Resources > Users, select the person, Action > Remove users. That frees their seat and deletes their device registrations, but Cloudflare keeps the user record ("You cannot delete or archive a user record") and its Access logs for the plan's retention (24 hours on Free, 30 days on Standard). Anything past that is Cloudflare's to delete, under its own privacy policy, on a request to it. D1 Time Travel keeps the old rows restorable for 7 days on Workers Free, 30 on Workers Paid, so the erasure is complete when that window has passed. Reply to the person with what was done.
+Then take the address off SES's account-level suppression list if it is on it (`aws sesv2 delete-suppressed-destination --email-address <address> --region af-south-1 --profile ewr-compliance`, typed by the operator), and record the erasure. It is complete 35 days later, when PITR no longer holds the deleted items. Reply to the person with what was done.
 
-**Access to their data.** The log query above, filtered to the address, answers a request to see what is held. Send it to the person, not into a file or a ticket.
-
-### Cost
-
-At this scale it is free: checked on 2026-11-06 against Cloudflare's pricing pages.
-
-| Part | Free allowance | This site |
-|---|---|---|
-| Pages | Static files free and unlimited, 500 builds a month, 20,000 files of up to 25 MiB | About 1,000 files and 30 MB |
-| Pages Functions | 100,000 requests a day, 10 ms CPU each. Every file is a request, because the middleware runs on all of them | About 30 to 60 requests a page load: 20 people loading it 10 times a day is about 12,000 |
-| D1 | 5 million rows read and 100,000 written a day, 5 GB | One row read a request |
-| Zero Trust (Access) | Up to 50 users. A card is needed to activate the Free plan, and is not charged | A user takes a seat when they sign in, and only a listed address can. Seats can be set to expire |
-
-The first cost, if one ever comes, is Workers Paid at US$5 a month for the account, which lifts the daily request limit to 10 million a month. More than 50 people signing in moves Zero Trust to US$7 a user a month. A custom domain needs its zone on Cloudflare, free on the Free plan, plus the domain's own registration.
-
-**The seats and the request limit.** The Access policy includes only the group the site keeps in step with the list, and Cloudflare sends a code only to an address a policy allows, so a stranger can neither take a seat nor send a request that reaches a Function. Closed by that change (private issue 11). What is left: someone who controls a listed user's mailbox can sign in as them and send requests until the account's daily Functions limit is used up, which Fail closed turns into the site being down for everyone until midnight UTC; removing that user ends their sessions and stops it. While the group is out of step (a failed sync not yet repeated), an address just removed may still get a code, and is refused by the middleware.
+**Access to their data.** The Users page and `GET /api/audit` (admins) show what is held about a listed address. Send it to the person, not into a file or a ticket.
 
 ## Build
 
@@ -207,9 +137,9 @@ None are required. These matter when the host allows them:
 
 A page is a folder's address, such as `/nodes/`, so a rule for `*.html` alone misses every page but `404.html`.
 
-On AWS, the CloudFront response-headers policy (`infra/security_headers.tf`) sets the last three rows, with HSTS, on every response; `tools/deploy.sh` sets each object's `Cache-Control` and the `.mjs` type as it uploads; and CloudFront compresses text (CachingOptimized). `static/_headers`, the Pages version, is gone, and `infra/tests/security_headers.tftest.hcl` pins the policy in place of `src/headers.test.ts`. On Cloudflare Pages, which this section described until P2, `_headers` set all but the first two rows, and Pages did those itself. Pages applies it to the files `functions/_middleware.ts` passes on with `ctx.next()`, but not to a response a Function makes itself, such as the sign-in refusal or `api/`. Those set `X-Content-Type-Options` and `frame-ancestors` themselves, in `functions/lib/gate.ts`, and the refusal page carries its own policy, `default-src 'none'; style-src 'unsafe-inline'`. On any other host, take the table as the list to set.
+On AWS, the CloudFront response-headers policy (`infra/security_headers.tf`) sets the last three rows, with HSTS, on every response; `tools/deploy.sh` sets each object's `Cache-Control` and the `.mjs` type as it uploads; and CloudFront compresses text (CachingOptimized). `infra/tests/security_headers.tftest.hcl` pins the policy. The API's answers get their own policy (`default-src 'none'`, no referrer) and `Cache-Control: no-store` from the API itself, and `/api/*` is never cached at the edge. The sign-in page carries its own CSP meta tag (`script-src 'self'`, `connect-src 'self'`). On any other host, take the table as the list to set.
 
-Pages keeps every uploaded file in its own cache until the next deploy, behind the middleware, which still checks each request. A cache rule on the domain sits in front of the middleware, and could serve a page or data file to someone it never checked: add none. Cloudflare does not cache HTML or JSON unless a rule tells it to, and does not store a `private` response.
+CloudFront caches files under `/signin/*` and the signed paths only by URL (CachingOptimized), and checks the signed cookies on every request, cached or not, so a cached file never reaches someone without them.
 
 Serve the site over `https`. The browser's Copy needs a secure context.
 
@@ -245,7 +175,7 @@ The host needs nothing for these. Each browser reads them directly from the ArcG
 
 `tools/fetch-tiles.sh` fills `static/tiles/`, 251 MB of `.pmtiles` for South Africa and the label fonts, and `pnpm build` copies it into `build/tiles/`. Check the host's limit on one file. To keep the file elsewhere, set `VITE_TILES_URL` and `VITE_TILES_GLYPHS_URL` to full `https` URLs.
 
-On Cloudflare Pages the base map cannot be beside the app: the file is far over Pages' 25 MiB limit, and Pages answers a range request with `200`. `tools/deploy.sh` builds without it. To have one there, host the `.pmtiles` elsewhere and set `VITE_TILES_URL`.
+`tools/deploy.sh` builds without it for now (Q4 in the private plan: S3 answers range requests, so it could come back). To have one meanwhile, host the `.pmtiles` elsewhere and set `VITE_TILES_URL`.
 
 The host of the `.pmtiles`, here or elsewhere, must:
 

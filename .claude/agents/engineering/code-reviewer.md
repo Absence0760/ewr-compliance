@@ -27,9 +27,9 @@ Walk these in order. Stop at about five findings; quality over quantity.
 
 ### Project invariants
 
-**Client-only, except `functions/`** (rule 1):
+**Client-only, except `server/`** (rule 1):
 - No server code in `src/`, no SSR adapter or `+page.server.ts`, no API key, no secret-bearing call from the browser.
-- `functions/` is the access check and user list only. Anything else added there is Critical. A rule in `functions/lib/users.ts` changed without its test in `users.test.ts` is Major, and so is a request path that reaches `next()` without passing `gate`.
+- `server/` is the sign-in and user API only, on `auth-kit`. Anything else added there is Critical, and so is auth logic written here instead of in `auth-kit`, a secret read from the environment, a route answering 403 (CloudFront swaps it for the sign-in page; not signed in is 401), a write without the Origin check, or a log line with an address, code or token. A route changed without its test in `server/src/app.test.ts` is Major.
 - A flow file a user loads is never sent anywhere. A new `fetch` needs a look: the only ones expected read `static/data` and the operator-configured real-time source. A new origin is Critical unless the task asked for it.
 
 **Data** (rule 3):
