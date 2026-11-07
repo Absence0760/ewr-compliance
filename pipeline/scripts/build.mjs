@@ -22,6 +22,9 @@ await build({
 	minify: false,
 	sourcemap: false,
 	legalComments: 'none',
+	// This package's tsconfig for every file, as vitest.config.ts: the app's own, which src/lib/ewr would
+	// otherwise get, extends SvelteKit's generated one, there only once the app is installed and synced.
+	tsconfig: join(root, 'tsconfig.json'),
 	// The SDK's CommonJS parts call require(); an ES module has none until it is made.
 	banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
 	logLevel: 'warning'
