@@ -46,6 +46,8 @@ mock_provider "aws" {
 
 mock_provider "random" {}
 
+mock_provider "archive" {}
+
 # Known IDs and ARNs, so the wiring can be asserted by equality at plan time.
 override_resource {
   target          = aws_acm_certificate.site

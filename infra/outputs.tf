@@ -33,3 +33,23 @@ output "alerts_topic_arns" {
     us_east_1 = aws_sns_topic.alerts_us_east_1.arn
   }
 }
+
+output "api_function_name" {
+  description = "The API Lambda (auth.tf): the GitHub variable API_FUNCTION_NAME deploy-lambdas.yml updates."
+  value       = local.api_enabled ? aws_lambda_function.api[0].function_name : null
+}
+
+output "users_table" {
+  description = "The user table, which tools/first-admin, recover-admin and erase-user act on."
+  value       = local.api_enabled ? aws_dynamodb_table.users[0].name : null
+}
+
+output "auth_runtime_secret_arn" {
+  description = "The API's runtime secret (the keys); the operator tools read the keys from it with the operator's own credentials. Its value is never an output."
+  value       = local.api_enabled ? aws_secretsmanager_secret.auth_runtime[0].arn : null
+}
+
+output "ses_identity" {
+  description = "The SES domain identity; H8 checks its DKIM status reads SUCCESS."
+  value       = local.api_enabled ? aws_sesv2_email_identity.domain[0].email_identity : null
+}

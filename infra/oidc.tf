@@ -8,8 +8,10 @@
 # trust that has drifted wider, and attaches this project's deploy policy.
 #
 # What CI may do with it, and what it may not:
-#   - Update the code of the Lambdas named in var.deploy_lambda_functions
-#     (P3's API, P4's pipeline). Nothing else.
+#   - Update the code of P3's API (auth.tf, once auth_enabled) and of the
+#     Lambdas named in var.deploy_lambda_functions (P4's pipeline). Nothing
+#     else: not their configuration, so CI can't point a function at another
+#     role or environment.
 #   - NEVER write the site bucket, or invalidate the distribution. The site and
 #     its data, real or sample, go up only from the operator's workstation
 #     (tools/deploy.sh). CI has no access to the real data and must not have.
@@ -58,12 +60,15 @@ locals {
     replace(split("/", var.github_repo)[1], ".", "\\."),
   )
 
+  # The API (auth.tf) by itself once it exists, then any others (P4).
+  deploy_lambda_functions = distinct(concat(local.api_enabled ? [local.api_function_name] : [], var.deploy_lambda_functions))
+
   deploy_lambda_arns = [
-    for name in var.deploy_lambda_functions :
+    for name in local.deploy_lambda_functions :
     "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${name}"
   ]
 
-  deploy_policy_enabled = length(var.deploy_lambda_functions) > 0
+  deploy_policy_enabled = length(local.deploy_lambda_functions) > 0
 }
 
 data "aws_iam_policy_document" "github_deploy" {

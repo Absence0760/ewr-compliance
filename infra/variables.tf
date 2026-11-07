@@ -135,7 +135,7 @@ variable "cloudfront_requests_alarm_per_5min" {
 # --- Deploy role (oidc.tf) ---------------------------------------------------
 
 variable "deploy_lambda_functions" {
-  description = "Names of the Lambda functions CI may update the code of, through the bootstrap deploy role. Empty until P3/P4 add them, and then the deploy policy isn't created at all. The role never gets S3 write: the data goes up only from the workstation (tools/deploy.sh)."
+  description = "More Lambda functions CI may update the code of, through the bootstrap deploy role (P4's pipeline). The API (auth.tf) is added by itself when auth_enabled. With neither, the deploy policy isn't created at all. The role never gets S3 write: the data goes up only from the workstation (tools/deploy.sh)."
   type        = list(string)
   default     = []
 
@@ -179,17 +179,6 @@ variable "cloudfront_public_keys" {
   }
 }
 
-variable "api_origin_host" {
-  description = "Hostname of the API Lambda's Function URL (<url-id>.lambda-url.<region>.on.aws). Empty (the default) leaves /api/* off the distribution: P3 sets it. Requests to /api/* then reach the default behaviour, signed and served from S3."
-  type        = string
-  default     = ""
-
-  validation {
-    condition     = var.api_origin_host == "" || can(regex("^[a-z0-9]+\\.lambda-url\\.[a-z0-9-]+\\.on\\.aws$", var.api_origin_host))
-    error_message = "api_origin_host is empty, or a Lambda Function URL's hostname (<url-id>.lambda-url.<region>.on.aws), with no scheme or path."
-  }
-}
-
 variable "waf_site_rate_limit_per_ip" {
   description = "WAF limit on every path: requests per IP per 5-minute window. A page load is about 30-60 requests. AWS's minimum is 100."
   type        = number
@@ -209,5 +198,106 @@ variable "waf_auth_rate_limit_per_ip" {
   validation {
     condition     = var.waf_auth_rate_limit_per_ip >= 100 && var.waf_auth_rate_limit_per_ip <= var.waf_site_rate_limit_per_ip
     error_message = "Between 100 (AWS WAF's minimum) and waf_site_rate_limit_per_ip."
+  }
+}
+
+# --- Sign-in and users (auth.tf) ---------------------------------------------
+
+variable "auth_enabled" {
+  description = "Create the sign-in (P3): the user table, the API Lambda behind /api/*, its runtime secret, SES and their alarms. Needs site_enabled. Off by default, so the site can be checked with signed URLs first (H7)."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.auth_enabled || var.site_enabled
+    error_message = "auth_enabled needs site_enabled: the API signs the site's cookies and sits behind its distribution."
+  }
+}
+
+variable "cloudfront_signing_key" {
+  description = "The cloudfront_public_keys entry whose private half is in the signing-key secret, and which the API signs with. Empty takes the only entry; set it when there are two (during a rotation)."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.cloudfront_signing_key == "" || contains(keys(var.cloudfront_public_keys), var.cloudfront_signing_key)
+    error_message = "cloudfront_signing_key names an entry of cloudfront_public_keys."
+  }
+}
+
+variable "mail_from_local_part" {
+  description = "The sign-in email's sender: <this>@domain_name. The API may send as this address only (ses:FromAddress)."
+  type        = string
+  default     = "no-reply"
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9._-]{0,63}$", var.mail_from_local_part))
+    error_message = "A lowercase local part, such as no-reply."
+  }
+}
+
+variable "mail_from_subdomain" {
+  description = "The custom MAIL FROM subdomain (<this>.domain_name), for SPF alignment."
+  type        = string
+  default     = "mail"
+
+  validation {
+    condition     = can(regex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$", var.mail_from_subdomain))
+    error_message = "One lowercase DNS label."
+  }
+}
+
+variable "dmarc_policy" {
+  description = "The DMARC policy: none to start, quarantine or reject once DKIM and SPF are seen to pass."
+  type        = string
+  default     = "none"
+
+  validation {
+    condition     = contains(["none", "quarantine", "reject"], var.dmarc_policy)
+    error_message = "none, quarantine or reject."
+  }
+}
+
+variable "dmarc_report_email" {
+  description = "Where DMARC aggregate reports go (rua). Empty sends none. Set in infra-secrets, never in this repo."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.dmarc_report_email == "" || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s.]+$", var.dmarc_report_email))
+    error_message = "Empty, or a mailbox."
+  }
+}
+
+variable "ses_tls_policy" {
+  description = "REQUIRE: SES refuses to hand a sign-in code to a mail server that can't do TLS. OPTIONAL sends in the clear to such servers."
+  type        = string
+  default     = "REQUIRE"
+
+  validation {
+    condition     = contains(["REQUIRE", "OPTIONAL"], var.ses_tls_policy)
+    error_message = "REQUIRE or OPTIONAL."
+  }
+}
+
+variable "api_log_retention_days" {
+  description = "Days the API's logs are kept. They hold event names and opaque ids, never an address."
+  type        = number
+  default     = 90
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731], var.api_log_retention_days)
+    error_message = "One of CloudWatch's retention periods, up to 731 days."
+  }
+}
+
+variable "api_reserved_concurrency" {
+  description = "Reserved concurrency for the API, which also caps it. null (the default) reserves none: a new account's limit can be 10, all of which must stay unreserved. Set it (5 is plenty) once the account's limit is raised."
+  type        = number
+  default     = null
+
+  validation {
+    condition     = var.api_reserved_concurrency == null ? true : (var.api_reserved_concurrency >= 1 && var.api_reserved_concurrency <= 50)
+    error_message = "null, or between 1 and 50."
   }
 }

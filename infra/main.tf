@@ -27,6 +27,11 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.44"
     }
+    # The API's stub package (auth.tf); CI uploads the real code.
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.7"
+    }
     random = {
       source  = "hashicorp/random"
       version = "~> 3.6"

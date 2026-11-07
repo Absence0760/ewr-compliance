@@ -2,7 +2,7 @@
 # They pin what `terraform validate` can't see: the region rule, the feature
 # flags' defaults, the budgets and alert topics, and the gated site's wiring
 # (private bucket, signed default behaviour, unsigned sign-in only, the API
-# behaviour only when asked for, the WAF and the edge function attached).
+# behaviour only with the sign-in (auth.tftest.hcl has the rest), the WAF and the edge function attached).
 #
 #   bin/check-infra.sh   (fmt + validate + test, as CI runs it)
 
@@ -43,6 +43,8 @@ mock_provider "aws" {
 }
 
 mock_provider "random" {}
+
+mock_provider "archive" {}
 
 # Known IDs and ARNs, so the wiring can be asserted by equality at plan time.
 override_resource {
@@ -296,7 +298,7 @@ run "site_wiring" {
   }
   assert {
     condition     = [for b in aws_cloudfront_distribution.site[0].ordered_cache_behavior : b.path_pattern] == ["/signin/*"]
-    error_message = "Without api_origin_host, /signin/* is the only other behaviour."
+    error_message = "Without auth_enabled, /signin/* is the only other behaviour."
   }
   assert {
     condition = alltrue([for b in aws_cloudfront_distribution.site[0].ordered_cache_behavior :
@@ -305,7 +307,7 @@ run "site_wiring" {
   }
   assert {
     condition     = length(aws_cloudfront_distribution.site[0].origin) == 1 && length(random_password.api_origin_secret) == 0
-    error_message = "No API origin (or its secret) until P3 sets api_origin_host."
+    error_message = "No API origin (or its secret) until auth_enabled (P3)."
   }
   assert {
     condition = alltrue([for e in aws_cloudfront_distribution.site[0].custom_error_response :
@@ -348,39 +350,6 @@ run "site_wiring" {
     condition     = aws_cloudwatch_metric_alarm.cloudfront_5xx[0].alarm_actions == toset([aws_sns_topic.alerts_us_east_1.arn])
     error_message = "The CloudFront alarms page through the us-east-1 topic."
   }
-}
-
-run "api_behaviour_when_asked_for" {
-  command = plan
-  variables {
-    site_enabled    = true
-    api_origin_host = "abc123def.lambda-url.af-south-1.on.aws"
-  }
-
-  assert {
-    condition     = [for b in aws_cloudfront_distribution.site[0].ordered_cache_behavior : b.path_pattern] == ["/signin/*", "/api/*"]
-    error_message = "With api_origin_host, /api/* follows /signin/*."
-  }
-  assert {
-    condition = alltrue([for b in aws_cloudfront_distribution.site[0].ordered_cache_behavior :
-      b.cache_policy_id == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" && b.target_origin_id == "lambda-api" &&
-      try(length(b.trusted_key_groups), 0) == 0 && b.response_headers_policy_id == "rhp-api"
-    if b.path_pattern == "/api/*"])
-    error_message = "/api/* is uncached (CachingDisabled), goes to the API, and carries the API's headers."
-  }
-  assert {
-    condition = alltrue([for o in aws_cloudfront_distribution.site[0].origin :
-    o.custom_origin_config[0].origin_protocol_policy == "https-only" && length(o.custom_header) == 1 if o.origin_id == "lambda-api"])
-    error_message = "The API origin is HTTPS only, with the shared-secret header."
-  }
-}
-
-run "rejects_an_api_origin_that_is_not_a_function_url" {
-  command = plan
-  variables {
-    api_origin_host = "https://example.org/api"
-  }
-  expect_failures = [var.api_origin_host]
 }
 
 # --- WAF ---------------------------------------------------------------------------

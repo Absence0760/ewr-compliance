@@ -11,10 +11,10 @@
 #   /signin/*  → the same bucket, unsigned: the sign-in page (static/signin/,
 #                P3) must load for someone not signed in. Nothing else is
 #                served unsigned.
-#   /api/*     → the API Lambda's Function URL, only once var.api_origin_host
-#                is set (P3). Unsigned at the edge: the API checks its own
-#                session cookie on every call, and /api/auth/* must answer
-#                someone not signed in.
+#   /api/*     → the API Lambda's Function URL (auth.tf), only with
+#                var.auth_enabled (P3). Unsigned at the edge: the API checks
+#                its own session cookie on every call, and /api/auth/* must
+#                answer someone not signed in.
 #
 # Signed cookies: the API (P3) signs a 15-minute custom policy for
 # https://<domain>/* with the private key in the signing-key secret below,
@@ -37,7 +37,8 @@ locals {
   cache_policy_caching_disabled  = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
   origin_request_all_except_host = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
 
-  api_enabled = var.site_enabled && var.api_origin_host != ""
+  # The API (auth.tf) and its /api/* behaviour.
+  api_enabled = var.site_enabled && var.auth_enabled
 }
 
 # --- Bucket ----------------------------------------------------------------------
@@ -262,7 +263,8 @@ resource "aws_cloudfront_origin_access_control" "site" {
 
 # Stamped on every /api/* request; the API refuses a request without it, so a
 # direct call to the Function URL (public by AWS design) gets past neither the
-# WAF nor the API. Only with the API (P3), which reads the same value.
+# WAF nor the API. Only with the API (P3), which reads the same value from its
+# runtime secret (auth.tf).
 resource "random_password" "api_origin_secret" {
   count   = local.api_enabled ? 1 : 0
   length  = 48
@@ -290,7 +292,7 @@ resource "aws_cloudfront_distribution" "site" {
   dynamic "origin" {
     for_each = local.api_enabled ? [1] : []
     content {
-      domain_name = var.api_origin_host
+      domain_name = local.api_origin_host
       origin_id   = "lambda-api"
       custom_origin_config {
         http_port              = 80
