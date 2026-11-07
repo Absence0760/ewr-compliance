@@ -7,3 +7,12 @@
 onlyBuiltDependencies:
   - "@absence0760/auth-kit@git+ssh://git@github.com/Absence0760/auth-kit.git#1a739cd8b4ae8614892d70d22b9d0f0c8c945481"
   - esbuild
+
+# A release must be 7 days old before an install here resolves it (minutes), the same cooldown as
+# .github/dependabot.yml: most malicious releases are found and pulled within days, and a version an
+# install by hand locked in earlier would also block Dependabot's updates until it aged. Security
+# fixes newer than that: add the package to minimumReleaseAgeExclude in the same change, and say why.
+minimumReleaseAge: 10080
+# auth-kit is ours, pinned by commit above, and exempt as in dependabot.yml.
+minimumReleaseAgeExclude:
+  - '@absence0760/auth-kit'

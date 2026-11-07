@@ -2,3 +2,9 @@
 # app's install, and the app's never reaches the Lambda. This file holds only settings.
 onlyBuiltDependencies:
   - esbuild
+
+# A release must be 7 days old before an install here resolves it (minutes), the same cooldown as
+# .github/dependabot.yml: most malicious releases are found and pulled within days, and a version an
+# install by hand locked in earlier would also block Dependabot's updates until it aged. Security
+# fixes newer than that: add the package to minimumReleaseAgeExclude in the same change, and say why.
+minimumReleaseAge: 10080

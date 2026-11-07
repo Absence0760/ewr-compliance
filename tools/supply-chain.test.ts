@@ -101,3 +101,13 @@ describe('the root workspace', () => {
 		expect(packages).toEqual(['.']);
 	});
 });
+
+describe('the release-age floor', () => {
+	it("holds every install to dependabot.yml's cooldown, so no hand install locks in a release younger than it", () => {
+		const days = Number(/default-days:\s*(\d+)/.exec(read('.github/dependabot.yml'))?.[1]);
+		expect(days).toBeGreaterThan(0);
+		for (const file of ['pnpm-workspace.yaml', 'server/pnpm-workspace.yaml', 'pipeline/pnpm-workspace.yaml']) {
+			expect(Number(/^minimumReleaseAge:\s*(\d+)\s*$/m.exec(read(file))?.[1]), file).toBe(days * 24 * 60);
+		}
+	});
+});

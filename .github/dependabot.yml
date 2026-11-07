@@ -3,6 +3,7 @@ version: 2
 # Both ecosystems wait 7 days after a release before proposing it (`cooldown`;
 # security updates are exempt and still arrive at once): most malicious package
 # releases are found and pulled within days.
+# Installs by hand keep the same floor: minimumReleaseAge in each pnpm-workspace.yaml.
 #
 # server/ is its own npm (pnpm) project, on the private auth-kit, which Dependabot reaches through
 # the `auth-kit` git registry below: the AUTH_KIT_READ_TOKEN *Dependabot* secret (Absence0760/auth-kit#2).
