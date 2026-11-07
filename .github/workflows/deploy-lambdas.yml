@@ -1,21 +1,24 @@
 name: Deploy Lambdas
 
 # Release-triggered, after WM's deploy-backend.yml: publishing a GitHub Release whose tag is
-# `api@X.Y.Z` deploys the sign-in API (server/) to its Lambda, ewr-compliance-api (infra/auth.tf).
+# `api@X.Y.Z` deploys the sign-in API (server/) to its Lambda, ewr-compliance-api (infra/auth.tf);
+# `pipeline@X.Y.Z` deploys the DWS store's pipeline (pipeline/) to ewr-compliance-dws (infra/dws.tf).
 # A bare tag push does nothing; the published Release is the deploy, so it is a deliberate act:
 #
 #   gh release create api@0.1.0 --target main --generate-notes
+#   gh release create pipeline@0.1.0 --target main --generate-notes
 #
 # Three jobs, each with only the scope it needs:
 #
-#   preflight  no environment, no AWS. Refuses unless the tag is api@semver, its commit is on main
-#              with a green `CI gate`, and the configuration is set: the AUTH_KIT_READ_TOKEN secret
-#              (read access to the private auth-kit, Absence0760/auth-kit#2), AWS_DEPLOY_ROLE_ARN,
-#              and the AWS_REGION and API_FUNCTION_NAME variables. A missing one fails here, saying
-#              which, never later and never silently.
-#   build      no environment, no AWS. Installs server/ (auth-kit through the token), runs its
-#              typecheck and tests, and bundles dist/api.zip. Third-party npm code never runs in a
-#              job that holds AWS credentials.
+#   preflight  no environment, no AWS. Refuses unless the tag is api@semver or pipeline@semver, its
+#              commit is on main with a green `CI gate`, and the configuration is set:
+#              AWS_DEPLOY_ROLE_ARN and the AWS_REGION variable, and for the API the
+#              AUTH_KIT_READ_TOKEN secret (read access to the private auth-kit, Absence0760/auth-kit#2)
+#              and the API_FUNCTION_NAME variable, for the pipeline the DWS_FUNCTION_NAME variable. A
+#              missing one fails here, saying which, never later and never silently.
+#   build      no environment, no AWS. Installs the tag's package, server/ (auth-kit through the
+#              token) or pipeline/, runs its typecheck and tests, and bundles its zip. Third-party
+#              npm code never runs in a job that holds AWS credentials.
 #   deploy     `environment: production`: GitHub pauses for the required reviewer, and only then can
 #              the OIDC token carry the `environment:production` subject the deploy role trusts
 #              (infra/oidc.tf). The role may update this function's code and read it, nothing else:
@@ -24,7 +27,8 @@ name: Deploy Lambdas
 # Rollback: run it by hand with an older published tag, through the same preflight and approval:
 #   gh workflow run deploy-lambdas.yml -f tag=api@0.1.0
 #
-# No static AWS keys anywhere. P4 adds the DWS pipeline's Lambda here.
+# No static AWS keys anywhere. Nothing here names a DWS station: the pipeline reads its list from its
+# own bucket (tools/dws-stations.sh).
 
 on:
   release:
@@ -32,7 +36,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Published api@X.Y.Z release to deploy (an older tag rolls back)'
+        description: 'Published api@X.Y.Z or pipeline@X.Y.Z release to deploy (an older tag rolls back)'
         required: true
         type: string
 
@@ -40,7 +44,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ (github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'api@')) && 'deploy-lambdas' || format('deploy-lambdas-other-{0}', github.run_id) }}
+  group: ${{ (github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'api@') || startsWith(github.event.release.tag_name, 'pipeline@')) && 'deploy-lambdas' || format('deploy-lambdas-other-{0}', github.run_id) }}
   cancel-in-progress: false
 
 env:
@@ -49,7 +53,7 @@ env:
 jobs:
   preflight:
     name: Preflight (tag, main, CI, configuration)
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'api@')
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'api@') || startsWith(github.event.release.tag_name, 'pipeline@')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -57,6 +61,8 @@ jobs:
       checks: read # read `CI gate` on the tagged commit
     outputs:
       sha: ${{ steps.check.outputs.sha }}
+      # api (server/, ewr-compliance-api) or pipeline (pipeline/, ewr-compliance-dws).
+      component: ${{ steps.check.outputs.component }}
     steps:
       - name: Checkout (full history and tags, to check the tag is on main)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -74,26 +80,34 @@ jobs:
           HAS_DEPLOY_ROLE: ${{ secrets.AWS_DEPLOY_ROLE_ARN != '' }}
           AWS_REGION: ${{ vars.AWS_REGION }}
           API_FUNCTION_NAME: ${{ vars.API_FUNCTION_NAME }}
+          DWS_FUNCTION_NAME: ${{ vars.DWS_FUNCTION_NAME }}
         run: |
           set -euo pipefail
           fail() { echo "::error::$1"; echo "$1" >> "$GITHUB_STEP_SUMMARY"; exit 1; }
-          [[ "$RELEASE_TAG" =~ ^api@[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "The tag must be api@X.Y.Z, not '$RELEASE_TAG'."
+          [[ "$RELEASE_TAG" =~ ^(api|pipeline)@[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "The tag must be api@X.Y.Z or pipeline@X.Y.Z, not '$RELEASE_TAG'."
+          component=${RELEASE_TAG%%@*}
           sha=$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}") || fail "No tag $RELEASE_TAG."
           git merge-base --is-ancestor "$sha" origin/main || fail "$RELEASE_TAG ($sha) is not on main."
           gate=$(gh api "repos/$REPO/commits/$sha/check-runs?check_name=CI%20gate" --jq '[.check_runs[] | select(.conclusion == "success")] | length')
           [ "$gate" -gt 0 ] || fail "CI gate has not passed on $sha. Wait for CI, or fix it first."
-          [ "$HAS_AUTH_KIT_TOKEN" = true ] || fail "The AUTH_KIT_READ_TOKEN secret is not set, so the build can't install the private auth-kit. Set it up as Absence0760/auth-kit#2 says (a fine-grained token, Contents: read on auth-kit only), as an Actions secret."
+          [ "$component" != api ] || [ "$HAS_AUTH_KIT_TOKEN" = true ] || fail "The AUTH_KIT_READ_TOKEN secret is not set, so the build can't install the private auth-kit. Set it up as Absence0760/auth-kit#2 says (a fine-grained token, Contents: read on auth-kit only), as an Actions secret."
           [ "$HAS_DEPLOY_ROLE" = true ] || fail "The AWS_DEPLOY_ROLE_ARN secret is not set (infra/README.md, H10)."
           [ "$AWS_REGION" = af-south-1 ] || fail "The AWS_REGION variable must be af-south-1, not '$AWS_REGION' (infra/README.md, H10)."
-          [ "$API_FUNCTION_NAME" = ewr-compliance-api ] || fail "The API_FUNCTION_NAME variable must be ewr-compliance-api (terraform output api_function_name), not '$API_FUNCTION_NAME'."
+          [ "$component" != api ] || [ "$API_FUNCTION_NAME" = ewr-compliance-api ] || fail "The API_FUNCTION_NAME variable must be ewr-compliance-api (terraform output api_function_name), not '$API_FUNCTION_NAME'."
+          [ "$component" != pipeline ] || [ "$DWS_FUNCTION_NAME" = ewr-compliance-dws ] || fail "The DWS_FUNCTION_NAME variable must be ewr-compliance-dws (terraform output dws_function_name), not '$DWS_FUNCTION_NAME'."
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "component=$component" >> "$GITHUB_OUTPUT"
           echo "Deploying $RELEASE_TAG ($sha)." >> "$GITHUB_STEP_SUMMARY"
 
   build:
-    name: Build the API package
+    name: Build the package
     needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      # The tag's package and its zip: server/dist/api.zip, or pipeline/dist/pipeline.zip.
+      PKG: ${{ needs.preflight.outputs.component == 'api' && 'server' || 'pipeline' }}
+      ZIP: ${{ needs.preflight.outputs.component == 'api' && 'api' || 'pipeline' }}
     steps:
       - name: Checkout the released commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -104,6 +118,7 @@ jobs:
       # pnpm fetches auth-kit from git@github.com:Absence0760/auth-kit (the lockfile's form); this
       # rewrites that one repo, and only it, to HTTPS with the read-only token.
       - name: Read access to auth-kit
+        if: needs.preflight.outputs.component == 'api'
         env:
           TOKEN: ${{ secrets.AUTH_KIT_READ_TOKEN }}
         run: |
@@ -115,41 +130,41 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          package_json_file: server/package.json
+          package_json_file: ${{ env.PKG }}/package.json
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: server/pnpm-lock.yaml
+          cache-dependency-path: ${{ env.PKG }}/pnpm-lock.yaml
 
       - name: Install
-        working-directory: server
+        working-directory: ${{ env.PKG }}
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        working-directory: server
+        working-directory: ${{ env.PKG }}
         run: pnpm check
 
       - name: Test
-        working-directory: server
+        working-directory: ${{ env.PKG }}
         run: pnpm test
 
       - name: Bundle
-        working-directory: server
+        working-directory: ${{ env.PKG }}
         run: pnpm build
 
       - name: Keep the package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: api-lambda
-          path: server/dist/api.zip
+          name: lambda
+          path: ${{ env.PKG }}/dist/${{ env.ZIP }}.zip
           if-no-files-found: error
           retention-days: 30
 
   deploy:
-    name: Deploy (update the API's code)
+    name: Deploy (update the function's code)
     needs: [preflight, build]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -164,7 +179,7 @@ jobs:
       - name: Download the package
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: api-lambda
+          name: lambda
           path: dist
 
       - name: Configure AWS credentials via OIDC
@@ -176,14 +191,15 @@ jobs:
 
       # Only the code and its hash are printed: the function's configuration (its environment) is
       # never read into this public log.
-      - name: Update the API's code
+      - name: Update the function's code
         env:
-          API_FUNCTION_NAME: ${{ vars.API_FUNCTION_NAME }}
+          FUNCTION_NAME: ${{ needs.preflight.outputs.component == 'api' && vars.API_FUNCTION_NAME || vars.DWS_FUNCTION_NAME }}
+          ZIP: ${{ needs.preflight.outputs.component == 'api' && 'api' || 'pipeline' }}
         run: |
           set -euo pipefail
           aws lambda update-function-code \
-            --function-name "$API_FUNCTION_NAME" \
-            --zip-file "fileb://dist/api.zip" \
+            --function-name "$FUNCTION_NAME" \
+            --zip-file "fileb://dist/$ZIP.zip" \
             --query 'CodeSha256' --output text
-          aws lambda wait function-updated --function-name "$API_FUNCTION_NAME"
-          echo "Deployed $RELEASE_TAG to $API_FUNCTION_NAME." >> "$GITHUB_STEP_SUMMARY"
+          aws lambda wait function-updated --function-name "$FUNCTION_NAME"
+          echo "Deployed $RELEASE_TAG to $FUNCTION_NAME." >> "$GITHUB_STEP_SUMMARY"

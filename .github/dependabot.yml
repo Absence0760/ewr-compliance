@@ -87,3 +87,22 @@ updates:
         versions: [">=25"]
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
+
+  # pipeline/: the DWS store's pipeline Lambda, its own pnpm package (no private dependency).
+  - package-ecosystem: npm
+    directory: "/pipeline"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      aws-sdk:
+        patterns: ["@aws-sdk/*"]
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "@types/node"
+        versions: [">=25"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
