@@ -4,7 +4,7 @@
 	"private": true,
 	"type": "module",
 	"description": "The DWS store's pipeline Lambda (infra/dws.tf): pulls each linked gauge's daily flow from DWS into the store the site serves under dws/. Its own package, beside the app, not a workspace member.",
-	"packageManager": "pnpm@10.33.2",
+	"packageManager": "pnpm@10.34.9",
 	"engines": {
 		"node": ">=24"
 	},
