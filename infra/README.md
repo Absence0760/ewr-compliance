@@ -1,6 +1,6 @@
 # infra
 
-Terraform for hosting EWR Compliance on AWS: the account skeleton (P1), the gated static site (P2) and the sign-in (P3) of the private hosting plan. The DWS store (P4) adds its own files. Built after `project-water-management`'s `infra/`.
+Terraform for hosting EWR Compliance on AWS: the account skeleton (P1), the gated static site (P2), the sign-in (P3) and the DWS store (P4) of the private hosting plan. Built after `project-water-management`'s `infra/`.
 
 Nothing here is applied by CI. The operator plans and applies from the workstation, with their own SSO profile. CI runs `bin/check-infra.sh` only: `terraform fmt`, `validate`, and the plan-only tests in `tests/` against mocked providers, with no credentials.
 
@@ -11,16 +11,18 @@ This repo is public. The account ID stays in `backend.config` (gitignored), and 
 | File | What it makes |
 |---|---|
 | `main.tf` | Providers: `var.aws_region` (af-south-1) and a `us_east_1` alias for CloudFront's certificate, WAF and metrics, and for budgets. `default_tags` on both. The S3 backend, its bucket from `backend.config` |
-| `variables.tf` | Every input. `aws_region` is refused unless it is af-south-1 or `data_outside_south_africa = true`. Feature flags (`site_enabled`, `auth_enabled`, `deploy_lambda_functions`, `cost_anomaly_threshold_usd`) are off by default |
-| `oidc.tf` | Looks up the bootstrap's `ewr-compliance-deploy` role, refuses a trust wider than this repo's `production` environment, and attaches a policy only once there are Lambdas to update (the API, by itself, once `auth_enabled`), for their code only. The role never gets S3 or CloudFront: the site and data go up from the workstation only |
+| `variables.tf` | Every input. `aws_region` is refused unless it is af-south-1 or `data_outside_south_africa = true`. Feature flags (`site_enabled`, `auth_enabled`, `dws_enabled`, `dws_schedule_enabled`, `deploy_lambda_functions`, `cost_anomaly_threshold_usd`) are off by default |
+| `oidc.tf` | Looks up the bootstrap's `ewr-compliance-deploy` role, refuses a trust wider than this repo's `production` environment, and attaches a policy only once there are Lambdas to update (the API once `auth_enabled`, the DWS pipeline once `dws_enabled`, each by itself), for their code only. The role never gets S3 or CloudFront: the site and data go up from the workstation only |
 | `alarms.tf` | Alert topics in af-south-1 and us-east-1, mailing `budget_alert_email`; monthly and daily budgets; Cost Anomaly Detection (off until turned on); the CloudFront 5xx and request-flood alarms |
-| `site.tf` | With `site_enabled`: the private bucket (versioned, old versions kept 30 days), OAC, the us-east-1 certificate validated in the delegated zone, the key group from `cloudfront_public_keys`, the empty signing-key secret, the distribution (PriceClass_All; default behaviour signed; `/signin/*` unsigned; `/api/*` to the API once `auth_enabled`) and its DNS records |
+| `site.tf` | With `site_enabled`: the private bucket (versioned, old versions kept 30 days), OAC, the us-east-1 certificate validated in the delegated zone, the key group from `cloudfront_public_keys`, the empty signing-key secret, the distribution (PriceClass_All; default behaviour signed; `/signin/*` unsigned; `/api/*` to the API once `auth_enabled`; `/dws/*` to the DWS store, signed, once `dws_enabled`) and its DNS records |
 | `edge_functions.tf` | The viewer-request function: unsigned or expired requests get a 302 to `/signin/` (or 401 JSON with `X-Requested-With`), folder paths get `index.html` |
 | `security_headers.tf` | The response-headers policies: what `static/_headers` set on Pages, plus HSTS |
 | `waf.tf` | Per-IP rate limits, `/api/auth/*` and every path, and the blocked-requests alarm |
 | `auth.tf` | With `auth_enabled` (P3): the user table (`auth-kit`'s single table: PITR, TTL on `ttl`, deletion protection), the API Lambda (stub code, which CI replaces) and its Function URL, its runtime secret (the code and session keys and the origin secret, `random_password`s written write-only), its role (`auth-kit`'s actions on the table, SES as `no-reply@` only, its two secrets, its log group), SES (configuration set, DKIM, MAIL FROM, DMARC), and the API-error, bounce, complaint and `auth.locked` alarms |
-| `outputs.tf` | `site_bucket` and `distribution_id`, which `tools/deploy.sh` reads; `users_table` and `auth_runtime_secret_arn`, which the operator tools read; and the rest the operator needs |
-| `tests/*.tftest.hcl` | Guardrails, IAM, headers and the sign-in, plan-only on mocked providers. The edge function runs as code in `tools/edge-functions.test.ts` (vitest) |
+| `dws.tf` | With `dws_enabled` (P4): the DWS store's bucket (versioned, old versions kept 30 days; CloudFront may read `serve/dws/*` only), the pipeline Lambda (stub code, which CI replaces; no async retries; a DLQ), its role (its bucket prefixes, the lease key, the DWS API key secret, its log group, its metric namespace; no delete), the empty DWS API key secret, the daily EventBridge rule (DISABLED until `dws_schedule_enabled`), and the lag (with the schedule), stopped, failed and DLQ alarms |
+| `dws_backfill.tf` | With `dws_enabled`: the Step Functions backfill over date windows (`tools/dws-backfill-plan.mjs`), one at a time with a pause, never retrying a refusal, and its failed-execution alarm |
+| `outputs.tf` | `site_bucket` and `distribution_id`, which `tools/deploy.sh` reads; `users_table` and `auth_runtime_secret_arn`, which the operator tools read; `dws_bucket`, which `tools/dws-stations.sh` reads, and `dws_backfill_state_machine_arn`; and the rest the operator needs |
+| `tests/*.tftest.hcl` | Guardrails, IAM, headers, the sign-in and the DWS store, plan-only on mocked providers. The edge function runs as code in `tools/edge-functions.test.ts` (vitest) |
 
 Terraform's version is pinned in `.terraform-version` (tfenv reads it here; CI too).
 
@@ -220,6 +222,55 @@ cd ~/github/ewr-compliance && tools/first-admin
 
 Sign in at `https://<domain>/` with that address, open Users, and add a second admin, so one locked out can't leave the site without one. `tools/recover-admin` is the break-glass and `tools/erase-user` the erasure: `docs/hosting.md` § Access control.
 
+**H11. The DWS store (P4).** One at a time, each when the last is done. What each part does, and what its alarms mean: `docs/hosting.md` § The DWS store.
+
+1. Set `dws_enabled = true` in `prod.tfvars` (and `dws_contact`, a mailbox DWS can write to before blocking us, if you want one in the user agent), then plan and apply as in H6. That makes the bucket, the pipeline (which fails until its code is deployed), the backfill and the empty DWS API key secret. The daily rule is made disabled.
+2. Deploy the pipeline as in H10: add the tag rule `pipeline@*` to the `production` environment's deployment branches and tags, set the variable, and publish a release and approve it.
+
+```
+gh variable set DWS_FUNCTION_NAME --body ewr-compliance-dws --repo Absence0760/ewr-compliance
+```
+
+```
+gh release create pipeline@0.1.0 --target main --generate-notes --repo Absence0760/ewr-compliance
+```
+
+3. Upload the station list. `tools/deploy.sh real` does it last, after the site; on its own it is:
+
+```
+cd ~/github/ewr-compliance && tools/dws-stations.sh
+```
+
+4. One pull by hand, from af-south-1: the test request the plan's Q1 asks for. It prints counts only (`pulled`, `failed`, `stopped`), never a station. `stopped` = `done` with `failed` = 0 means DWS answered and every page read; `refused` means DWS answered 403, so stop and don't try again until that is understood. After any stop the pipeline itself asks nothing for a while (20 hours after a 403, an hour after the others) and answers `cooling`; adding `"ignoreStop":true` to the payload overrides that, for when you know why.
+
+```
+aws lambda invoke --function-name ewr-compliance-dws --cli-binary-format raw-in-base64-out --payload '{"mode":"daily"}' --region af-south-1 --profile ewr-compliance /dev/stdout
+```
+
+5. The backfill. Print the plan (date windows only, newest first) into a file, then start it. Pick `--from` for how far back the record should go; it runs one window a minute or so.
+
+```
+cd ~/github/ewr-compliance && node tools/dws-backfill-plan.mjs --from 1990-01-01 > ~/dws-backfill.json
+```
+
+```
+aws stepfunctions start-execution --state-machine-arn "$(AWS_PROFILE=ewr-compliance terraform -chdir=infra output -raw dws_backfill_state_machine_arn)" --input file://$HOME/dws-backfill.json --region af-south-1 --profile ewr-compliance
+```
+
+If it fails (the `dws-backfill-failed` alarm), the failed window's error is the execution's. Nothing in it is retried that would ask DWS again: start the same command again to resume once the reason is understood (not straight after `DwsRefused`). It skips what is stored.
+
+6. Turn the daily pull on: `dws_schedule_enabled = true` in `prod.tfvars`, then plan and apply. That also makes the lag alarm.
+
+7. When DWS issues an API key: write it alone to a file outside any repo, put it into its secret from the file, and delete the file. Nothing reads it yet (the HyData page needs none); the pipeline's API source is a later change.
+
+```
+aws secretsmanager put-secret-value --secret-id ewr-compliance/dws-api-key --secret-string file://$HOME/dws-api-key.txt --region af-south-1 --profile ewr-compliance
+```
+
+```
+shred -u ~/dws-api-key.txt
+```
+
 ## Rotating the signing key
 
 Add the new public key to `cloudfront_public_keys` under a new name, keep the old one, set `cloudfront_signing_key` to the old name, and apply: the key group trusts both, and the API still signs with the old. Then, one straight after the other, put the new private key into the secret (H7's command), set `cloudfront_signing_key` to the new name and apply: the API's environment changes, so every instance starts again, reads the new key and checks it against the new public key (an instance that starts in between refuses sign-in with 503 for that minute rather than sign with a mismatched pair). Once every cookie signed with the old key has expired (15 minutes), remove the old public key, unset `cloudfront_signing_key`, and apply again.
@@ -230,4 +281,4 @@ Add the new public key to `cloudfront_public_keys` under a new name, keep the ol
 
 ## Costs
 
-About $11–13 a month in all once P3 and P4 are in: WAF about $7, Secrets Manager $0.40 a secret (the signing key and the API's runtime secret), the sops key $1, alarms about $0.10 each past the free ten, Route 53 $0.50 for the zone. The budgets are free (two an account).
+About $11–13 a month in all once P3 and P4 are in: WAF about $7, Secrets Manager $0.40 a secret (the signing key, the API's runtime secret and the DWS API key), the sops key $1, alarms about $0.10 each past the free ten, Route 53 $0.50 for the zone. The budgets are free (two an account).

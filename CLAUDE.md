@@ -4,13 +4,13 @@ Guidance for Claude Code working in this repository. Keep this file short — it
 
 EWR Compliance Measurement compares observed river flows with Environmental Water Requirements at the EWR nodes and sites of the Berg, Breede-Overberg, Gouritz and Olifants-Doorn basins. It opens on South Africa's Water Management Areas of 2023, each with its own map. It is a static SvelteKit 3 app (`adapter-static`, `ssr = false`) with Svelte 5 runes and TypeScript. Layout and conventions: `docs/architecture.md`.
 
-**Hosting is on AWS af-south-1,** per the private hosting plan, in phases P1–P6; nothing is live yet. P1 to P3 are in `infra/` (Terraform, `infra/README.md`), `tools/deploy.sh`, `server/` and `static/signin/`. **Sign-in, sessions and user management come from `auth-kit`,** a private package `server/` installs at a pinned tag. Don't write auth code here: fix it in `auth-kit`, tag it, and take the Dependabot PR (and bump the `onlyBuiltDependencies` line in `server/pnpm-workspace.yaml` with it).
+**Hosting is on AWS af-south-1,** per the private hosting plan, in phases P1–P6; nothing is live yet. P1 to P4 are in `infra/` (Terraform, `infra/README.md`), `tools/deploy.sh`, `server/`, `static/signin/` and `pipeline/`. **Sign-in, sessions and user management come from `auth-kit`,** a private package `server/` installs at a pinned tag. Don't write auth code here: fix it in `auth-kit`, tag it, and take the Dependabot PR (and bump the `onlyBuiltDependencies` line in `server/pnpm-workspace.yaml` with it).
 
 This repo is public and holds the code. The real data, the client's brief and the tests pinned to them are in the private repo `ewr-compliance-private`, a sibling folder. This repo runs on a synthetic sample.
 
 ## Commands
 
-pnpm 10 and Node 24. The app is one package. `server/`, the sign-in API, is a separate pnpm project with its own lockfile (not a workspace member), because it needs read access to the private `auth-kit`; the app, e2e and fork PRs install without it.
+pnpm 10 and Node 24. The app is one package. `server/`, the sign-in API, is a separate pnpm project with its own lockfile (not a workspace member), because it needs read access to the private `auth-kit`; the app, e2e and fork PRs install without it. `pipeline/`, the DWS store's Lambda, is one too.
 
 | Command | What it does |
 |---|---|
@@ -22,6 +22,8 @@ pnpm 10 and Node 24. The app is one package. `server/`, the sign-in API, is a se
 | `pnpm data:private` | Copy the real data and its tests in from the private repo (`EWR_PRIVATE_DIR` overrides the folder) |
 | `pnpm test`, `pnpm test:watch` | Vitest (`src/**/*.test.ts` and `tools/**/*.test.ts`, beside each module), on the sample |
 | `cd server && pnpm install --frozen-lockfile`, then `pnpm check`, `pnpm test`, `pnpm build` | The sign-in API: install (needs access to `auth-kit`), typecheck, Vitest, and bundle `dist/api.zip`. CI deploys it on an `api@X.Y.Z` release (`deploy-lambdas.yml`) |
+| `cd pipeline && pnpm install --frozen-lockfile`, then `pnpm check`, `pnpm test`, `pnpm build` | The DWS store's pipeline: install, typecheck, Vitest on synthetic `X0H00x` replies (with a contract test against the app's own readers), and bundle `dist/pipeline.zip`. CI deploys it on a `pipeline@X.Y.Z` release |
+| `tools/dws-stations.sh [--dry-run]`, `node tools/dws-backfill-plan.mjs --from YYYY-MM-DD` | The operator's: upload the DWS store's station list from the private repo (`tools/deploy.sh real` runs it; it prints a count, never a code), and print the backfill's input (date windows only). `infra/README.md` H11 |
 | `tools/first-admin`, `tools/recover-admin`, `tools/erase-user` | The operator's, with their AWS profile: the first admin, the break-glass, erasure. Each asks for the address |
 | `pnpm test:e2e` | Playwright (`e2e/`), on the sample. Needs `pnpm data:sample` |
 | `pnpm test:private` | `pnpm data:private`, then Vitest and Playwright over the real data |
@@ -35,7 +37,7 @@ pnpm 10 and Node 24. The app is one package. `server/`, the sign-in API, is a se
 
 ## Hard rules
 
-1. **Client-only, except `server/` (and `pipeline/` from P4).** `src/` has no server code, SSR adapter, server load function or API key. `server/` is the sign-in and user API only, on `auth-kit`; its keys are read at run time from Secrets Manager, never from the environment or a file. A flow file a user loads stays in the browser: nothing sends it anywhere, `server/` included. Not signed in is 401, never 403 (CloudFront turns every 403 into the sign-in page).
+1. **Client-only, except `server/` and `pipeline/`.** `src/` has no server code, SSR adapter, server load function or API key. `server/` is the sign-in and user API only, on `auth-kit`; its keys are read at run time from Secrets Manager, never from the environment or a file. `pipeline/` only pulls DWS's published flow into the store, politely (one request a second, nothing retried after a 403), and writes what the app's own readers accept; station codes never go in this repo, a workflow, a log line beyond a failed page's label, or the backfill's input. A flow file a user loads stays in the browser: nothing sends it anywhere, `server/` and `pipeline/` included. Not signed in is 401, never 403 (CloudFront turns every 403 into the sign-in page).
 2. **Everything here is public.** No secret in any file, encrypted or not, and no personal data. No client material either: no real flow or EWR value, node code, site, file name or quoted brief, in code, comments, tests or docs. Fixtures added to tests are synthetic. Real values go in the private repo.
 3. **`static/data` is generated and ignored by git.** Never edit it by hand and never force-add it: it may hold real data. Real data is rebuilt into the private repo through `tools/`, and `pnpm test:private` is what can fail for a real reason. The sample comes from `e2e/fixtures/make-sample-data.mjs`: change that, rerun it, and update the specs' hand arithmetic.
 4. **Numbers on screen come from `src/lib/ewr`,** never recomputed in a component. `parsers.ts` and `resolve.ts` stay pure: no DOM, no fetch.

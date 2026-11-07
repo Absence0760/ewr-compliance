@@ -2,8 +2,9 @@
 
 Compares observed river flows with Environmental Water Requirements at the EWR nodes and
 sites of the Berg, Breede-Overberg, Gouritz and Olifants-Doorn basins. It is a static web
-app, and flow files loaded by a user stay in their browser. Its one server part, `server/`,
-decides who may open the hosted site: admins keep a list of users, and nobody else gets in.
+app, and flow files loaded by a user stay in their browser. Its server parts are `server/`,
+which decides who may open the hosted site (admins keep a list of users, and nobody else gets
+in), and `pipeline/`, which keeps the site's own copy of DWS gauge flow current.
 
 This repository is the code, with a synthetic sample dataset to run it on. The real EWR
 data is not here: see [Data](#data).
@@ -103,7 +104,7 @@ The client brief is in the private repo.
 
 ## DWS data
 
-The browser does not call DWS. DWS refuses networks outside South Africa, so a pipeline in AWS Cape Town pulls each linked gauge's flow from DWS every day into our own store, and the site serves the store under `dws/` (the private hosting plan, phase P4). Data source > DWS (kept current) reads it, in either comparison. Its files are described in `docs/architecture.md` § DWS store.
+The browser does not call DWS. DWS refuses networks outside South Africa, so a pipeline in AWS Cape Town pulls each linked gauge's flow from DWS every day into our own store, and the site serves the store under `dws/` (the private hosting plan, phase P4). Data source > DWS (kept current) reads it, in either comparison. Its files, and the pipeline that writes them (`pipeline/`), are described in `docs/architecture.md` § DWS store.
 
 - It is offered at a node with a linked gauge, for that gauge's station, and applies the node's factor exactly as the gauge source does. The factor scales the node's observed flow, never the gauge's own record.
 - The Real Time Comparison reads the station's daily flow and, where DWS has them, its 12-minute readings, drawn a month at a time as a linked gauge's are.

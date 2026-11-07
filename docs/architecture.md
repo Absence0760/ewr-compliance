@@ -1,8 +1,10 @@
 # Architecture
 
 A static SvelteKit 3 app (`adapter-static`, `ssr = false`) with Svelte 5 runes and TypeScript.
-Flow files stay in the browser, and everything else is static JSON in `static/data`. The one server
-part is `server/`, the sign-in and user API that decides who may open the site: § Users and access.
+Flow files stay in the browser, and everything else is static JSON in `static/data`. The server
+parts are `server/`, the sign-in and user API that decides who may open the site (§ Users and
+access), and `pipeline/`, which keeps the DWS store the app reads (§ DWS store). Neither ever sees a
+flow file a user loads.
 
 ## Data tiers
 
@@ -37,7 +39,7 @@ Observed flow comes from a linked gauge, the DWS store, or a file. Each comparis
 
 ## DWS store
 
-The browser never calls DWS. A pipeline in AWS af-south-1 pulls each linked gauge's flow from DWS on a schedule into our own store, and the site serves it same-origin under `dws/` (CloudFront `/dws/*` to the store's `serve/` prefix). Data source > DWS (kept current) reads it. Decisions, recorded with the operator:
+The browser never calls DWS. A pipeline in AWS af-south-1 pulls each linked gauge's flow from DWS on a schedule into our own store, and the site serves it same-origin under `dws/` (CloudFront `/dws/*` to the store's bucket with origin path `/serve`, so `dws/index.json` is the key `serve/dws/index.json`). Data source > DWS (kept current) reads it. Decisions, recorded with the operator:
 
 - It is offered only at a node with a linked gauge (`app.link`), for that link's station. A node with no link has no store source.
 - It applies the node's factor exactly as the gauge source does (`dwsRt`, `dwsHist`, through `gaugeSeries` and `gaugeFlow`): one factor per node, scaling the node's observed flow and never a record as shown for the gauge itself.
@@ -54,7 +56,17 @@ The files, which the pipeline (P4) writes exactly so. `src/lib/ewr/dwsStore.ts` 
 | `dws/flows-<station>.json` | `{ "daily": "<a DWS .day file>", "readings": "<12-minute readings, as CSV>" }`, the `GaugeFlowFile` of `static/data/flows-<station>.json`, read by `parseGaugeFlows` unchanged. Either may be `""`. Code 170 or a blank in the daily flow is a missing day. |
 | `dws/monthly-<station>.json` | Optional. `{ "monthly": "<a DWS .mon file, or a table worked up from a daily file>", "incomplete": ["YYYY-MM", …] }`, as a record and its `incomplete` list are in `gauges.json`, read by `parseMon`. |
 
-The station names in the index are client material: the store sits behind the sign-in, and no list of them goes in this repo. The sample's store, `e2e/fixtures/sample-store`, is written by `make-sample-data.mjs` and served to the specs by `serveStore` in `e2e/support/app.ts`; it is not copied to `static/`.
+The station names in the index are client material: the store sits behind the sign-in, and no list of them goes in this repo.
+
+### The pipeline
+
+`pipeline/` writes the store: a Lambda, its own pnpm package beside the app (not a workspace member), ported from `project-water-management`'s DWS pass. Its infrastructure is `infra/dws.tf` and `infra/dws_backfill.tf`; how it is run and watched, `docs/hosting.md` § The DWS store.
+
+- **Source.** The HyData daily table (`HyData.aspx`, `DataType=Daily`, `SiteType=RIV`) that WM reads, two years a request, read defensively (`src/hydata.ts`): no table, another header, a flow column in another unit, an impossible or repeated date, a flow above 100 000 m³/s or a code too wide for its column refuses the page. A flow column holding text or a negative figure is written blank, a missing day, as the app treats a -9999 elsewhere; codes are kept as DWS gives them, for the app's rules to read. Monthly volumes and 12-minute readings are not pulled yet (the plan's Q1): `readings` is `""` and `monthly` is `false`.
+- **The app's own readers check what it writes.** The daily file is EWR's `.day` layout (date in 1-8, flow in 10-18, code in 20-24), rendered then read back with `parseDay` row for row; the flows file goes through `parseGaugeFlows` and the index through `parseDwsIndex` before either is stored. The pipeline imports them from `src/lib/ewr` by relative path, and `pipeline/src/contract.test.ts` reads its output with them, so a change on either side that the other can't read fails CI.
+- **Merge.** A later pull wins day by day; a day a later page doesn't list keeps what an earlier pull stored, so a short or empty page never drops a day. `covers` is the merged file's first and last day.
+- **Times.** `fetchedAt` is when the station's last good pull ended (UTC, `Z`). `stale` is set when its last pull of a window reaching today is more than 3 days old (`STALE_AFTER_DAYS`), and a station only backfilled is stale until the daily run reaches it.
+- **Its own keys** in the bucket, which CloudFront can't read: `config/stations.json`, the list (`tools/dws-stations.sh`); `raw/<station>/daily/<from>_<to>.txt`, each page as sent; `state/status.json`, per station its last good and current pull, its `covers`, and how the last run stopped; `lease/dws.json`, the one run allowed at a time. Per station it writes the flows file, then the raw page, then the status, then the index, so a stored raw page means its days are merged (the backfill's resume test) and the index never lists more than is written. The sample's store, `e2e/fixtures/sample-store`, is written by `make-sample-data.mjs` and served to the specs by `serveStore` in `e2e/support/app.ts`; it is not copied to `static/`.
 
 `localStorage` (`src/lib/state/storage.ts`) keeps the EC basis and each node's choices. The DWS API addresses an older version kept there, `histApi` and `rtApi`, are dropped the first time this one runs.
 
@@ -90,12 +102,13 @@ A copy served without the API, such as `pnpm dev`, `pnpm preview` or the e2e ser
 
 ## Hosting on AWS
 
-Phases P1 to P3 of the private hosting plan, in `infra/` (Terraform, flat `*.tf`, applied by the operator from the workstation, never by CI). What each file makes, and the operator's steps: `infra/README.md`. What the host does: `docs/hosting.md` § AWS, as built so far.
+Phases P1 to P4 of the private hosting plan, in `infra/` (Terraform, flat `*.tf`, applied by the operator from the workstation, never by CI). What each file makes, and the operator's steps: `infra/README.md`. What the host does: `docs/hosting.md` § AWS, as built so far.
 
-- **Skeleton (P1).** Providers for af-south-1 and us-east-1, `default_tags`, the S3 backend whose bucket is in the gitignored `backend.config`, alert topics, budgets, and the lookup of the bootstrap's OIDC deploy role with a postcondition on its trust. The deploy role is never given S3 or CloudFront; it may update the code of the API and any Lambda named in `deploy_lambda_functions`.
+- **Skeleton (P1).** Providers for af-south-1 and us-east-1, `default_tags`, the S3 backend whose bucket is in the gitignored `backend.config`, alert topics, budgets, and the lookup of the bootstrap's OIDC deploy role with a postcondition on its trust. The deploy role is never given S3 or CloudFront; it may update the code of the API, the DWS pipeline and any Lambda named in `deploy_lambda_functions`.
 - **Gated site (P2, `site_enabled`).** A private bucket behind CloudFront (OAC). The default behaviour trusts one key group, so every path needs CloudFront signed cookies, which the API signs from P3; `/signin/*` is the one unsigned path. The viewer-request function (`infra/edge_functions.tf`, run as code by `tools/edge-functions.test.ts`) redirects a request with no live session to `/signin/`, or answers 401 JSON to one with `X-Requested-With`, and serves folder paths their `index.html`. A response-headers policy replaces `static/_headers`, and WAF rate-limits each address.
 - **Sign-in (P3, `auth_enabled`).** `infra/auth.tf`: the user table (PITR, TTL on `ttl`, deletion protection), the API Lambda behind `/api/*` (CachingDisabled, cookies and `Origin` forwarded, the origin secret stamped), its keys in a write-only runtime secret, IAM limited to `auth-kit`'s actions on the table, SES as `no-reply@` only and its two secrets, SES in af-south-1 with DKIM, MAIL FROM and DMARC, and alarms. CI deploys its code (`deploy-lambdas.yml`).
-- **Tests.** `infra/tests/*.tftest.hcl`, plan-only against mocked providers, pin the region rule, the deploy role's scope, the site's wiring, the WAF, the headers and the sign-in's scoping. `bin/check-infra.sh` runs fmt, validate and these in a temporary copy, and is CI's `Terraform` job, which the `CI gate` needs.
+- **DWS store (P4, `dws_enabled`).** `infra/dws.tf` and `infra/dws_backfill.tf`: the store's bucket (CloudFront reads `serve/dws/*` only, signed, through the `/dws/*` behaviour), the pipeline Lambda with no async retries and a DLQ, its grants held to its prefixes and the lease key, the daily rule (disabled until `dws_schedule_enabled`), an empty secret for a future DWS API key, the Step Functions backfill over date windows that retries nothing that would ask DWS again, and the lag, stopped, failed, DLQ and backfill alarms. CI deploys its code (`deploy-lambdas.yml`, `pipeline@X.Y.Z`).
+- **Tests.** `infra/tests/*.tftest.hcl`, plan-only against mocked providers, pin the region rule, the deploy role's scope, the site's wiring, the WAF, the headers, the sign-in's scoping and the DWS store's (`dws.tftest.hcl`). `bin/check-infra.sh` runs fmt, validate and these in a temporary copy, and is CI's `Terraform` job, which the `CI gate` needs.
 
 ## Privacy notice
 
@@ -119,8 +132,9 @@ Phases P1 to P3 of the private hosting plan, in `infra/` (Terraform, flat `*.tf`
 | `src/lib/components/charts` | uPlot wrapper. |
 | `src/lib/components/nodes` | Nodes table and data notes. |
 | `src/lib/components/viewer` | File viewer dialog. |
-| `tools/` | `build-rivers.ts` for `static/geo`, `build_geo.py` for the private quaternaries file, `sync-private.sh` and `sample-data.mjs`, which fill `static/data`, `fetch-tiles.sh` for the base map, `check-live-services.ts`, the contract check on the live layers, `deploy.sh` with `deploy-check.mjs`, the S3 deploy and the checks it makes first (`docs/hosting.md` § Build), `first-admin`, `recover-admin` and `erase-user` (§ Users and access), and `edge-functions.test.ts`, which runs the CloudFront function in `infra/` as code. See README. |
+| `tools/` | `build-rivers.ts` for `static/geo`, `build_geo.py` for the private quaternaries file, `sync-private.sh` and `sample-data.mjs`, which fill `static/data`, `fetch-tiles.sh` for the base map, `check-live-services.ts`, the contract check on the live layers, `deploy.sh` with `deploy-check.mjs`, the S3 deploy and the checks it makes first (`docs/hosting.md` § Build), `dws-stations.sh` and `dws-backfill-plan.mjs`, the DWS store's station list and backfill plan, `first-admin`, `recover-admin` and `erase-user` (§ Users and access), and `edge-functions.test.ts`, which runs the CloudFront function in `infra/` as code. See README. |
 | `server/`, `static/signin/` | The sign-in and user API, and the sign-in page (§ Users and access). |
+| `pipeline/` | The DWS store's pipeline Lambda, its own pnpm package (§ DWS store): `src/hydata.ts` reads DWS's page and writes the `.day` file, `src/polite.ts` is its one HTTP client, `src/lease.ts` the one-run-at-a-time lease, `src/run.ts` the daily run and a backfill window, `src/handler.ts` the entry. `fixtures/` holds synthetic `X0H001` replies only. `pnpm build` bundles `dist/pipeline.zip`. |
 | `infra/`, `bin/check-infra.sh` | Terraform for the AWS hosting (§ Hosting on AWS), and its credential-free checks. `infra/README.md`. |
 | `e2e/fixtures` | Synthetic flow files, the sample dataset and the sample DWS store, each with the script that writes it. |
 | `vite.config.ts`, `src/csp.ts` | Adapter, `BASE_PATH` and the content security policy, whose `connect-src` `src/csp.ts` builds. See `docs/hosting.md`. |
