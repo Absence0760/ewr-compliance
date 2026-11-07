@@ -14,8 +14,9 @@
 #      CloudFront does, against the key group (trusted_key_groups), and a
 #      cookie that passes here but fails there gets CloudFront's 403, which
 #      site.tf's custom error response turns into the sign-in page.
-#   2. A dot segment (/./, /../) gets 404, so no path resolves to the bucket
-#      root, where ListBucket would list.
+#   2. A dot segment (/./, /../) or an empty one (//) gets 404, so no path
+#      resolves to the bucket root, where ListBucket would list, and no folder
+#      redirect can name another host (//evil.example/x → Location: //evil…).
 #   3. Folder paths get their page: /nodes/ is served /nodes/index.html, and
 #      /nodes (no trailing slash, no extension) is a 301 to /nodes/, because
 #      the pages use relative paths and must be loaded from the folder
@@ -124,7 +125,9 @@ resource "aws_cloudfront_function" "site_request" {
 
       var segments = uri.split('/');
       for (var i = 0; i < segments.length; i++) {
-        if (segments[i] === '.' || segments[i] === '..') {
+        // An empty segment inside the path (//) too: the 301 below would otherwise send
+        // //evil.example/x to Location: //evil.example/x/, another site.
+        if (segments[i] === '.' || segments[i] === '..' || (segments[i] === '' && i > 0 && i < segments.length - 1)) {
           return answer(404, 'Not Found', { 'content-type': { value: 'text/plain; charset=utf-8' } }, 'Not Found');
         }
       }

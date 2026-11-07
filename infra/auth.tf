@@ -507,6 +507,40 @@ resource "aws_cloudwatch_log_metric_filter" "auth_locked" {
   }
 }
 
+# A sign-in step slower than its 1-second floor shows in the timing, which
+# could say whether an address is listed (a send is slower than none). The API
+# logs auth.slow; raise the floor (server/src/app.ts) if this fires.
+resource "aws_cloudwatch_log_metric_filter" "auth_slow" {
+  count          = local.auth
+  name           = "${local.project}-auth-slow"
+  log_group_name = aws_cloudwatch_log_group.api[0].name
+  pattern        = "\"auth.slow\""
+
+  metric_transformation {
+    name          = "AuthSlow"
+    namespace     = local.project
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "auth_slow" {
+  count               = local.auth_alarms
+  alarm_name          = "${local.project}-auth-slow"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "AuthSlow"
+  namespace           = local.project
+  period              = 3600
+  statistic           = "Sum"
+  threshold           = 3
+  alarm_description   = "Sign-in steps took longer than their 1-second floor three times in an hour, so their timing may say whether an address is listed. Usually slow SES sends: raise the floor in server/src/app.ts."
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  treat_missing_data  = "notBreaching"
+
+  depends_on = [aws_cloudwatch_log_metric_filter.auth_slow]
+}
+
 resource "aws_cloudwatch_metric_alarm" "auth_locked" {
   count               = local.auth_alarms
   alarm_name          = "${local.project}-auth-locked"

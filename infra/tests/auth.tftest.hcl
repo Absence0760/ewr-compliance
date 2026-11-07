@@ -329,6 +329,13 @@ run "api_iam_is_scoped" {
     error_message = "No wildcard resource but the log group's own streams (SES's identity/* is pinned by FromAddress)."
   }
   assert {
+    condition = one([for s in data.aws_iam_policy_document.api[0].statement : s.resources if s.sid == "SendAsNoReplyOnly"]) == toset([
+      "arn:aws:ses:af-south-1:000000000000:identity/*",
+      "arn:aws:ses:af-south-1:000000000000:configuration-set/ewr-compliance",
+    ])
+    error_message = "SES: identities in this account and region, and this configuration set; never \"*\"."
+  }
+  assert {
     condition     = aws_iam_role.api[0].name == "ewr-compliance-api-lambda" && length(aws_iam_role_policy.api) == 1
     error_message = "One inline policy on the API's own role."
   }
@@ -462,6 +469,10 @@ run "alarms" {
     condition = alltrue([for a in [aws_cloudwatch_metric_alarm.api_errors[0], aws_cloudwatch_metric_alarm.ses_bounce_rate[0], aws_cloudwatch_metric_alarm.ses_complaint_rate[0], aws_cloudwatch_metric_alarm.auth_locked[0]] :
     a.alarm_actions == toset(["arn:aws:sns:af-south-1:000000000000:ewr-compliance-prod-alerts"])])
     error_message = "The four sign-in alarms page through the regional topic."
+  }
+  assert {
+    condition     = aws_cloudwatch_log_metric_filter.auth_slow[0].pattern == "\"auth.slow\"" && aws_cloudwatch_metric_alarm.auth_slow[0].alarm_actions == toset(["arn:aws:sns:af-south-1:000000000000:ewr-compliance-prod-alerts"])
+    error_message = "auth.slow (a sign-in step past its timing floor) is counted and alarmed."
   }
 }
 

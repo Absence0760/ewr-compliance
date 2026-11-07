@@ -91,6 +91,11 @@ describe('site_request', () => {
 		it('refuses dot segments, so nothing resolves to the bucket root', () => {
 			for (const uri of ['/.', '/..', '/data/../', '/./index.html']) expect(outcome(uri, { cookies: live() }), uri).toBe(404);
 		});
+
+		it('refuses an empty segment, so a folder redirect never names another host', () => {
+			for (const uri of ['//evil.example/x', '//evil.example', '/nodes//x', '///x']) expect(outcome(uri, { cookies: live() }), uri).toBe(404);
+			expect(outcome('/nodes/', { cookies: live() })).not.toBe(404);
+		});
 	});
 
 	describe('not signed in', () => {

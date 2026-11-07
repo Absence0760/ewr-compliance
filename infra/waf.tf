@@ -12,6 +12,7 @@
 #   - every path: var.waf_site_rate_limit_per_ip (default 2000), the backstop.
 #     Unsigned requests are answered by the edge function, but each is still
 #     a billed request; this caps one address.
+# Both block with 429 JSON and Retry-After (never 403: see below).
 # No AWS managed rule groups: nothing here takes a request body but sign-in,
 # and the common rule set's body and size rules add cost for no gain.
 #
@@ -28,12 +29,30 @@ resource "aws_wafv2_web_acl" "site" {
     allow {}
   }
 
+  # A block answers 429 JSON, never WAF's default 403: the distribution swaps
+  # every 403 for the sign-in page (site.tf), which would hide the limit from
+  # the sign-in page and the app.
+  custom_response_body {
+    key          = "rate_limited"
+    content      = "{\"error\":\"Too many requests from your network. Wait a few minutes and try again.\"}"
+    content_type = "APPLICATION_JSON"
+  }
+
   rule {
     name     = "RateLimitAuthPerIP"
     priority = 0
 
     action {
-      block {}
+      block {
+        custom_response {
+          response_code            = 429
+          custom_response_body_key = "rate_limited"
+          response_header {
+            name  = "Retry-After"
+            value = "300"
+          }
+        }
+      }
     }
 
     statement {
@@ -77,7 +96,16 @@ resource "aws_wafv2_web_acl" "site" {
     priority = 1
 
     action {
-      block {}
+      block {
+        custom_response {
+          response_code            = 429
+          custom_response_body_key = "rate_limited"
+          response_header {
+            name  = "Retry-After"
+            value = "300"
+          }
+        }
+      }
     }
 
     statement {

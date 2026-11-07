@@ -380,6 +380,16 @@ run "waf_rules" {
     condition     = alltrue([for r in aws_wafv2_web_acl.site[0].rule : length(r.action[0].block) == 1])
     error_message = "Both rules block."
   }
+  assert {
+    condition = alltrue([for r in aws_wafv2_web_acl.site[0].rule :
+      r.action[0].block[0].custom_response[0].response_code == 429 &&
+    r.action[0].block[0].custom_response[0].custom_response_body_key == "rate_limited"])
+    error_message = "A block answers 429 JSON, never 403, which the distribution would swap for the sign-in page."
+  }
+  assert {
+    condition     = one([for b in aws_wafv2_web_acl.site[0].custom_response_body : b.content_type if b.key == "rate_limited"]) == "APPLICATION_JSON"
+    error_message = "The 429's body is JSON."
+  }
 }
 
 run "auth_limit_cannot_exceed_site_limit" {
