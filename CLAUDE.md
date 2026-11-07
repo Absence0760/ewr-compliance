@@ -30,7 +30,7 @@ pnpm 10 and Node 24. One package, no workspace.
 
 ## Hard rules
 
-1. **Client-only, except `functions/`.** `src/` has no server code, SSR adapter, server load function or API key. The only server code is `functions/`: the access check in front of the site and the user list behind it, and nothing else goes there. A flow file a user loads stays in the browser: nothing sends it anywhere, `functions/` included.
+1. **Client-only, except `functions/`.** `src/` has no server code, SSR adapter, server load function or API key. The only server code is `functions/`: the access check in front of the site and the user list behind it, which includes keeping the Cloudflare Access group in step with the list through the Cloudflare API (its token is a Pages secret, read from env), and nothing else goes there. A flow file a user loads stays in the browser: nothing sends it anywhere, `functions/` included.
 2. **Everything here is public.** No secret in any file, encrypted or not, and no personal data. No client material either: no real flow or EWR value, node code, site, file name or quoted brief, in code, comments, tests or docs. Fixtures added to tests are synthetic. Real values go in the private repo.
 3. **`static/data` is generated and ignored by git.** Never edit it by hand and never force-add it: it may hold real data. Real data is rebuilt into the private repo through `tools/`, and `pnpm test:private` is what can fail for a real reason. The sample comes from `e2e/fixtures/make-sample-data.mjs`: change that, rerun it, and update the specs' hand arithmetic.
 4. **Numbers on screen come from `src/lib/ewr`,** never recomputed in a component. `parsers.ts` and `resolve.ts` stay pure: no DOM, no fetch.

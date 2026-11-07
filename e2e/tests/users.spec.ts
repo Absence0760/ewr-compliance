@@ -2,10 +2,13 @@ import { expect, MAP, test, USER_API } from '../support/app.ts';
 import type { Page, Request } from '@playwright/test';
 
 // A made-up host with a user list. It keeps the host's rules that the page relies on: an address
-// already listed is refused with a reason, and every call must carry X-Requested-With.
+// already listed is refused with a reason, and every call must carry X-Requested-With. `access` is
+// what it says about the Cloudflare Access group after a change: kept in step by default.
 type U = { email: string; admin: boolean; addedBy: string; addedAt: string };
+type Sync = { state: 'synced' } | { state: 'not configured' } | { state: 'failed'; reason: string };
+type Access = { sync: Sync; sessions?: Sync };
 
-async function host(page: Page, me: { email: string; admin: boolean }, start: U[] = []) {
+async function host(page: Page, me: { email: string; admin: boolean }, start: U[] = [], access: Access = { sync: { state: 'synced' } }) {
 	let users = structuredClone(start);
 	const calls: Request[] = [];
 	await page.route(USER_API, async (route) => {
@@ -16,16 +19,22 @@ async function host(page: Page, me: { email: string; admin: boolean }, start: U[
 		if (path === 'me') return reply(me);
 		if (!me.admin) return reply({ error: 'Only an admin can manage users.' }, 403);
 		if (path === 'users' && req.method() === 'GET') return reply(users);
+		if (path === 'users/sync' && req.method() === 'GET') return reply({ configured: access.sync.state !== 'not configured' });
+		if (path === 'users/sync' && req.method() === 'POST') return reply({ access: access.sync, count: users.length });
 		if (path === 'users' && req.method() === 'POST') {
 			const b = req.postDataJSON();
 			const email = String(b.email).trim().toLowerCase();
 			if (users.some((u) => u.email === email)) return reply({ error: `${email} is already on the list.` }, 409);
 			users.push({ email, admin: b.admin, addedBy: me.email, addedAt: '2026-11-06T09:00:00.000Z' });
-			return reply(users.at(-1), 201);
+			return reply({ ...users.at(-1), access: access.sync }, 201);
 		}
 		const email = decodeURIComponent(path.replace(/^users\//, ''));
 		if (req.method() === 'PATCH') users = users.map((u) => (u.email === email ? { ...u, admin: req.postDataJSON().admin } : u));
-		if (req.method() === 'DELETE') users = users.filter((u) => u.email !== email);
+		if (req.method() === 'DELETE') {
+			users = users.filter((u) => u.email !== email);
+			const sessions = access.sync.state === 'synced' ? (access.sessions ?? access.sync) : null;
+			return reply({ access: access.sync, sessions });
+		}
 		return reply(null);
 	});
 	return calls;
@@ -141,6 +150,60 @@ test.describe('users', () => {
 			await expect(page.getByRole('status')).toBeVisible();
 			expect(calls.length).toBeGreaterThan(2);
 			for (const c of calls) expect(c.headers()['x-requested-with']).toBe('XMLHttpRequest');
+		});
+	});
+
+	test.describe('the Cloudflare Access group', () => {
+		const open = async (page: Page, access: Access) => {
+			const calls = await host(page, { email: ADMIN.email, admin: true }, [ADMIN, MEMBER], access);
+			await page.goto('users/');
+			await expect(table(page)).toBeVisible();
+			return calls;
+		};
+		const FAILED: Access = { sync: { state: 'failed', reason: 'the Cloudflare API answered HTTP 500' } };
+		const SAVED_BUT = 'Saved, but Cloudflare Access was not updated: the Cloudflare API answered HTTP 500. Press Sync with Access.';
+
+		test('is synced on demand, from Sync with Access', async ({ page }) => {
+			const calls = await open(page, { sync: { state: 'synced' } });
+			await expect(page.getByText('Cloudflare Access is not being kept in step')).toHaveCount(0);
+			await page.getByRole('button', { name: 'Sync with Access' }).click();
+			await expect(page.getByRole('status')).toHaveText('Cloudflare Access now sends a sign-in code to the 2 addresses listed, and no one else.');
+			const post = calls.find((c) => c.method() === 'POST')!;
+			expect(new URL(post.url()).pathname).toMatch(/\/api\/users\/sync$/);
+		});
+
+		test('when it could not be updated, an add is still saved, with a warning and the way to sync again', async ({ page }) => {
+			await open(page, FAILED);
+			await page.getByLabel('Email address').fill('new.person@example.com');
+			await page.getByRole('button', { name: 'Add user' }).click();
+			await expect(page.getByRole('alert')).toHaveText(SAVED_BUT);
+			await expect(table(page)).toContainText('new.person@example.com');
+			await page.getByRole('button', { name: 'Sync with Access' }).click();
+			await expect(page.getByRole('alert')).toHaveText('Cloudflare Access was not updated: the Cloudflare API answered HTTP 500.');
+		});
+
+		test('when it could not be updated, a removal is still saved, with the same warning', async ({ page }) => {
+			await open(page, FAILED);
+			await page.getByRole('button', { name: 'Remove member@example.com' }).click();
+			await page.getByRole('button', { name: 'Yes, remove' }).click();
+			await expect(page.getByRole('alert')).toHaveText(SAVED_BUT);
+			await expect(table(page)).not.toContainText('member@example.com');
+		});
+
+		test("says when a removed user's open sessions could not be ended", async ({ page }) => {
+			await open(page, { sync: { state: 'synced' }, sessions: { state: 'failed', reason: 'the Cloudflare API answered HTTP 403' } });
+			await page.getByRole('button', { name: 'Remove member@example.com' }).click();
+			await page.getByRole('button', { name: 'Yes, remove' }).click();
+			await expect(page.getByRole('alert')).toContainText('their open sessions could not be ended: the Cloudflare API answered HTTP 403.');
+		});
+
+		test('when the host does not keep it in step, changes still save and the page says so', async ({ page }) => {
+			await open(page, { sync: { state: 'not configured' } });
+			await expect(page.getByText('Cloudflare Access is not being kept in step with this list')).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Sync with Access' })).toHaveCount(0);
+			await page.getByLabel('Email address').fill('new.person@example.com');
+			await page.getByRole('button', { name: 'Add user' }).click();
+			await expect(page.getByRole('status')).toHaveText('Added new.person@example.com. They can sign in now.');
 		});
 	});
 });

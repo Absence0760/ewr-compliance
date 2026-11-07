@@ -1,6 +1,7 @@
 // The user list in Cloudflare D1. The schema is migrations/0001_users.sql. The last-admin rule is in
 // each statement, so two admins acting at once cannot leave the site with none. A change and its audit
 // row go in one batch, which D1 runs as a transaction, and the row is written only if the change was.
+// The same batch deletes audit rows older than AUDIT_RETENTION_MONTHS, the period the privacy notice gives.
 import type { Entry, Store, User } from './users.ts';
 
 interface Row {
@@ -15,6 +16,16 @@ const user = (r: Row): User => ({ email: r.email, admin: r.admin === 1, addedBy:
 /** True when the change keeps an admin: the user is not one, or another admin remains. */
 const KEEPS_ADMIN = `(admin = 0 OR (SELECT COUNT(*) FROM users WHERE admin = 1) > 1)`;
 
+/** How long an audit row is kept. The privacy notice in the private repo states the same period. */
+export const AUDIT_RETENTION_MONTHS = 24;
+
+/** The time before which audit rows are deleted, counted back from a change made at `at`. */
+export function auditCutoff(at: string): string {
+	const d = new Date(at);
+	d.setUTCMonth(d.getUTCMonth() - AUDIT_RETENTION_MONTHS);
+	return d.toISOString();
+}
+
 export function d1Store(db: D1Database): Store {
 	/** The change, then its entry if the change touched a row. True when it did. */
 	async function change(stmt: D1PreparedStatement, entry?: Entry): Promise<boolean> {
@@ -22,7 +33,9 @@ export function d1Store(db: D1Database): Store {
 		const log = db
 			.prepare('INSERT INTO audit (at, actor, action, target) SELECT ?, ?, ?, ? WHERE changes() = 1')
 			.bind(entry.at, entry.actor, entry.action, entry.target);
-		const [r] = await db.batch([stmt, log]);
+		// Last, so that changes() in the insert still counts the change's own rows.
+		const expire = db.prepare('DELETE FROM audit WHERE at < ?').bind(auditCutoff(entry.at));
+		const [r] = await db.batch([stmt, log, expire]);
 		return r.meta.changes === 1;
 	}
 

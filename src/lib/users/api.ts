@@ -49,7 +49,18 @@ export async function whoAmI(): Promise<Me | 'expired' | null> {
 	}
 }
 
+/**
+ * What a change did to the Cloudflare Access group the host keeps in step with the list
+ * (functions/lib/accessGroup.ts). The list is saved whatever this says.
+ */
+export type AccessSync = { state: 'synced' } | { state: 'not configured' } | { state: 'failed'; reason: string };
+
 export const listUsers = () => call<UserRow[]>('users');
-export const addUser = (email: string, admin: boolean) => call<UserRow>('users', 'POST', { email, admin });
+export const addUser = (email: string, admin: boolean) => call<UserRow & { access: AccessSync }>('users', 'POST', { email, admin });
 export const setAdmin = (email: string, admin: boolean) => call<null>(`users/${encodeURIComponent(email)}`, 'PATCH', { admin });
-export const removeUser = (email: string) => call<null>(`users/${encodeURIComponent(email)}`, 'DELETE');
+/** sessions is null when the group was not updated, so their sessions were left alone. */
+export const removeUser = (email: string) =>
+	call<{ access: AccessSync; sessions: AccessSync | null }>(`users/${encodeURIComponent(email)}`, 'DELETE');
+/** Whether the host keeps the Access group in step with the list. */
+export const accessStatus = () => call<{ configured: boolean }>('users/sync');
+export const syncAccess = () => call<{ access: AccessSync; count: number }>('users/sync', 'POST');

@@ -1,11 +1,13 @@
 <script lang="ts">
 	// The site's users, for its admins: add someone, make or unmake an admin, remove someone. The host
-	// checks every change again (functions/lib/users.ts), so this page only saves a round trip.
+	// checks every change again (functions/lib/users.ts), so this page only saves a round trip. After
+	// an add or a removal the host brings the Cloudflare Access group in step with the list; when it
+	// cannot, the change is still saved and the page says so, offering Sync with Access.
 	import { tick } from 'svelte';
-	import { addUser, listUsers, removeUser, setAdmin, type UserRow } from '#lib/users/api.ts';
+	import { accessStatus, addUser, listUsers, removeUser, setAdmin, syncAccess, type AccessSync, type UserRow } from '#lib/users/api.ts';
 	import { session } from '#lib/state/session.svelte.ts';
 
-	type Message = { level: 'info' | 'error'; text: string };
+	type Message = { level: 'info' | 'warning' | 'error'; text: string };
 
 	let users = $state<UserRow[] | null>(null);
 	let message = $state<Message | null>(null);
@@ -17,6 +19,8 @@
 	/** The user whose Remove button takes focus back when it reappears, after Cancel. Not reactive. */
 	let returnTo: string | null = null;
 	let notice = $state<HTMLElement>();
+	/** Whether the host keeps the Access group in step: null until known, or when it could not be asked. */
+	let accessConfigured = $state<boolean | null>(null);
 
 	const focus = (el: HTMLElement) => el.focus();
 	const focusIfReturning = (email: string) => (el: HTMLElement) => {
@@ -33,12 +37,12 @@
 	const me = $derived(session.me);
 	const date = (iso: string) => iso.slice(0, 10);
 
-	async function act(work: () => Promise<unknown>, done: string) {
+	async function act<T>(work: () => Promise<T>, done: string | ((r: T) => Message)) {
 		busy = true;
 		try {
-			await work();
+			const r = await work();
 			users = await listUsers();
-			message = { level: 'info', text: done };
+			message = typeof done === 'string' ? { level: 'info', text: done } : done(r);
 		} catch (e) {
 			message = { level: 'error', text: (e as Error).message };
 		} finally {
@@ -52,13 +56,39 @@
 				(u) => (users = u),
 				(e: Error) => (message = { level: 'error', text: e.message })
 			);
+			// Unknown stays null: Sync with Access is still offered, and says what is wrong if pressed.
+			accessStatus().then(
+				(s) => (accessConfigured = s.configured),
+				() => (accessConfigured = null)
+			);
 		}
 	});
+
+	/** The outcome of an add or a removal, which is saved whatever Access said. */
+	function afterChange(access: AccessSync, text: string): Message {
+		if (access.state === 'failed') {
+			return { level: 'warning', text: `Saved, but Cloudflare Access was not updated: ${access.reason}. Press Sync with Access.` };
+		}
+		accessConfigured = access.state === 'synced';
+		return { level: 'info', text };
+	}
+
+	const sync = () =>
+		act(syncAccess, ({ access, count }): Message => {
+			if (access.state === 'failed') return { level: 'warning', text: `Cloudflare Access was not updated: ${access.reason}.` };
+			accessConfigured = access.state === 'synced';
+			return access.state === 'synced'
+				? { level: 'info', text: `Cloudflare Access now sends a sign-in code to the ${count} ${count === 1 ? 'address' : 'addresses'} listed, and no one else.` }
+				: { level: 'warning', text: 'Cloudflare Access is not set up to be kept in step with this list.' };
+		});
 
 	async function add(e: SubmitEvent) {
 		e.preventDefault();
 		const who = email.trim();
-		await act(() => addUser(who, asAdmin), `Added ${who.toLowerCase()}${asAdmin ? ' as an admin' : ''}. They can sign in now.`);
+		await act(
+			() => addUser(who, asAdmin),
+			(r) => afterChange(r.access, `Added ${who.toLowerCase()}${asAdmin ? ' as an admin' : ''}. They can sign in now.`)
+		);
 		if (message?.level === 'info') {
 			email = '';
 			asAdmin = false;
@@ -70,7 +100,16 @@
 
 	async function remove(u: UserRow) {
 		removing = null;
-		await act(() => removeUser(u.email), `Removed ${u.email}. They can no longer open the site.`);
+		await act(
+			() => removeUser(u.email),
+			({ access, sessions }): Message =>
+				sessions?.state === 'failed'
+					? {
+							level: 'warning',
+							text: `Removed ${u.email}. Cloudflare Access sends them no new sign-in code, but their open sessions could not be ended: ${sessions.reason}. The site refuses them on their next request all the same.`
+						}
+					: afterChange(access, `Removed ${u.email}. They can no longer open the site.`)
+		);
 		// The row, or at least its confirm, is gone: land on the outcome rather than the page body.
 		await tick();
 		notice?.focus();
@@ -100,10 +139,20 @@
 			</label>
 			<label class="check"><input type="checkbox" bind:checked={asAdmin} /> Admin</label>
 			<button type="submit" disabled={busy}>Add user</button>
+			{#if accessConfigured !== false}
+				<button type="button" disabled={busy} onclick={sync}>Sync with Access</button>
+			{/if}
 		</form>
 
+		{#if accessConfigured === false}
+			<p class="notice">
+				Cloudflare Access is not being kept in step with this list, because the host's Access group settings are missing. The site still
+				lets in only the people listed here, but Access may send a sign-in code to anyone who asks.
+			</p>
+		{/if}
+
 		{#if message}
-			<div class="notice {message.level}" tabindex="-1" bind:this={notice} role={message.level === 'error' ? 'alert' : 'status'}>{message.text}</div>
+			<div class="notice {message.level}" tabindex="-1" bind:this={notice} role={message.level === 'info' ? 'status' : 'alert'}>{message.text}</div>
 		{/if}
 
 		{#if users}

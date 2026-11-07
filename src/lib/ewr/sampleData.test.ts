@@ -24,7 +24,7 @@ test('it says it is the sample, so nothing mistakes it for real data', () => {
 
 test('it has the same files as a real build, and no more', () => {
 	const basins = ['berg', 'breede', 'gouritz', 'olifantsdoring'];
-	const want = ['index.json', 'gauges.json', 'node-info.json', 'flows-X0H997.json', 'flows-X0H998.json', 'flows-X0H999.json', ...basins.flatMap((b) => [`ewr-${b}.json`, `series-${b}.json`])];
+	const want = ['index.json', 'gauges.json', 'node-info.json', 'privacy.md', 'flows-X0H997.json', 'flows-X0H998.json', 'flows-X0H999.json', ...basins.flatMap((b) => [`ewr-${b}.json`, `series-${b}.json`])];
 	assert.deepEqual(readdirSync(DIR).sort(), want.sort());
 });
 

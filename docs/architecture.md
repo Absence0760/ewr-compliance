@@ -50,18 +50,23 @@ Observed flow comes from a linked gauge, the DWS API once it exists, or a file. 
 
 ## Users and access
 
-On the host, Cloudflare Pages, nobody reaches any file of the site, `data/` included, unless two things hold. Cloudflare Access has signed them in, with a one-time code sent to their email address, and that address is on the site's list of users. Access proves who someone is; the list, which the site's admins keep, decides whether they may come in. Hosting and setting it up: `docs/hosting.md` § Access control.
+On the host, Cloudflare Pages, nobody reaches any file of the site, `data/` included, unless two things hold. Cloudflare Access has signed them in, with a one-time code sent to their email address, and that address is on the site's list of users. Access proves who someone is; the list, which the site's admins keep, decides whether they may come in. The list in D1 is the source of truth. Access's policy includes only an Access group the site keeps in step with it, so Access sends a code to no one else, and the middleware checks the list again on every request. Hosting and setting it up: `docs/hosting.md` § Access control.
 
 | Path | Role |
 |---|---|
 | `functions/_middleware.ts` | Runs before every request. Verifies the Access token (`lib/access.ts`: RS256 with Access's published keys, cached for an hour and fetched again for an unknown key id at most once a minute) and looks the address up in the list (`lib/gate.ts`). Refuses with a page, or JSON for the app's own calls, each carrying its own `nosniff` and `frame-ancestors` headers, since `_headers` does not reach a response a Function makes. A change (POST, PATCH, DELETE) must come from the site's own origin. |
 | `functions/lib/users.ts` | The rules. Only an admin lists, adds, removes, or makes and unmakes admins. Nobody removes themself or their own admin rights. Addresses are kept trimmed and lowercase. Every change is logged in `audit`. |
-| `functions/lib/d1.ts`, `migrations/` | The list in Cloudflare D1. The last-admin rule is in each SQL statement, so two admins acting at once cannot leave the site with none. A change and its audit row go in one batch, a transaction. The table refuses an address that is not lowercase and trimmed. |
-| `functions/api/` | `me` (who is signed in), `users` (list, add) and `users/<email>` (make or unmake admin, remove), JSON over `fetch`. |
+| `functions/lib/d1.ts`, `migrations/` | The list in Cloudflare D1. The last-admin rule is in each SQL statement, so two admins acting at once cannot leave the site with none. A change and its audit row go in one batch, a transaction, which also deletes audit rows older than `AUDIT_RETENTION_MONTHS` (24), counted back from the change's own time. The table refuses an address that is not lowercase and trimmed. |
+| `functions/lib/accessGroup.ts`, `functions/lib/membership.ts` | The Access group. After an add or a removal, `membership.ts` sends the whole list to `accessGroup.ts`, which reads the group and replaces its include rules, one email rule per address, through the Cloudflare API, keeping its name and other rules; on a removal it then ends that user's Access sessions. Making or unmaking an admin changes no membership and sends nothing. A failed call leaves the D1 change standing and comes back in the reply (`access`, `sessions`) for the page to show; without `CF_ACCOUNT_ID`, `ACCESS_GROUP_ID` and the secret `CF_API_TOKEN` the state is "not configured". A reason never carries the token or a response body. |
+| `functions/api/` | `me` (who is signed in), `users` (list, add), `users/<email>` (make or unmake admin, remove) and `users/sync` (GET whether the group is kept in step, POST sync it now), JSON over `fetch`. |
 | `src/lib/users/api.ts`, `src/lib/state/session.svelte.ts` | The app asks `api/me` once at start. Every call sends `X-Requested-With`, so an expired sign-in is a JSON 401 and not a sign-in page; a 401 from `api/me` sets `session.expired`, and the Users page then asks for a reload instead of saying there is no list. |
-| `src/lib/components/users/UsersAdmin.svelte`, `src/routes/users/` | The Users page, offered in the nav to admins only. |
+| `src/lib/components/users/UsersAdmin.svelte`, `src/routes/users/` | The Users page, offered in the nav to admins only. After a change Access was not told of, it says "Saved, but Cloudflare Access was not updated" with the reason; Sync with Access sends the whole list again; and a host without the group settings gets a notice that Access is not kept in step. |
 
 A copy served without `functions/`, such as `pnpm dev`, `pnpm preview` or the e2e servers, has no list: `api/me` is not found, the app shows no Users link, and everything else works as before. The e2e fixture answers `api/` with 404 by default, and `users.spec.ts` stands in for a host with a list. The first admin is added by the operator, once, straight into D1; after that, admins add everyone else. The list holds email addresses, so it lives only in D1, never in this repo.
+
+## Privacy notice
+
+`privacy/` shows the privacy notice, linked from the end of the app bar on every page (`+layout.svelte`; not a footer, which would take height from the map). It renders even when the data fails to load, since it needs none of it. Its text is not in this repo: it is `static/data/privacy.md`, the real notice from the private repo through `pnpm data:private`, or a made-up one from `make-sample-data.mjs` in the sample. `src/lib/privacy/markdown.ts` reads a little Markdown (headings `#` to `###`, drawn as h2 to h4, paragraphs, lists, `**bold**`, links) into blocks the page draws with Svelte's own elements. No text becomes HTML, and a link keeps its address only when it is `https:` or `mailto:`. `src/lib/privacy/notice.svelte.ts` fetches it once. What the site keeps, and how a person is erased: `docs/hosting.md` § Personal data.
 
 ## Layout
 
@@ -74,7 +79,7 @@ A copy served without `functions/`, such as `pnpm dev`, `pnpm preview` or the e2
 | `src/lib/ewr/importFlow.ts` | Reads flow files and API responses, by `FlowWant`; `xlsx` loads only when needed. The DWS API is not published, so the API format is an assumption: README § DWS API. |
 | `src/lib/state/app.svelte.ts` | The single app state (`app`). Components read it and call its methods. |
 | `src/lib/components/map` | `WmaMap.svelte`, the national map of WMAs, and `EwrMap.svelte`, one WMA's map, with popup (`NodePopup.svelte`), legend, basin zoom and search. `wma.ts` holds the WMAs and the geometry tests, `mapData.ts` the map's other pure logic, `mapStyle.ts` the layers and base map style, `catchments.ts` the live DWS boundaries and flow gauges, paged, with a time limit. |
-| `src/routes` | `/`, the WMA chooser. `wma/[wma]/`, one WMA's map and compliance panel. `nodes/`, `notes/`, and `+error.svelte`. |
+| `src/routes` | `/`, the WMA chooser. `wma/[wma]/`, one WMA's map and compliance panel. `nodes/`, `notes/`, `privacy/`, and `+error.svelte`. |
 | `src/lib/components/compliance` | Node panel, Historical and Real Time Comparison, `GaugePanel.svelte`, a gauge's published monthly volumes, and `LoadFlowDialog.svelte`, the Load flow data window. `compare.ts` holds table rows and chart series. |
 | `src/lib/components/charts` | uPlot wrapper. |
 | `src/lib/components/nodes` | Nodes table and data notes. |

@@ -16,8 +16,9 @@ The decision: only people on the site's list of users can load any of its files.
 
 The host is Cloudflare Pages, because the check runs there, in front of every file:
 
-- **Cloudflare Access** signs people in with a one-time code sent to their email address, so nobody has a password and none is stored. Its policy lets in any address that completes the code. It proves who someone is, not whether they may come in.
-- **`functions/_middleware.ts`** runs before every request, `data/` included. It verifies the Access token and looks the address up in the list. Anyone not on it gets a page saying so, and an admin removing someone takes effect on that person's next request, not when their sign-in expires.
+- **Cloudflare Access** signs people in with a one-time code sent to their email address, so nobody has a password and none is stored. Its policy includes only the Access group `ewr-compliance-users`, which the site keeps in step with the list, and Access sends a code only to an address its policy allows: a stranger gets none, takes no seat and never reaches a Function. The list in D1 stays the source of truth; the group follows it.
+- **`functions/_middleware.ts`** runs before every request, `data/` included. It verifies the Access token and looks the address up in the list, the inner check that holds even if the group falls out of step. Anyone not on it gets a page saying so, and an admin removing someone takes effect on that person's next request, not when their sign-in expires.
+- **Keeping the group in step** (`functions/lib/accessGroup.ts`): after an admin adds or removes someone, the site replaces the group's include rules with the whole list, through the Cloudflare API, and on a removal then ends that person's Access sessions (`revoke_user`), which otherwise stay valid until they expire. Making or unmaking an admin leaves the group alone. If the API call fails, the change is still saved and the Users page says Access was not updated, with a Sync with Access button that sends the whole list again. Without the three settings below the site saves changes but does not touch the group, and the Users page says so. An Access group holds at most 1,000 rules, so the site refuses a 1,001st user.
 - **Cloudflare D1** holds the list and a log of every change, with who made it. It names people, so it is never copied into a repo.
 
 Settings the Pages project needs (dashboard, Settings):
@@ -27,11 +28,14 @@ Settings the Pages project needs (dashboard, Settings):
 | Variable `ACCESS_TEAM_DOMAIN` | The Zero Trust team domain, `<team>.cloudflareaccess.com` |
 | Variable `ACCESS_AUD` | The Application Audience (AUD) tags of the site's two Access applications, the site and its deployment previews, separated by a comma |
 | D1 binding `USERS_DB` | The user database, with `migrations/0001_users.sql` applied |
+| Variable `CF_ACCOUNT_ID` | The Cloudflare account ID |
+| Variable `ACCESS_GROUP_ID` | The ID of the Access group `ewr-compliance-users` (Zero Trust > Access > Access groups, the group's page) |
+| Secret `CF_API_TOKEN` | An API token with one permission, **Access: Organizations, Identity Providers, and Groups Write**, on this one account and no other. The operator makes it (My Profile > API Tokens > Create Custom Token) and sets it as a secret, in the dashboard (Settings > Variables and Secrets, type Secret) or with `pnpm wrangler pages secret put CF_API_TOKEN --project-name ewr-compliance`, which prompts for it. Never as a plain variable, and never in a file |
 | Functions failure mode | **Fail closed** (Settings > Runtime > Fail open / closed). Fail open serves the files without the check once the free daily limit is used up |
 
 Set the variables, the binding and the failure mode for both of the project's environments, Production and Preview: Pages keeps them apart, and a preview without the variables or binding refuses everyone. They reach only deployments made after the change: Cloudflare says to redeploy for a binding to take effect, so deploy again after changing any of them.
 
-The failure mode matters because the daily limit of 100,000 Functions requests is the account's, shared with every Worker and Pages project on it, and resets at midnight UTC. With the Access policy open to everyone, anyone can complete the code and send requests until it is used up. Fail open would then serve every file, `data/` included, with no check at all. Cloudflare's docs do not say which mode a new project starts with, so check it reads Fail closed in both environments rather than assume it. Without either variable, or the binding, every request is refused with "not set up". If Access's keys cannot be fetched, requests are refused with "Sign-in unavailable" until they can. The first admin, once, by the operator:
+The failure mode matters because the daily limit of 100,000 Functions requests is the account's, shared with every Worker and Pages project on it, and resets at midnight UTC. With the policy limited to the group only a listed user can send requests at all, but a listed user's compromised mailbox would still be enough to use it up. Fail open would then serve every file, `data/` included, with no check at all. Cloudflare's docs do not say which mode a new project starts with, so check it reads Fail closed in both environments rather than assume it. Without either variable, or the binding, every request is refused with "not set up". If Access's keys cannot be fetched, requests are refused with "Sign-in unavailable" until they can. The first admin, once, by the operator:
 
 ```
 pnpm wrangler d1 execute ewr-compliance-users --remote --command "INSERT INTO users (email, admin, added_by, added_at) VALUES ('<address>', 1, 'operator', datetime('now'))"
@@ -42,18 +46,19 @@ The address in lowercase: the table refuses any other, because a mixed-case addr
 ### Setting up, in this order
 
 1. Create the Pages project as Direct Upload, `pnpm wrangler pages project create ewr-compliance --production-branch main`, and never connect it to Git. A Git-connected project builds a preview of every commit to every branch by default, Dependabot's included, and each would run that branch's `functions/` against the same `USERS_DB`.
-2. Create the two Access applications (§ Access, as built) and note both AUD tags.
-3. Create the database and apply the schema: `pnpm wrangler d1 create ewr-compliance-users`, then `pnpm wrangler d1 execute ewr-compliance-users --remote --file migrations/0001_users.sql`.
-4. Set the variables, the `USERS_DB` binding and Fail closed, in Production and in Preview.
-5. Add the first admin, with the command above.
-6. Only then deploy, starting with `tools/deploy.sh sample`.
+2. Create the Access group `ewr-compliance-users` (Zero Trust > Access > Access groups), including one rule, Emails, with the operator's own address: the same address, lowercase, as the first admin in step 6. Note its ID for `ACCESS_GROUP_ID`. The site replaces the group's include rules from then on, keeping its name and any exclude or require rules.
+3. Create the two Access applications (§ Access, as built) and note both AUD tags.
+4. Create the database and apply the schema: `pnpm wrangler d1 create ewr-compliance-users`, then `pnpm wrangler d1 execute ewr-compliance-users --remote --file migrations/0001_users.sql`.
+5. Set the variables, the `USERS_DB` binding, the `CF_API_TOKEN` secret and Fail closed, in Production and in Preview.
+6. Add the first admin, with the command above.
+7. Only then deploy, starting with `tools/deploy.sh sample`. Sign in as the first admin and press Sync with Access on the Users page once, which checks the token.
 
 ### Access, as built
 
 In the dashboard, by the route Cloudflare's Pages known-issues page gives:
 
 - Pages project > Settings > General > Enable access policy. Edit the application it makes and delete the `*` from its hostname, so it covers `ewr-compliance.pages.dev`. Enable the setting again, so a second application covers `*.ewr-compliance.pages.dev`, the hash and preview URLs.
-- Both applications: policy Allow, Include Everyone; One-time PIN as the only login method; session 24 hours. Note each one's Application Audience (AUD) tag for `ACCESS_AUD`.
+- Both applications: policy Allow, Include the Access group `ewr-compliance-users`, never Everyone; One-time PIN as the only login method; session 24 hours. Note each one's Application Audience (AUD) tag for `ACCESS_AUD`.
 - Zero Trust > Settings > Admin controls > Remove inactive users from seats: set a period (one month is the shortest). Off by default, so a seat is otherwise held for good.
 
 It is set in the dashboard, not Terraform, because the provider's `cloudflare_pages_project` has open bugs that break a Direct Upload project's plans: cloudflare/terraform-provider-cloudflare #7303, #7449 and #7288.
@@ -85,11 +90,28 @@ The sign-in cookie is Access's and strictly necessary to reach the site, so it n
 Before going live, check:
 
 - From a browser that is not signed in, `data/index.json` gets the sign-in page.
-- An address not on the list gets "Not on the list" after signing in, for `data/index.json` as well as the home page.
-- Removing a user shuts them out on their next request.
+- An address not on the list is sent no code, for `data/index.json` as well as the home page.
+- Adding a user puts their address in the group (Zero Trust > Access > Access groups); removing one takes it out and shuts them out on their next request.
+- Sync with Access on the Users page reports the number of addresses listed, not an error.
 - A `<hash>.ewr-compliance.pages.dev` URL and a preview URL behave the same, signed out and as an address not on the list.
 - The failure mode reads Fail closed in both Production and Preview.
 - The deployment list holds only the deployments meant to be there.
+
+### Personal data
+
+The site's only personal data is the list of users (email address, admin flag, who added them and when), the audit log of changes (time, actor's address, action, target's address), Cloudflare Access's own sign-in records, and the email with the code Access sends. The privacy notice at `privacy/`, linked from the app bar of every page, says so: its text is `static/data/privacy.md` in the private repo, which `pnpm data:private` copies in (`docs/architecture.md` § Privacy notice). Before the real deploy, fill its placeholders, and get the client's agreement to hosting outside South Africa with the private repo's `docs/hosting-consent.md`.
+
+**Retention.** Audit rows older than 24 months (`AUDIT_RETENTION_MONTHS` in `functions/lib/d1.ts`) are deleted by every change, in the same batch as the change and its own row. If the notice's period changes, change the constant with it: the private repo's `tests/unit/privacy.test.ts` checks they agree.
+
+**Deletion on request.** An admin removes the person on the Users page, which deletes their row in `users`. For a full erasure the operator then takes their address out of the audit log, and out of `added_by` on the users they added. An `add` row's target is the address, or the address followed by ` (admin)`, so the command matches those two exactly and nothing else, never a longer address that starts the same:
+
+```
+pnpm wrangler d1 execute ewr-compliance-users --remote --command "UPDATE audit SET target = CASE WHEN target IN ('<address>', '<address> (admin)') THEN 'erased' ELSE target END, actor = CASE WHEN actor = '<address>' THEN 'erased' ELSE actor END WHERE target IN ('<address>', '<address> (admin)') OR actor = '<address>'; UPDATE users SET added_by = 'erased' WHERE added_by = '<address>'"
+```
+
+The address in lowercase, as the list keeps it. Then Cloudflare: Zero Trust > Team & Resources > Users, select the person, Action > Remove users. That frees their seat and deletes their device registrations, but Cloudflare keeps the user record ("You cannot delete or archive a user record") and its Access logs for the plan's retention (24 hours on Free, 30 days on Standard). Anything past that is Cloudflare's to delete, under its own privacy policy, on a request to it. D1 Time Travel keeps the old rows restorable for 7 days on Workers Free, 30 on Workers Paid, so the erasure is complete when that window has passed. Reply to the person with what was done.
+
+**Access to their data.** The log query above, filtered to the address, answers a request to see what is held. Send it to the person, not into a file or a ticket.
 
 ### Cost
 
@@ -100,11 +122,11 @@ At this scale it is free: checked on 2026-11-06 against Cloudflare's pricing pag
 | Pages | Static files free and unlimited, 500 builds a month, 20,000 files of up to 25 MiB | About 1,000 files and 30 MB |
 | Pages Functions | 100,000 requests a day, 10 ms CPU each. Every file is a request, because the middleware runs on all of them | About 30 to 60 requests a page load: 20 people loading it 10 times a day is about 12,000 |
 | D1 | 5 million rows read and 100,000 written a day, 5 GB | One row read a request |
-| Zero Trust (Access) | Up to 50 users. A card is needed to activate the Free plan, and is not charged | A user takes a seat when they sign in, on the list or not. Seats can be set to expire |
+| Zero Trust (Access) | Up to 50 users. A card is needed to activate the Free plan, and is not charged | A user takes a seat when they sign in, and only a listed address can. Seats can be set to expire |
 
 The first cost, if one ever comes, is Workers Paid at US$5 a month for the account, which lifts the daily request limit to 10 million a month. More than 50 people signing in moves Zero Trust to US$7 a user a month. A custom domain needs its zone on Cloudflare, free on the Free plan, plus the domain's own registration.
 
-**A risk, not yet closed.** Because the Access policy lets in any address that completes the code, a stranger takes a seat by signing in, though they see only "Not on the list". Someone doing it on purpose with 50 throwaway addresses fills every seat and locks out each user who does not already hold one, until the seats expire. The same stranger, signed in, can send requests until the account's daily Functions limit is used up, which Fail closed turns into the site being down for everyone until midnight UTC. The operator is deciding how to close this: private issue 11.
+**The seats and the request limit.** The Access policy includes only the group the site keeps in step with the list, and Cloudflare sends a code only to an address a policy allows, so a stranger can neither take a seat nor send a request that reaches a Function. Closed by that change (private issue 11). What is left: someone who controls a listed user's mailbox can sign in as them and send requests until the account's daily Functions limit is used up, which Fail closed turns into the site being down for everyone until midnight UTC; removing that user ends their sessions and stops it. While the group is out of step (a failed sync not yet repeated), an address just removed may still get a code, and is refused by the middleware.
 
 ## Build
 

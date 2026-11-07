@@ -24,8 +24,8 @@ To host it, run `pnpm build` and copy `build/` to any static host, at a domain r
 
 `static/data` is ignored by git, and is filled by one of two commands.
 
-- **`pnpm data:sample`** copies the synthetic sample from `e2e/fixtures/sample-data`. It has a node of each kind the app treats differently, in every basin: a `.tab` node, Revised `.rul` nodes, a flow-only node, an Olifants-Doring node with Cumulative and Incremental runs, a site at a node, an approximate node and a node with no coordinates. Every code and number is invented by `e2e/fixtures/make-sample-data.mjs`, which is deterministic. To change the sample, change that script and rerun it. If `static/data` holds anything but the sample the command refuses, so real data is never lost silently. `pnpm data:sample --force` replaces it.
-- **`pnpm data:private`** needs access to the private repo `ewr-compliance-private`, cloned beside this one, or named by `EWR_PRIVATE_DIR`. It copies the real data to `static/data`, and the tests pinned to it to `src/private` and `e2e/tests/private`. All of that is ignored by git.
+- **`pnpm data:sample`** copies the synthetic sample from `e2e/fixtures/sample-data`. It has a node of each kind the app treats differently, in every basin: a `.tab` node, Revised `.rul` nodes, a flow-only node, an Olifants-Doring node with Cumulative and Incremental runs, a site at a node, an approximate node and a node with no coordinates. Every code and number is invented by `e2e/fixtures/make-sample-data.mjs`, which is deterministic. To change the sample, change that script and rerun it. If `static/data` holds anything but the sample the command refuses, so real data is never lost silently. `pnpm data:sample --force` replaces it. Its `privacy.md`, the privacy notice the app shows at `privacy/`, is made up too.
+- **`pnpm data:private`** needs access to the private repo `ewr-compliance-private`, cloned beside this one, or named by `EWR_PRIVATE_DIR`. It copies the real data to `static/data`, with the real privacy notice, and the tests pinned to it to `src/private` and `e2e/tests/private`. All of that is ignored by git.
 
 ## Test
 

@@ -21,7 +21,11 @@
 	/** A WMA's map is part of the map, under its first link. */
 	const inWma = $derived(page.url.pathname.startsWith(`${home.replace(/\/$/, '')}/wma/`));
 	const here = (href: string) => page.url.pathname.replace(/\/$/, '') === href.replace(/\/$/, '') || (href === home && inWma);
-	const current = $derived(nav.find((n) => here(n.href)));
+	/** At the end of the bar, on every page, for everyone who can load the site. Not a footer, which would take height from the map. */
+	const privacy = { href: resolve('privacy/'), label: 'Privacy notice' };
+	const current = $derived([...nav, privacy].find((n) => here(n.href)));
+	/** The notice needs none of the data, so it shows even when the data cannot load. */
+	const onPrivacy = $derived(here(privacy.href));
 	const wmaName = $derived(inWma ? wmaBySlug(page.params.wma ?? '')?.name : undefined);
 	/** The home page's banner carries the title, as its h1, so the bar leaves it out there. */
 	const isHome = $derived(page.url.pathname.replace(/\/$/, '') === home.replace(/\/$/, '') && !page.error);
@@ -56,10 +60,13 @@
 			<option value="PES">PES</option>
 		</select>
 	</label>
+	<a class="privacy" href={privacy.href} aria-current={current === privacy ? 'page' : undefined}>{privacy.label}</a>
 </header>
 
 <main id="main" tabindex="-1">
-	{#if app.loadError}
+	{#if onPrivacy}
+		{@render children()}
+	{:else if app.loadError}
 		<div class="notice error" style="margin:14px">Could not start: {app.loadError}</div>
 	{:else if app.loaded}
 		{@render children()}

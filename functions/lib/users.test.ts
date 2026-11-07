@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { d1Store } from './d1.ts';
+import { AUDIT_RETENTION_MONTHS, auditCutoff, d1Store } from './d1.ts';
 import { auditRows, testDb } from './sqlite-d1.ts';
 import { addUser, listUsers, normalEmail, removeUser, setAdmin, type Store, type User } from './users.ts';
 
@@ -117,6 +117,26 @@ describe('the record of changes', () => {
 		await expect(removeUser(store, admin, member.email, NOW)).rejects.toThrow();
 		expect(await store.get('new@example.com')).toBeNull();
 		expect(await store.get(member.email)).not.toBeNull();
+	});
+
+	it(`is kept for ${AUDIT_RETENTION_MONTHS} months: each change deletes the rows older than that, in the same batch`, async () => {
+		const old = (at: string, target: string) =>
+			d1.raw.prepare("INSERT INTO audit (at, actor, action, target) VALUES (?, 'admin@example.com', 'add', ?)").run(at, target);
+		old('2024-11-06T11:59:59.999Z', 'expired@example.com');
+		old('2024-11-06T12:00:00.000Z', 'kept@example.com');
+		await addUser(store, admin, 'new@example.com', false, NOW);
+		expect(auditRows(d1).map((r) => r.target)).toEqual(['kept@example.com', 'new@example.com']);
+	});
+
+	it('deletes nothing when the change fails to be logged', async () => {
+		d1.raw.prepare("INSERT INTO audit (at, actor, action, target) VALUES ('2020-01-01T00:00:00.000Z', 'a@example.com', 'add', 'old@example.com')").run();
+		d1.raw.exec('CREATE TRIGGER refuse BEFORE INSERT ON users BEGIN SELECT RAISE(ABORT, \'refused\'); END');
+		await expect(addUser(store, admin, 'new@example.com', false, NOW)).rejects.toThrow(/refused/);
+		expect(auditRows(d1).map((r) => r.target)).toEqual(['old@example.com']);
+	});
+
+	it('counts the cutoff back by calendar months', () => {
+		expect(auditCutoff('2026-11-06T12:00:00.000Z')).toBe('2024-11-06T12:00:00.000Z');
 	});
 
 	it('records nothing for a change that did not happen', async () => {

@@ -23,6 +23,7 @@ code { font: 0.93em ui-monospace, Menlo, Consolas, monospace; }
 .appbar nav a { padding: 5px 10px; border-radius: 6px; color: var(--ink-2); text-decoration: none; }
 .appbar nav a.on { background: var(--surface-2); color: var(--ink); font-weight: 600; }
 .appbar .signed { font-size: 12px; }
+.appbar .privacy { padding: 4px 0; line-height: 16px; font-size: 12px; color: var(--ink-2); }
 main { flex: 1; min-height: 0; display: flex; }
 .view { flex: 1; min-width: 0; overflow: auto; padding: 12px 14px; }
 .view.split { display: grid; grid-template-columns: minmax(320px, 42%) 1fr; padding: 0; overflow: hidden; }

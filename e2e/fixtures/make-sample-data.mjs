@@ -328,6 +328,24 @@ const NODE_INFO = {
 
 const json = (value) => `${JSON.stringify(value, null, '\t')}\n`;
 
+// The privacy notice the app shows at privacy/. The real one is in the private repo; this one is made up,
+// names no one, and has one of each thing the page draws.
+const PRIVACY = `# Privacy notice (sample)
+
+This is a **synthetic** notice for the tests. It describes no real site, operator or person.
+
+## What is kept
+
+- A made-up list of example addresses, such as one@example.com.
+- A made-up record of changes,
+  kept for a made-up period.
+
+## Who to ask
+
+1. Write to [the sample operator](mailto:operator@example.com).
+2. Read [the sample regulator's page](https://example.com/regulator).
+`;
+
 mkdirSync(OUT, { recursive: true });
 writeFileSync(`${OUT}index.json`, json({
 	// `pnpm data:sample` and the Playwright config read this to tell the sample from real data.
@@ -347,6 +365,7 @@ writeFileSync(`${OUT}index.json`, json({
 }));
 writeFileSync(`${OUT}gauges.json`, json(GAUGES));
 writeFileSync(`${OUT}node-info.json`, json(NODE_INFO));
+writeFileSync(`${OUT}privacy.md`, PRIVACY);
 for (const [station, file] of Object.entries(FLOWS)) writeFileSync(`${OUT}flows-${station}.json`, json(file));
 for (const slug of Object.values(BASINS)) {
 	for (const group of ['ewr', 'series']) writeFileSync(`${OUT}${group}-${slug}.json`, json(STORES[`${group}-${slug}`]));
