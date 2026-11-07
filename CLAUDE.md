@@ -4,7 +4,7 @@ Guidance for Claude Code working in this repository. Keep this file short — it
 
 EWR Compliance Measurement compares observed river flows with Environmental Water Requirements at the EWR nodes and sites of the Berg, Breede-Overberg, Gouritz and Olifants-Doorn basins. It opens on South Africa's Water Management Areas of 2023, each with its own map. It is a static SvelteKit 3 app (`adapter-static`, `ssr = false`) with Svelte 5 runes and TypeScript. Layout and conventions: `docs/architecture.md`.
 
-**Hosting is moving to AWS af-south-1,** per the private hosting plan, in phases P1–P6; nothing is live yet. The Cloudflare design (`functions/`, `migrations/`, D1, the Access sync, wrangler, `static/_headers`) stays until P3 replaces it: don't extend it. **Sign-in, sessions and user management come from `auth-kit`,** a private package installed at a pinned tag, from P3 on. Don't write auth code here: fix it in `auth-kit`, tag it, and take the Dependabot PR.
+**Hosting is moving to AWS af-south-1,** per the private hosting plan, in phases P1–P6; nothing is live yet. P1 and P2 are in `infra/` (Terraform, `infra/README.md`) and `tools/deploy.sh`; `static/_headers` is replaced by the CloudFront headers policy. The rest of the Cloudflare design (`functions/`, `migrations/`, D1, the Access sync, wrangler) stays until P3 replaces it: don't extend it. **Sign-in, sessions and user management come from `auth-kit`,** a private package installed at a pinned tag, from P3 on. Don't write auth code here: fix it in `auth-kit`, tag it, and take the Dependabot PR.
 
 This repo is public and holds the code. The real data, the client's brief and the tests pinned to them are in the private repo `ewr-compliance-private`, a sibling folder. This repo runs on a synthetic sample.
 
@@ -27,7 +27,8 @@ pnpm 10 and Node 24. One package, no workspace.
 | `python3 ../ewr-compliance-private/tools/build_node_info.py` | Rebuild `node-info.json`, what the RQO node workbook records at each node (REMP/BM site, EWR site ID, WQ station, SWSAs), in the private repo. Arguments: `README.md` § Rebuild the data |
 | `python3 ../ewr-compliance-private/tools/build_data.py`, `python3 tools/build_geo.py` | Rebuild the real data in the private repo, and the quaternaries file it places nodes with. Arguments and dependencies: `README.md` § Rebuild the data |
 | `node tools/build-rivers.ts` | Rebuild `static/geo/rivers-<wma>.json`, the named DWS 1:500 000 rivers of each WMA. Network |
-| `tools/deploy.sh sample\|real [--dry-run] [--yes]` | Build a clean worktree of `origin/main`, check it (`tools/deploy-check.mjs`) and deploy it to Cloudflare Pages. Operator's workstation only, with wrangler's own login. Details: `docs/hosting.md` § Build |
+| `tools/deploy.sh sample\|real [--dry-run] [--yes]` | Build a clean worktree of `origin/main`, check it (`tools/deploy-check.mjs`), `aws s3 sync` it to the site bucket in two cache passes and invalidate CloudFront. Operator's workstation only, with the `ewr-compliance` SSO profile. Details: `docs/hosting.md` § Build |
+| `bin/check-infra.sh` | Terraform fmt, validate and the mocked-provider tests of `infra/` (`infra/tests/`), in a temporary copy, with no AWS credentials. CI's `Terraform` job. Never plan or apply against AWS from a session: that is the operator's (`infra/README.md`) |
 | `node tools/check-live-services.ts` | Check the live ArcGIS layers against what the app assumes. Network, by hand |
 
 ## Hard rules
