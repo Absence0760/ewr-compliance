@@ -18,7 +18,7 @@ This repo is public. The account ID stays in `backend.config` (gitignored), and 
 | `edge_functions.tf` | The viewer-request function: unsigned or expired requests get a 302 to `/signin/` (or 401 JSON with `X-Requested-With`), folder paths get `index.html` |
 | `security_headers.tf` | The response-headers policies: the site's headers (those the retired `static/_headers` file set) plus HSTS, and the API's |
 | `waf.tf` | Per-IP rate limits, `/api/auth/*` and every path, and the blocked-requests alarm |
-| `auth.tf` | With `auth_enabled` (P3): the user table (`auth-kit`'s single table: PITR, TTL on `ttl`, deletion protection), the API Lambda (stub code, which CI replaces) and its Function URL, its runtime secret (the code and session keys and the origin secret, `random_password`s written write-only), its role (`auth-kit`'s actions on the table, SES as `no-reply@` only, its two secrets, its log group), SES (configuration set, DKIM, MAIL FROM, DMARC), and the API-error, bounce, complaint and `auth.locked` alarms |
+| `auth.tf` | With `auth_enabled` (P3): the user table (`auth-kit`'s single table: PITR, TTL on `ttl`, deletion protection), the API Lambda (stub code, which CI replaces) and its Function URL, its runtime secret (the code and session keys and the origin secret, `random_password`s written write-only), its role (`auth-kit`'s actions on the table, SES as `no-reply@` only, its two secrets, its log group), SES (configuration set, DKIM, MAIL FROM, DMARC), and the API-error, bounce, complaint, `auth.locked`, `auth.slow`, direct-call (no origin secret) and run-count alarms. `api_reserved_concurrency` is required once `lambda_account_concurrency_limit` is raised |
 | `dws.tf` | With `dws_enabled` (P4): the DWS store's bucket (versioned, old versions kept 30 days; CloudFront may read `serve/dws/*` only), the pipeline Lambda (stub code, which CI replaces; no async retries; a DLQ), its role (its bucket prefixes, the lease key, the DWS API key secret, its log group, its metric namespace; no delete), the empty DWS API key secret, the daily EventBridge rule (DISABLED until `dws_schedule_enabled`), and the lag (with the schedule), stopped, failed and DLQ alarms |
 | `dws_backfill.tf` | With `dws_enabled`: the Step Functions backfill over date windows (`tools/dws-backfill-plan.mjs`), one at a time with a pause, never retrying a refusal, and its failed-execution alarm |
 | `outputs.tf` | `site_bucket` and `distribution_id`, which `tools/deploy.sh` reads; `users_table` and `auth_runtime_secret_arn`, which the operator tools read; `dws_bucket`, which `tools/dws-stations.sh` reads, and `dws_backfill_state_machine_arn`; and the rest the operator needs |
@@ -97,6 +97,26 @@ gh api repos/Absence0760/ewr-compliance/environments/production/deployment-branc
 ```
 
 It should list `branch main`, `tag api@*` and `tag pipeline@*`. If stage 4's environment update cleared them, add each back: `gh api -X POST repos/Absence0760/ewr-compliance/environments/production/deployment-branch-policies -f name='api@*' -f type=tag` (and the same for `main` with `type=branch`, and `pipeline@*`).
+
+Three more settings, set 2026-11-07 after the pre-deploy review, which keep one stolen GitHub login from deploying its own API code. Stage 4 may write the environment again, so check them too:
+
+```
+gh api repos/Absence0760/ewr-compliance/environments/production --jq .can_admins_bypass
+```
+
+It should print `false`: an admin can't skip the deploy approval.
+
+```
+gh api repos/Absence0760/ewr-compliance/rulesets --jq '.[] | select(.target == "tag") | .name'
+```
+
+It should print `release-tags`: only an admin creates, moves or deletes an `api@*` or `pipeline@*` tag.
+
+```
+gh api repos/Absence0760/ewr-compliance/actions/permissions --jq .sha_pinning_required
+```
+
+It should print `true`: a workflow can't use an action by tag or branch.
 
 **H4. Enable af-south-1** for the new account, from the management account, then check it reads `ENABLED` (it takes a few minutes). The management account can change another account's regions only once trusted access for AWS Account Management is on in the organisation. Turn it on once (it is harmless if it already is):
 
@@ -372,4 +392,4 @@ Add the new public key to `cloudfront_public_keys` under a new name, keep the ol
 
 ## Costs
 
-About $11–13 a month in all once P3 and P4 are in: WAF about $7, Secrets Manager $0.40 a secret (the signing key, the API's runtime secret and the DWS API key), the sops key $1, alarms about $0.10 each past the free ten, Route 53 $0.50 for the zone. The budgets are free (two an account).
+About $11–13 a month in all once P3 and P4 are in: WAF about $7, Secrets Manager $0.40 a secret (the signing key, the API's runtime secret and the DWS API key), the sops key $1, alarms about $0.10 each past the free ten (the API's two flood alarms among them), Route 53 $0.50 for the zone. The budgets are free (two an account).

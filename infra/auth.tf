@@ -460,6 +460,62 @@ resource "aws_cloudwatch_metric_alarm" "api_errors" {
   }
 }
 
+# The Function URL is public and skips the WAF, so a flood sent straight to it
+# is a billed run and a log line per request, which the budgets report only a
+# day later. Two prompt signals: any call without CloudFront's origin secret
+# (only someone who found the URL sends one; the Deploy readiness check of
+# docs/hosting.md sends one on purpose), and a run count no handful of users
+# reaches.
+resource "aws_cloudwatch_log_metric_filter" "api_origin_secret_rejected" {
+  count          = local.auth
+  name           = "${local.project}-api-origin-secret-rejected"
+  log_group_name = aws_cloudwatch_log_group.api[0].name
+  pattern        = "\"api.origin_secret_rejected\""
+
+  metric_transformation {
+    name          = "ApiOriginSecretRejected"
+    namespace     = local.project
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "api_origin_secret_rejected" {
+  count               = local.auth_alarms
+  alarm_name          = "${local.project}-api-direct-calls"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ApiOriginSecretRejected"
+  namespace           = local.project
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 1
+  alarm_description   = "The sign-in API's Function URL was called without CloudFront's origin secret: someone has the URL and is calling it directly, past the WAF. Each call is refused (404) but billed. Expected once, from the Deploy readiness check (docs/hosting.md). If it keeps firing, see docs/hosting.md, \"If the API is flooded\"."
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  treat_missing_data  = "notBreaching"
+
+  depends_on = [aws_cloudwatch_log_metric_filter.api_origin_secret_rejected]
+}
+
+resource "aws_cloudwatch_metric_alarm" "api_invocations" {
+  count               = local.auth_alarms
+  alarm_name          = "${local.project}-api-invocations"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Invocations"
+  namespace           = "AWS/Lambda"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = var.api_invocations_alarm_per_5min
+  alarm_description   = "The sign-in API ran more than ${var.api_invocations_alarm_per_5min} times in 5 minutes, far past a handful of users. With ${local.project}-api-direct-calls, someone is calling the Function URL directly; without it, through the site (the WAF's sampled requests, us-east-1, say from where). See docs/hosting.md, \"If the API is flooded\"."
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    FunctionName = aws_lambda_function.api[0].function_name
+  }
+}
+
 resource "aws_cloudwatch_metric_alarm" "ses_bounce_rate" {
   count               = local.auth_alarms
   alarm_name          = "${local.project}-ses-bounce-rate"
