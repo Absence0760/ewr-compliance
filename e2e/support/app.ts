@@ -123,6 +123,14 @@ export async function serveStore(page: Page, files: Record<string, unknown>): Pr
 export const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
 
 export const mapRegion = (page: Page) => page.getByRole('region', { name: 'Map of EWR nodes and sites' });
+export const nationalMap = (page: Page) => page.getByRole('region', { name: 'Map of Water Management Areas' });
+
+/**
+ * Wait until a map (`mapRegion` or `nationalMap`) is drawn and every live layer has answered, loaded or
+ * lost: its canvas is `aria-busy` until then. What a test waits on before saying nothing more went wrong.
+ * Not network idle, which a request MapLibre's worker leaves unfinished, when its map goes, can hold off for good.
+ */
+export const mapSettled = (region: Locator) => expect(region.locator('[aria-busy]')).toHaveAttribute('aria-busy', 'false');
 export const panel = (page: Page) => page.getByRole('complementary', { name: 'Compliance' });
 export const select = (scope: Page | Locator, name: string | RegExp) => scope.getByRole('combobox', { name });
 
