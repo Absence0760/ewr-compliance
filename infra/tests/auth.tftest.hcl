@@ -474,6 +474,41 @@ run "alarms" {
     condition     = aws_cloudwatch_log_metric_filter.auth_slow[0].pattern == "\"auth.slow\"" && aws_cloudwatch_metric_alarm.auth_slow[0].alarm_actions == toset(["arn:aws:sns:af-south-1:000000000000:ewr-compliance-prod-alerts"])
     error_message = "auth.slow (a sign-in step past its timing floor) is counted and alarmed."
   }
+  assert {
+    condition = (
+      aws_cloudwatch_log_metric_filter.api_origin_secret_rejected[0].pattern == "\"api.origin_secret_rejected\"" &&
+      aws_cloudwatch_log_metric_filter.api_origin_secret_rejected[0].log_group_name == "/aws/lambda/ewr-compliance-api" &&
+      aws_cloudwatch_metric_alarm.api_origin_secret_rejected[0].threshold == 1 &&
+      aws_cloudwatch_metric_alarm.api_origin_secret_rejected[0].comparison_operator == "GreaterThanOrEqualToThreshold"
+    )
+    error_message = "A single call to the Function URL without the origin secret alarms."
+  }
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.api_invocations[0].metric_name == "Invocations" &&
+      aws_cloudwatch_metric_alarm.api_invocations[0].threshold == 1000 &&
+      aws_cloudwatch_metric_alarm.api_invocations[0].dimensions.FunctionName == "ewr-compliance-api"
+    )
+    error_message = "The API's run count over 5 minutes alarms past api_invocations_alarm_per_5min (1000)."
+  }
+  assert {
+    condition = alltrue([for a in [aws_cloudwatch_metric_alarm.api_origin_secret_rejected[0], aws_cloudwatch_metric_alarm.api_invocations[0]] :
+    a.alarm_actions == toset(["arn:aws:sns:af-south-1:000000000000:ewr-compliance-prod-alerts"])])
+    error_message = "The two flood alarms page through the regional topic."
+  }
+}
+
+run "no_alarms_when_alarms_are_off" {
+  command = plan
+  variables {
+    site_enabled   = true
+    auth_enabled   = true
+    alarms_enabled = false
+  }
+  assert {
+    condition     = length(aws_cloudwatch_metric_alarm.api_origin_secret_rejected) == 0 && length(aws_cloudwatch_metric_alarm.api_invocations) == 0
+    error_message = "alarms_enabled = false creates neither flood alarm."
+  }
 }
 
 run "two_keys_need_a_signer" {
@@ -538,6 +573,28 @@ run "refuses_a_reservation_on_a_new_accounts_limit" {
     api_reserved_concurrency = 5
   }
   expect_failures = [var.api_reserved_concurrency]
+}
+
+run "refuses_a_raised_limit_with_no_cap" {
+  command = plan
+  variables {
+    site_enabled                     = true
+    auth_enabled                     = true
+    lambda_account_concurrency_limit = 1000
+  }
+  expect_failures = [var.api_reserved_concurrency]
+}
+
+run "a_raised_limit_needs_no_cap_without_the_api" {
+  command = plan
+  variables {
+    site_enabled                     = true
+    lambda_account_concurrency_limit = 1000
+  }
+  assert {
+    condition     = length(aws_lambda_function.api) == 0
+    error_message = "Without auth_enabled there is no API to cap, so a raised limit plans."
+  }
 }
 
 run "refuses_a_reservation_into_the_unreserved_100" {

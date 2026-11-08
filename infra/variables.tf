@@ -292,7 +292,7 @@ variable "api_log_retention_days" {
 }
 
 variable "api_reserved_concurrency" {
-  description = "Reserved concurrency for the API, which also caps it. null (the default) reserves none: a new account's limit can be 10, all of which must stay unreserved. Set it (5 is plenty) once the account's limit is raised."
+  description = "Reserved concurrency for the API, which also caps it. null (the default) reserves none: a new account's limit can be 10, all of which must stay unreserved. Required (5 is plenty) once the account's limit is raised and lambda_account_concurrency_limit says so: the plan refuses a raised limit with no cap."
   type        = number
   default     = null
 
@@ -308,6 +308,25 @@ variable "api_reserved_concurrency" {
   validation {
     condition     = var.api_reserved_concurrency == null ? true : var.lambda_account_concurrency_limit - var.api_reserved_concurrency >= 100
     error_message = "api_reserved_concurrency leaves the account fewer than the 100 unreserved executions Lambda keeps for the other functions (the DWS pipeline). Raise the account's Lambda concurrency limit (Service Quotas, \"Concurrent executions\"), set lambda_account_concurrency_limit to the new value (aws lambda get-account-settings), then set api_reserved_concurrency = 5."
+  }
+
+  # The other way round: once the account's limit is raised, the API must be
+  # capped, or a flood of its public Function URL (which skips the WAF) can run
+  # as many copies at once as the new limit allows, each billed.
+  validation {
+    condition     = !var.auth_enabled || var.lambda_account_concurrency_limit <= 10 || var.api_reserved_concurrency != null
+    error_message = "lambda_account_concurrency_limit is raised but the API has no cap: set api_reserved_concurrency = 5 in the same apply, so a flood of its Function URL can't run more than 5 at once."
+  }
+}
+
+variable "api_invocations_alarm_per_5min" {
+  description = "Alarm when the sign-in API runs more than this many times in 5 minutes. A signed-in person makes a few calls a page and one renewal every 15 minutes, so 1000 is many times a busy 5 minutes for a handful of users."
+  type        = number
+  default     = 1000
+
+  validation {
+    condition     = var.api_invocations_alarm_per_5min >= 100 && var.api_invocations_alarm_per_5min <= 100000
+    error_message = "Between 100 and 100000."
   }
 }
 
