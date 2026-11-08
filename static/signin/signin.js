@@ -3,6 +3,14 @@
 // /signin/, the one path outside the sign-in). The API is server/src/app.ts.
 import { safeNext } from '/signin/next.js';
 
+// Framed by another page, the sign-in refuses to run, before anything is wired: CloudFront serves this
+// page for its own 403 without the frame-ancestors header (docs/hosting.md § Headers), so this is the
+// guard there. Hidden, so nothing in it can be clicked through an overlay.
+if (window.top !== window.self) {
+	document.documentElement.hidden = true;
+	throw new Error('The sign-in page refuses to run in a frame.');
+}
+
 const $ = (id) => document.getElementById(id);
 const emailStep = $('email-step');
 const codeStep = $('code-step');
