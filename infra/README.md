@@ -207,7 +207,7 @@ From the repo root. `<domain>` is `domain_name`; `<key-id>` is the key's entry i
 AWS_PROFILE=ewr-compliance terraform -chdir=infra output signing_public_key_ids
 ```
 
-An unsigned request is sent to sign-in, and the app's own fetch gets 401:
+An unsigned request gets CloudFront's 403 with the sign-in page as its body, with or without the app's header (CloudFront checks the signature before the edge function runs; the app reads the 403 as signed out). Both print `403`, and the first no `location`:
 
 ```
 curl -sI https://<domain>/data/index.json | grep -iE '^(HTTP|location)'
@@ -232,7 +232,7 @@ rm -f "${XDG_RUNTIME_DIR:-/dev/shm}/ewr-cf-signing.key"
 The same with `https://<domain>/nodes` gives 301 to `/nodes/`, and `https://<domain>/nodes/` gives 200. The map's worker is served as JavaScript:
 
 ```
-aws s3api list-objects-v2 --bucket "$(AWS_PROFILE=ewr-compliance terraform -chdir=infra output -raw site_bucket)" --prefix _app/immutable/workers/ --profile ewr-compliance --query 'Contents[].Key' --output text
+aws s3api list-objects-v2 --bucket "$(AWS_PROFILE=ewr-compliance terraform -chdir=infra output -raw site_bucket)" --prefix _app/immutable/assets/ --profile ewr-compliance --query 'Contents[].Key' --output text
 ```
 
 ```
@@ -241,7 +241,7 @@ aws s3api head-object --bucket "$(AWS_PROFILE=ewr-compliance terraform -chdir=in
 
 It should print `text/javascript` and the immutable cache line.
 
-**Check this first time, and say what it showed:** whether CloudFront runs the viewer-request function before it checks the signature on a trusted-key-group behaviour. AWS's documentation doesn't say. If it checks first, the unsigned curl above gets 403 with the sign-in page (the custom error response) rather than 302: still closed, and still leading to sign-in, but the `?next=` and the 401 JSON don't happen. The sign-in page copes either way: served for a 403, it takes the address it was served at as where to go next. Also look at that 403's headers (`curl -sI` on the unsigned path): a viewer-response function doesn't run on it, so it carries none of the security headers, and if every signed-out visit gets it, the sign-in page needs its frame guard (`docs/hosting.md` § Headers, Where a function doesn't reach).
+**What the first deploy showed (2026-11-08):** CloudFront checks the signature on a trusted-key-group behaviour *before* it runs the viewer-request function, which AWS's documentation doesn't say. So a signed-out request gets 403 with the sign-in page (the custom error response), never the function's 302 or 401 JSON: still closed, and still leading to sign-in. The sign-in page, served for a 403, takes the address it was served at as where to go next; the app's own fetches read a 403 as signed out, as a 401 (`src/lib/users/siteFetch.ts`); and the 403 carries none of the security headers, so the sign-in page's own frame guard is what keeps it from being framed (`docs/hosting.md` § Headers, Where a function doesn't reach). If a later deploy shows a 302 instead, CloudFront has changed the order: say so, as the app copes with both.
 
 **H0. Read access to `auth-kit`.** CI's `server` job, `deploy-lambdas.yml` and Dependabot's `server/` updates all install the private auth-kit, through the secret `AUTH_KIT_READ_TOKEN`. **One token serves every repo that installs auth-kit** (this one and pitman): Absence0760/auth-kit#2 is the one procedure, and its boxes are where each step is ticked. Claude never handles the token; each `gh secret set` prompts you for it.
 

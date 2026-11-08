@@ -64,8 +64,8 @@ const gauges = (at: [number, number]) => ({
 export const test = base.extend<{ gaugeAt: [number, number]; refused: RegExp | null; watch: void }>({
 	gaugeAt: [[21.47, -33.55], { option: true }],
 	/**
-	 * Files of the site a spec answers with the edge's 401, as for an expired sign-in
-	 * (`test.use({ refused })`): the watch lets a 401 for these by, and nothing else.
+	 * Files of the site a spec refuses, as for an expired sign-in (`test.use({ refused })`): the watch lets
+	 * a 401 (the edge's) or a 403 (CloudFront's) for these by, and nothing else.
 	 */
 	refused: [null, { option: true }],
 	watch: [
@@ -84,10 +84,10 @@ export const test = base.extend<{ gaugeAt: [number, number]; refused: RegExp | n
 			);
 			await page.route(USER_API, (route) => route.fulfill({ status: 404, body: 'Not found' }));
 			await page.route(DWS_STORE, (route) => route.fulfill({ status: 404, body: 'Not found' }));
-			const wasRefused = (url: string, status = 401) => status === 401 && !!refused?.test(url);
+			const wasRefused = (url: string, status = 401) => (status === 401 || status === 403) && !!refused?.test(url);
 			page.on('console', (m) => {
 				if (DWS_STORE.test(m.location().url) || USER_API.test(m.location().url)) return;
-				if (wasRefused(m.location().url) && /status of 401/.test(m.text())) return;
+				if (wasRefused(m.location().url) && /status of 40[13]/.test(m.text())) return;
 				if ((m.type() === 'error' || m.type() === 'warning') && !KNOWN_NOISE.some((re) => re.test(m.text()))) {
 					trouble.push(`console.${m.type()}: ${m.text()}`);
 				}

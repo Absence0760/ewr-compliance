@@ -502,16 +502,17 @@ run "dws_behaviour_is_signed_and_reads_serve_only" {
     error_message = "The store's origin is its bucket through OAC, with origin_path /serve."
   }
   assert {
-    condition = [for s in data.aws_iam_policy_document.dws_bucket[0].statement : s.resources if s.effect != "Deny"] == [
-      toset(["arn:aws:s3:::ewr-compliance-dws-000000000000/serve/dws/*"])
-    ]
-    error_message = "CloudFront may read serve/dws/* only: never the station list, the raw pages, the status or the lease."
+    condition = { for s in data.aws_iam_policy_document.dws_bucket[0].statement : s.sid => [s.actions, s.resources] if s.effect != "Deny" } == {
+      AllowCloudFrontReadServe = [toset(["s3:GetObject"]), toset(["arn:aws:s3:::ewr-compliance-dws-000000000000/serve/dws/*"])]
+      AllowCloudFrontList      = [toset(["s3:ListBucket"]), toset(["arn:aws:s3:::ewr-compliance-dws-000000000000"])]
+    }
+    error_message = "CloudFront may read serve/dws/* only (never the station list, the raw pages, the status or the lease), and list the bucket only so a missing store file is a 404, not a 403 that reads as signed out."
   }
   assert {
     condition = alltrue([for s in data.aws_iam_policy_document.dws_bucket[0].statement :
-      s.actions == toset(["s3:GetObject"]) && one(s.condition).variable == "AWS:SourceArn" &&
+      one(s.condition).variable == "AWS:SourceArn" &&
     one(one(s.condition).values) == "arn:aws:cloudfront::000000000000:distribution/EDISTTEST" if s.effect != "Deny"])
-    error_message = "GetObject only, for this distribution only."
+    error_message = "For this distribution only."
   }
 }
 

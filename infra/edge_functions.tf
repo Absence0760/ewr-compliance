@@ -11,9 +11,11 @@
 #      signed URL (Key-Pair-Id, Signature, and an Expires or Policy still in
 #      the future), which is how the operator checks the gate before P3. That is a courtesy
 #      check, for a clean sign-in redirect: it does not verify the signature.
-#      CloudFront does, against the key group (trusted_key_groups), and a
-#      cookie that passes here but fails there gets CloudFront's 403, which
-#      site.tf's custom error response turns into the sign-in page.
+#      CloudFront does, against the key group (trusted_key_groups), and it
+#      does so before this function runs: on the first deploy (2026-11-08) an
+#      unsigned request got CloudFront's 403, which site.tf's custom error
+#      response turns into the sign-in page, and never reached this branch.
+#      The app reads that 403 as signed out (src/lib/users/siteFetch.ts).
 #   2. A dot segment (/./, /../) or an empty one (//) gets 404, so no path
 #      resolves to the bucket root, where ListBucket would list, and no folder
 #      redirect can name another host (//evil.example/x → Location: //evil…).
@@ -189,7 +191,7 @@ resource "aws_cloudfront_function" "site_request" {
 #   - site_request's own answers set the site's headers themselves (above);
 #   - the API sets its four on every answer, refusals included
 #     (server/src/http.ts BASE_HEADERS);
-#   - left without them: S3's own 404 (and the store's 403) XML error bodies,
+#   - left without them: S3's own 404 XML error bodies,
 #     the sign-in page CloudFront serves for its own 403 (a cookie whose
 #     signature fails; site.tf custom_error_response), WAF's 429 JSON and
 #     CloudFront's own 5xx. The policies covered those. What it costs:
