@@ -25,14 +25,17 @@
 # https://<domain>/* with the private key in the signing-key secret below,
 # and sets CloudFront-Policy, CloudFront-Signature and CloudFront-Key-Pair-Id.
 # CloudFront checks the signature against the key group's public keys
-# (var.cloudfront_public_keys); the edge function only reads the policy's
-# expiry, to send an expired or absent session to sign-in rather than a bare
-# 403. It never decides access: the signature check does.
+# (var.cloudfront_public_keys) before the edge function runs (seen on the
+# first deploy, 2026-11-08): a request without valid live cookies gets
+# CloudFront's 403, which the custom error response below turns into the
+# sign-in page, and the app reads a 403 as signed out (src/lib/users/
+# siteFetch.ts). The edge function's own 302 and 401 for an expired or absent
+# session are kept for a behaviour that reaches it unsigned; it never decides
+# access: the signature check does.
 #
-# A missing object: the bucket policy grants ListBucket, so S3 answers 404, not
-# 403, and a CloudFront 403 always means "not signed" (the custom error
-# response below turns it into the sign-in page). Under /dws/ alone a missing
-# file is a 403 too: CloudFront may not list the store (dws.tf).
+# A missing object: both bucket policies grant ListBucket, so S3 answers 404,
+# not 403, and a CloudFront 403 always means "not signed", under /dws/ too
+# (dws.tf).
 # ----------------------------------------------------------------------------
 
 locals {

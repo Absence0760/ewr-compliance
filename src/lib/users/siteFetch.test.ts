@@ -36,11 +36,39 @@ describe('siteFetch', () => {
 	});
 
 	it('answers any other status as fetch does, without asking the session', async () => {
-		answers = [404];
-		expect((await siteFetch('dws/index.json')).status).toBe(404);
-		answers = [403];
-		expect((await siteFetch('data/x.json')).status).toBe(403);
+		for (const status of [404, 429, 500, 502]) {
+			answers = [status];
+			expect((await siteFetch('dws/index.json')).status).toBe(status);
+		}
 		expect(unauthorized).not.toHaveBeenCalled();
+	});
+
+	// What the hosted site actually answers for lapsed cookies: CloudFront checks them before the edge
+	// function runs, so its 403 (the sign-in page as the body) comes first. A missing file is a 404.
+	it('on a 403 renews the cookies once and tries again, as for a 401', async () => {
+		answers = [403, 200];
+		const res = await siteFetch('data/gauges.json');
+		expect(res.status).toBe(200);
+		expect(unauthorized).toHaveBeenCalledTimes(1);
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(refused).not.toHaveBeenCalled();
+	});
+
+	it('throws SignedOut on a 403 when the session cannot renew the cookies', async () => {
+		unauthorized.mockResolvedValue(false);
+		answers = [403];
+		await expect(siteFetch('dws/index.json')).rejects.toBeInstanceOf(SignedOut);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(refused).not.toHaveBeenCalled();
+	});
+
+	it('sends the person to sign in when a 403 outlasts a renewal, whichever refusal came first', async () => {
+		answers = [401, 403];
+		await expect(siteFetch('data/index.json')).rejects.toBeInstanceOf(SignedOut);
+		expect(refused).toHaveBeenCalledTimes(1);
+		answers = [403, 401];
+		await expect(siteFetch('data/index.json')).rejects.toBeInstanceOf(SignedOut);
+		expect(refused).toHaveBeenCalledTimes(2);
 	});
 
 	it('on a 401 renews the cookies once and tries again', async () => {

@@ -5,8 +5,8 @@
 // the app is open the session renews them: every REFRESH_MS, and when the tab comes back after a
 // while (a laptop asleep past the 15 minutes). A refresh also re-checks the list, so a removed user
 // is sent to sign in. A 401 from the API means the session is over: the person goes to
-// signin/?next=<here>. A 401 for a file (the edge's answer when only the file cookies ran out) gets one
-// refresh first, through unauthorized(): every file fetch goes through siteFetch, which calls it.
+// signin/?next=<here>. A 403 or 401 for a file (CloudFront's answer when only the file cookies ran out)
+// gets one refresh first, through unauthorized(): every file fetch goes through siteFetch, which calls it.
 import { refresh, signinUrl, whenSignedOut, whoAmI, type Me } from '#lib/users/api.ts';
 import { whenUnauthorized } from '#lib/users/siteFetch.ts';
 
@@ -25,7 +25,7 @@ class Session {
 	#last = 0;
 	#timer: ReturnType<typeof setInterval> | null = null;
 	#retry: ReturnType<typeof setTimeout> | null = null;
-	/** The refresh a file's 401 started, shared by every fetch refused meanwhile. */
+	/** The refresh a file's refusal started, shared by every fetch refused meanwhile. */
 	#renewing: Promise<boolean> | null = null;
 
 	async check() {
@@ -56,7 +56,7 @@ class Session {
 	}
 
 	/**
-	 * For a fetch that got 401: one refresh, then sign-in. True when the caller may try again. Before the
+	 * For a fetch that got 401 or 403: one refresh, then sign-in. True when the caller may try again. Before the
 	 * session is known (a file refused as the app starts), or where there is none, straight to sign-in:
 	 * the sign-in page lets a live session back in without a code. Fetches refused together share one refresh.
 	 */

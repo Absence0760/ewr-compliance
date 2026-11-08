@@ -2,8 +2,8 @@
 // changed by its admins. A copy served without it, such as `pnpm dev` or `pnpm preview`, has no
 // list: /api/me answers 404 there, and the app then offers no user page.
 import { resolve } from '$app/paths';
-// XHR is sent on every call: the edge answers a request whose file cookies have run out with 401 JSON
-// rather than a redirect to the sign-in page (infra/edge_functions.tf). SignedOut is what a 401 throws.
+// XHR is sent on every call, as on the site's file fetches (siteFetch.ts). The API answers a request
+// without a live session with 401 JSON itself, never 403 (server/src/http.ts). SignedOut is what a 401 throws.
 import { SignedOut, XHR } from '#lib/users/siteFetch.ts';
 
 export { SignedOut };

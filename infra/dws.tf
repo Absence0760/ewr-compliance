@@ -128,11 +128,16 @@ resource "aws_s3_bucket_lifecycle_configuration" "dws" {
 }
 
 # CloudFront may read serve/dws/* and nothing else: not the station list, the
-# raw pages, the status or the lease. No ListBucket for it, so a missing file is
-# S3's 403, which the distribution's custom error response answers with the
-# sign-in page, as for an unsigned request; the app reads any failure of
-# dws/index.json as "no store" with its status (src/lib/ewr/dwsStore.ts).
-# The pipeline's own role grants are in its policy below, not here.
+# raw pages, the status or the lease. ListBucket makes a missing file there a
+# 404, as on the site's bucket: a 403 would get the sign-in page (the custom
+# error response) and read as signed out (src/lib/users/siteFetch.ts), which
+# a store still filling up must not do. It can't list or reveal anything
+# outside serve/dws/: /dws/* is the only path to this origin, its origin path
+# puts every key under serve/dws/, the edge function refuses dot and empty
+# segments, and the behaviour forwards no query string (site.tf). The app
+# reads any failure of dws/index.json as "no store" with its status
+# (src/lib/ewr/dwsStore.ts). The pipeline's own role grants are in its policy
+# below, not here.
 data "aws_iam_policy_document" "dws_bucket" {
   count = local.dws
 
@@ -142,6 +147,24 @@ data "aws_iam_policy_document" "dws_bucket" {
       sid       = "AllowCloudFrontReadServe"
       actions   = ["s3:GetObject"]
       resources = ["${aws_s3_bucket.dws[0].arn}/serve/dws/*"]
+      principals {
+        type        = "Service"
+        identifiers = ["cloudfront.amazonaws.com"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "AWS:SourceArn"
+        values   = [aws_cloudfront_distribution.site[0].arn]
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.site_enabled ? [1] : []
+    content {
+      sid       = "AllowCloudFrontList"
+      actions   = ["s3:ListBucket"]
+      resources = [aws_s3_bucket.dws[0].arn]
       principals {
         type        = "Service"
         identifiers = ["cloudfront.amazonaws.com"]
