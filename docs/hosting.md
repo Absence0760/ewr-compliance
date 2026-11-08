@@ -207,7 +207,7 @@ The operator's steps from nothing to live, in the order they must run. The numbe
 
 | Step | What | Flags in `prod.tfvars` afterwards |
 |---|---|---|
-| H0 | Read access to `auth-kit`: the fine-grained token as the Actions and Dependabot secret `AUTH_KIT_READ_TOKEN`. Needed before CI can build `server/` and before H9 | all off |
+| H0 | Read access to `auth-kit`: one fine-grained token, shared with pitman (Absence0760/auth-kit#2), as this repo's Actions and Dependabot secret `AUTH_KIT_READ_TOKEN`; steps, checks and rotation in `infra/README.md`. Needed before CI can build `server/` and before H9 | all off |
 | H1 | `infra-secrets/ewr-compliance/bootstrap.tfvars`, committed and pushed | — |
 | before H2 | Once a workstation: the `mgmt` and `dns-parent` SSO profiles in `~/.aws/config` (`aws configure sso`, Runbook D), `dns-parent` on the parent zone's account | — |
 | H2 | `aws sso login` as `mgmt` and `dns-parent` | — |

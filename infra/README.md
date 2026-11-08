@@ -222,17 +222,40 @@ It should print `text/javascript` and the immutable cache line.
 
 **Check this first time, and say what it showed:** whether CloudFront runs the viewer-request function before it checks the signature on a trusted-key-group behaviour. AWS's documentation doesn't say. If it checks first, the unsigned curl above gets 403 with the sign-in page (the custom error response) rather than 302: still closed, and still leading to sign-in, but the `?next=` and the 401 JSON don't happen. The sign-in page copes either way: served for a 403, it takes the address it was served at as where to go next.
 
-**H0. Read access to `auth-kit`** (before P3 can be built in CI). As Absence0760/auth-kit#2 says: one fine-grained token limited to `Absence0760/auth-kit`, Contents: Read-only, with its expiry written down, stored in this repo as the Actions secret **and** the Dependabot secret `AUTH_KIT_READ_TOKEN`. Each command prompts for the value:
+**H0. Read access to `auth-kit`.** CI's `server` job, `deploy-lambdas.yml` and Dependabot's `server/` updates all install the private auth-kit, through the secret `AUTH_KIT_READ_TOKEN`. **One token serves every repo that installs auth-kit** (this one and pitman): Absence0760/auth-kit#2 is the one procedure, and its boxes are where each step is ticked. Claude never handles the token; each `gh secret set` prompts you for it.
+
+1. **The token, once for every consumer.** If pitman already made it, take it from Bitwarden (the entry "GitHub token: auth-kit read") and go to step 2. Otherwise, at https://github.com/settings/personal-access-tokens/new: token name `auth-kit read (CI + Dependabot)`; resource owner `Absence0760`; expiration custom, about a year out; repository access **Only select repositories**, `Absence0760/auth-kit`; repository permissions **Contents: Read-only** (GitHub adds Metadata: Read-only), nothing else. Generate it, and save it in Bitwarden as "GitHub token: auth-kit read" with the expiry date in the note. Add a calendar reminder to rotate it two weeks before.
+2. Store it as this repo's Actions secret (paste at the hidden prompt):
 
 ```
-gh secret set AUTH_KIT_READ_TOKEN --repo Absence0760/ewr-compliance --app actions
+gh secret set AUTH_KIT_READ_TOKEN --app actions -R Absence0760/ewr-compliance
+```
+
+3. And as its Dependabot secret, the same way:
+
+```
+gh secret set AUTH_KIT_READ_TOKEN --app dependabot -R Absence0760/ewr-compliance
+```
+
+4. Check both exist (names only, never the value): each list shows `AUTH_KIT_READ_TOKEN`.
+
+```
+gh secret list --app actions -R Absence0760/ewr-compliance
 ```
 
 ```
-gh secret set AUTH_KIT_READ_TOKEN --repo Absence0760/ewr-compliance --app dependabot
+gh secret list --app dependabot -R Absence0760/ewr-compliance
 ```
 
-Until it is set, CI's `server` job warns and passes, and `deploy-lambdas.yml` fails at its preflight.
+5. Check CI can use it: run CI on `main` and look at the `Server (typecheck, tests, bundle)` job. It should install, test and bundle, not warn that the secret is unavailable.
+
+```
+gh workflow run ci.yml --ref main -R Absence0760/ewr-compliance
+```
+
+Tick each box on auth-kit#2 as you go. Until the secret is set, CI's `server` job warns and passes, `deploy-lambdas.yml` fails at its preflight, and Dependabot's `server/` job fails with "Secret Not Found".
+
+**Rotating it** (before the expiry, or at once if it may have leaked): make a new token as in step 1, set it in every consumer's two secrets (steps 2 and 3 here, and pitman's), check (steps 4 and 5), then delete the old token on GitHub and update Bitwarden. Revoke first if it leaked: the jobs fail until the new one is set, which is the safe way round.
 
 **H8. Sign-in (P3): apply, then SES production access.** Set `auth_enabled = true` in `prod.tfvars`, then plan and apply as in H6. That makes the table, the API (answering 503 until its code is deployed, H10), its runtime secret and SES. Then check that the domain identity's DKIM is verified (it takes up to a day after the records exist):
 
