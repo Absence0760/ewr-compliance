@@ -1,4 +1,4 @@
-import { MAP, expect, findNode, mapRegion, panel, select, test } from '../support/app.ts';
+import { MAP, expect, findNode, mapRegion, mapSettled, nationalMap, panel, select, test } from '../support/app.ts';
 
 // The opening screen: a banner, South Africa's WMAs on a map, and the same WMAs as links.
 const chooser = (page: import('@playwright/test').Page) => page.getByRole('navigation', { name: 'Water Management Areas' });
@@ -10,7 +10,7 @@ test.describe('choosing a Water Management Area', () => {
 		// One title, in the banner: the app bar leaves its own out on this page.
 		await expect(page.getByRole('heading', { level: 1 })).toHaveText('EWR Compliance Measurement');
 		await expect(page.getByRole('banner').getByRole('heading')).toHaveCount(0);
-		await expect(page.getByRole('region', { name: 'Map of Water Management Areas' }).locator('canvas.maplibregl-canvas')).toBeVisible();
+		await expect(nationalMap(page).locator('canvas.maplibregl-canvas')).toBeVisible();
 		const links = chooser(page).getByRole('link');
 		await expect(links).toHaveText([
 			/^Limpopo-Olifants\s*No EWR data yet$/,
@@ -21,13 +21,13 @@ test.describe('choosing a Water Management Area', () => {
 			// Every node of the sample: 5 in Gouritz, 2 in Berg, 1 each in Breede and Olifants-Doring.
 			/^Breede-Olifants\s*9 EWR nodes$/
 		]);
-		await page.waitForLoadState('networkidle');
+		await mapSettled(nationalMap(page));
 		await expect(page.getByRole('alert')).toHaveCount(0);
 	});
 
 	test('the national map names each WMA, and marks the one in focus in the list', async ({ page }) => {
 		await page.goto('/');
-		const national = page.getByRole('region', { name: 'Map of Water Management Areas' });
+		const national = nationalMap(page);
 		const names = ['Limpopo-Olifants', 'Inkomati-Usuthu', 'Pongola-Mtamvuna', 'Vaal-Orange', 'Mzimvubu-Tsitsikamma', 'Breede-Olifants'];
 		for (const name of names) await expect(national.getByText(name, { exact: true })).toBeVisible();
 		// Not WMAs, and named for orientation: in grey, and not in the list.
@@ -65,7 +65,7 @@ test.describe('choosing a Water Management Area', () => {
 		await expect(select(map, 'Zoom to a basin')).toHaveCount(0);
 		await expect(map.getByRole('checkbox', { name: 'Rivers' })).toBeChecked();
 		await expect(panel(page).getByRole('heading', { name: 'Vaal-Orange' })).toBeVisible();
-		await page.waitForLoadState('networkidle');
+		await mapSettled(map);
 		await expect(map.getByRole('alert')).toHaveCount(0);
 	});
 
@@ -73,8 +73,10 @@ test.describe('choosing a Water Management Area', () => {
 		await page.route(/\/WMA_2023\//, (route) => route.fulfill({ json: { error: { code: 500, message: 'down' } } }));
 		await page.goto('/');
 		await expect(page.getByRole('alert')).toHaveText('Water Management Areas could not be loaded from the DWS service. Choose one from the list.');
+		// A lost layer has answered too: the map is no longer busy.
+		await mapSettled(nationalMap(page));
 		// No names over a map with no outlines.
-		await expect(page.getByRole('region', { name: 'Map of Water Management Areas' }).getByText('Vaal-Orange', { exact: true })).toHaveCount(0);
+		await expect(nationalMap(page).getByText('Vaal-Orange', { exact: true })).toHaveCount(0);
 		await chooser(page).getByRole('link', { name: /Breede-Olifants/ }).click();
 		await expect(page).toHaveURL(new RegExp(`/${MAP}$`));
 	});

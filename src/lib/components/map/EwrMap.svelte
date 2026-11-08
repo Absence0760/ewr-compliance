@@ -71,6 +71,8 @@
 	let showBasemap = $state(true);
 	let basemapFailed = $state(false);
 	let lostLive = $state.raw<string[]>([]);
+	/** Live layers asked for and not yet answered, loaded or lost. */
+	let pendingLive = $state(0);
 	let gauges = $state.raw<FeatureCollection | null>(null);
 
 	// A file beside the app, or any host allowing cross-origin range requests.
@@ -166,15 +168,21 @@
 	 * handled alone, so a slow or dead service never holds back the others.
 	 */
 	function loadLive(m: MapLibreMap) {
-		const live = (load: () => Promise<FeatureCollection>, lost: string, use: (fc: FeatureCollection) => void) =>
-			load().then(
-				(fc) => {
-					if (map === m) use(fc);
-				},
-				() => {
-					if (map === m) lostLive = [...lostLive, lost];
-				}
-			);
+		const live = (load: () => Promise<FeatureCollection>, lost: string, use: (fc: FeatureCollection) => void) => {
+			pendingLive++;
+			return load()
+				.then(
+					(fc) => {
+						if (map === m) use(fc);
+					},
+					() => {
+						if (map === m) lostLive = [...lostLive, lost];
+					}
+				)
+				.finally(() => {
+					if (map === m) pendingLive--;
+				});
+		};
 		const set = (id: string, data: FeatureCollection) => (m.getSource(id) as GeoJSONSource).setData(data);
 		// Catchments and gauges are asked for by the WMA's box and kept by its outline. Without the
 		// outline, which is reported, they are kept by the box alone.
@@ -389,7 +397,8 @@
 </script>
 
 <section class="wrap" aria-label="Map of EWR nodes and sites" bind:this={wrap}>
-	<div class="map" bind:this={container}></div>
+	<!-- Busy until the map is drawn and every live layer has answered, loaded or lost, or it could not start. -->
+	<div class="map" bind:this={container} aria-busy={!failure && (!ready || pendingLive > 0)}></div>
 	<div class="bar">
 		<select aria-label="Water Management Area" value={wma.slug} onchange={(e) => changeWma(e.currentTarget.value)}>
 			<option value="">All WMAs</option>

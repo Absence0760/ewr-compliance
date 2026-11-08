@@ -25,6 +25,8 @@
 	const labels = new Map<string, Marker>();
 	let ready = $state(false);
 	let failure = $state('');
+	/** Whether the live WMA layer has answered, loaded or lost. */
+	let answered = $state(false);
 
 	// The app's root as a full URL: a setting that is a path is beside the app, wherever the page is.
 	const root = new URL(asset('' as never), document.baseURI).href;
@@ -86,17 +88,21 @@
 					}
 				}, under);
 				m.addLayer({ id: LINE, type: 'line', source: 'wmas', paint: { 'line-color': WMA_PURPLE, 'line-width': 1.5 } }, under);
-				loadWmas().then(
-					(fc) => {
-						if (map !== m) return;
-						(m.getSource('wmas') as GeoJSONSource).setData(fc);
-						// Named only once there are outlines to name: without them the list stands in.
-						nameLabels();
-					},
-					() => {
-						if (map === m) failure = LOST;
-					}
-				);
+				loadWmas()
+					.then(
+						(fc) => {
+							if (map !== m) return;
+							(m.getSource('wmas') as GeoJSONSource).setData(fc);
+							// Named only once there are outlines to name: without them the list stands in.
+							nameLabels();
+						},
+						() => {
+							if (map === m) failure = LOST;
+						}
+					)
+					.finally(() => {
+						if (map === m) answered = true;
+					});
 				m.on('mousemove', FILL, (e) => {
 					const f = e.features?.[0];
 					const w = (f?.properties.w as string) ?? '';
@@ -129,7 +135,8 @@
 </script>
 
 <section class="wrap" aria-label="Map of Water Management Areas">
-	<div class="map" bind:this={container}></div>
+	<!-- Busy until the map is drawn and the live WMA layer has answered, loaded or lost, or it could not start. -->
+	<div class="map" bind:this={container} aria-busy={!failure && !(ready && answered)}></div>
 	{#if failure}
 		<p class="failure" role="alert">{failure}</p>
 	{/if}

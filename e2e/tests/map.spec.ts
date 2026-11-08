@@ -1,5 +1,5 @@
-import { MAP, DWS, expect, findNode, mapRegion, panel, select, test } from '../support/app.ts';
-import type { Page } from '@playwright/test';
+import { MAP, DWS, expect, findNode, mapRegion, mapSettled, panel, select, test } from '../support/app.ts';
+import type { Page, Route } from '@playwright/test';
 
 const canvas = (page: Page) => page.locator('canvas.maplibregl-canvas');
 
@@ -74,6 +74,21 @@ test.describe('map', () => {
 		await findNode(page, 'syt1', 'syt1 / SYN-SITE1');
 		await expect(mapRegion(page).getByText('X0H999', { exact: true })).toBeVisible();
 		await expect(mapRegion(page).getByRole('alert')).toHaveText('Quaternary catchments could not be loaded from the DWS service. Everything else still works.');
+	});
+
+	test('the map is busy until every live layer has answered, and a lost one ends it too', async ({ page }) => {
+		let held: (route: Route) => void = () => {};
+		const asked = new Promise<Route>((resolve) => (held = resolve));
+		await page.route(/Quaternary_Catchments/, (route) => held(route));
+		await page.goto(MAP);
+		const map = mapRegion(page);
+		// The gauges are in, labelled with the node in view, and the catchments are not.
+		await findNode(page, 'syt1', 'syt1 / SYN-SITE1');
+		await expect(map.getByText('X0H999', { exact: true })).toBeVisible();
+		await expect(map.locator('[aria-busy]')).toHaveAttribute('aria-busy', 'true');
+		await (await asked).fulfill({ json: { error: { code: 500, message: 'down' } } });
+		await mapSettled(map);
+		await expect(map.getByRole('alert')).toHaveText('Quaternary catchments could not be loaded from the DWS service. Everything else still works.');
 	});
 
 	test('labels a flow gauge, and its popup names it, with no link off the site', async ({ page }) => {

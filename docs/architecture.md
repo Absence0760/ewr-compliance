@@ -27,6 +27,7 @@ The app opens on South Africa's six Water Management Areas of 2023 (`/`): a bann
 - A node is on the map of its basin's WMA, by `BASIN_WMA`. All four study basins are in Breede-Olifants. A basin missing from it is on no map, which `sampleData.test.ts` and `tools/check-live-services.ts` catch.
 - A WMA's catchments and flow gauges are asked for by its box and kept by its outline, from the live `WMA_2023` layer: a catchment when most of its vertices are inside, so a neighbour sharing an edge is left out, and a gauge when it is inside. A quaternary a node of the WMA names is kept wherever it lies. If the outline fails, the box is all there is, and the map says it lost the outline.
 - A WMA with no EWR data opens anyway, on its catchments, rivers and gauges, and says it has none.
+- Each map's canvas (`WmaMap`, `EwrMap`) is `aria-busy` until the map is drawn and every live layer has answered, loaded or lost, or the map could not start. The specs wait on it (`mapSettled` in `e2e/support/app.ts`) before checking that nothing went wrong, never on network idle: a request MapLibre's worker leaves unfinished when its map goes can hold that off for good.
 - Rivers are `static/geo/rivers-<slug>.json`, the DWS 1:500 000 rivers built by `tools/build-rivers.ts`, with name `n`, Strahler order `s` and flow class `c`. Orders 1 and 2 are drawn from zoom 9. Hovering names a river, clicking opens its popup, and from zoom 10 names run along the line when the base map's fonts are there.
 
 ## Node information
