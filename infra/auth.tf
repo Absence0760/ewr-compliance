@@ -466,7 +466,8 @@ resource "aws_cloudwatch_metric_alarm" "api_errors" {
 # (only someone who found the URL sends one; the Deploy readiness check of
 # docs/hosting.md sends one on purpose, so this one mails only and never trips
 # the breaker: its name is outside the breaker topic's <project>-breaker-api-*
-# publishers), and the breaker's run-count trip (below, breaker.tf).
+# publishers), and a run count no handful of users reaches (api-invocations,
+# below, mail only; the breaker's trip, breaker.tf, stops it).
 resource "aws_cloudwatch_log_metric_filter" "api_origin_secret_rejected" {
   count          = local.auth
   name           = "${local.project}-api-origin-secret-rejected"
@@ -498,11 +499,30 @@ resource "aws_cloudwatch_metric_alarm" "api_origin_secret_rejected" {
   depends_on = [aws_cloudwatch_log_metric_filter.api_origin_secret_rejected]
 }
 
-# The run count is watched by the spend breaker's trip, not an alarm here:
-# ewr-compliance-breaker-api-invocations (breaker.tf) mails this topic and
-# stops the API past breaker_api_invocations_per_5min runs in each of three
-# 5-minute periods. It replaced the mail-only api-invocations alarm (1 000 in
-# one period), so the API's Invocations has one alarm, not two.
+# The early warning on the run count, mail only: past
+# api_invocations_alarm_per_5min (1 000) in one 5-minute period. The breaker's
+# run-count trip (breaker.tf, breaker_api_invocations_per_5min, 3 000 in each
+# of three periods) is what stops the API; this mails first, and mails for a
+# flood that stays under the trip all month. Its name is outside the breaker
+# topic's <project>-breaker-api-* publishers, so it can never trip it.
+resource "aws_cloudwatch_metric_alarm" "api_invocations" {
+  count               = local.auth_alarms
+  alarm_name          = "${local.project}-api-invocations"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Invocations"
+  namespace           = "AWS/Lambda"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = var.api_invocations_alarm_per_5min
+  alarm_description   = "The sign-in API ran more than ${var.api_invocations_alarm_per_5min} times in 5 minutes, far past a handful of users. Mail only: the spend breaker stops it past ${var.breaker_api_invocations_per_5min} in each of three 5-minute periods. With ${local.project}-api-direct-calls, someone is calling the Function URL directly; without it, through the site (the WAF's sampled requests, us-east-1, say from where). See docs/hosting.md, \"If the API is flooded\"."
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    FunctionName = aws_lambda_function.api[0].function_name
+  }
+}
 
 resource "aws_cloudwatch_metric_alarm" "ses_bounce_rate" {
   count               = local.auth_alarms

@@ -26,11 +26,23 @@ process.stdout.write(answer === undefined ? '' : String(answer) + '\\n');
 
 type Scenario = Record<string, unknown>;
 
+// A fake `terraform`: `output -raw api_reserved_concurrency` prints FAKE_TF_API, or fails as an
+// uninitialised infra/ does when it is unset.
+const FAKE_TERRAFORM = `#!/usr/bin/env bash
+case "$*" in
+	*"output -raw api_reserved_concurrency"*) [ -n "\${FAKE_TF_API:-}" ] && { printf '%s' "$FAKE_TF_API"; exit 0; } ;;
+esac
+echo "Error: no outputs found" >&2
+exit 1
+`;
+
 function run(scenario: Scenario, env: Record<string, string> = {}, tfvars?: string) {
 	const dir = mkdtempSync(join(tmpdir(), 'breaker-reset-'));
 	try {
 		writeFileSync(join(dir, 'aws'), FAKE_AWS);
 		chmodSync(join(dir, 'aws'), 0o755);
+		writeFileSync(join(dir, 'terraform'), FAKE_TERRAFORM);
+		chmodSync(join(dir, 'terraform'), 0o755);
 		writeFileSync(join(dir, 'scenario.json'), JSON.stringify(scenario));
 		const log = join(dir, 'calls.log');
 		writeFileSync(log, '');
@@ -104,6 +116,26 @@ describe('tools/breaker-reset.sh', () => {
 		expect(named(calls, 'lambda', 'delete-function-concurrency').map((c) => arg(c, '--function-name'))).toEqual(['ewr-compliance-api', 'ewr-compliance-dws']);
 	});
 
+	it('takes the API’s value from terraform output before the tfvars', () => {
+		const { status, calls } = run(TRIPPED, { FAKE_TF_API: '7' }, 'api_reserved_concurrency = 5\n');
+		expect(status).toBe(0);
+		expect(named(calls, 'lambda', 'put-function-concurrency').map((c) => arg(c, '--reserved-concurrent-executions'))).toEqual(['7']);
+		const none = run(TRIPPED, { FAKE_TF_API: 'none' });
+		expect(named(none.calls, 'lambda', 'delete-function-concurrency').map((c) => arg(c, '--function-name'))).toEqual(['ewr-compliance-api', 'ewr-compliance-dws']);
+	});
+
+	it('refuses, changing nothing, when it can read the API’s value from nowhere, rather than leave it uncapped', () => {
+		const { status, calls, stderr } = run(TRIPPED);
+		expect(status).toBe(2);
+		expect(stderr).toContain("Can't tell the API's reserved concurrency");
+		expect(named(calls, 'cloudwatch', 'set-alarm-state')).toHaveLength(0);
+		expect(calls.some((c) => c.includes('lambda'))).toBe(false);
+		// The pipeline alone needs no API value.
+		const dwsOnly = run({ ...TRIPPED, alarms: { 'ewr-compliance-breaker-dws-': DWS_ALARMS } });
+		expect(dwsOnly.status, dwsOnly.stderr).toBe(0);
+		expect(named(dwsOnly.calls, 'lambda', 'delete-function-concurrency').map((c) => arg(c, '--function-name'))).toEqual(['ewr-compliance-dws']);
+	});
+
 	it('takes BREAKER_RESET_API_CONCURRENCY over the tfvars, and refuses a value that isn’t one', () => {
 		const set = run(TRIPPED, { BREAKER_RESET_API_CONCURRENCY: '3' }, 'api_reserved_concurrency = 5\n');
 		expect(named(set.calls, 'lambda', 'put-function-concurrency').map((c) => arg(c, '--reserved-concurrent-executions'))).toEqual(['3']);
@@ -113,7 +145,7 @@ describe('tools/breaker-reset.sh', () => {
 	});
 
 	it('leaves a function the breaker did not stop as it is', () => {
-		const { status, calls, stdout } = run({ ...TRIPPED, concurrency: { 'ewr-compliance-api': '5', 'ewr-compliance-dws': 'None' } });
+		const { status, calls, stdout } = run({ ...TRIPPED, concurrency: { 'ewr-compliance-api': '5', 'ewr-compliance-dws': 'None' } }, { FAKE_TF_API: '5' });
 		expect(status).toBe(0);
 		expect(named(calls, 'lambda', 'put-function-concurrency')).toHaveLength(0);
 		expect(named(calls, 'lambda', 'delete-function-concurrency')).toHaveLength(0);
@@ -121,7 +153,7 @@ describe('tools/breaker-reset.sh', () => {
 	});
 
 	it('handles only the API when the DWS store is off, and then never looks at its queue', () => {
-		const { status, calls } = run({ ...TRIPPED, alarms: { 'ewr-compliance-breaker-api-': API_ALARMS } });
+		const { status, calls } = run({ ...TRIPPED, alarms: { 'ewr-compliance-breaker-api-': API_ALARMS } }, { FAKE_TF_API: '5' });
 		expect(status).toBe(0);
 		expect(named(calls, 'cloudwatch', 'set-alarm-state')).toHaveLength(3);
 		expect(calls.some((c) => c.includes('sqs'))).toBe(false);
@@ -130,13 +162,13 @@ describe('tools/breaker-reset.sh', () => {
 
 	it('refuses while this clock hour is already over a duration trip, unless BREAKER_RESET_NOW=1', () => {
 		const busy = { ...TRIPPED, used: { ...(TRIPPED.used as object), 'Name=FunctionName,Value=ewr-compliance-dws': '6000000.0' } };
-		const refused = run(busy);
+		const refused = run(busy, { FAKE_TF_API: '5' });
 		expect(refused.status).toBe(2);
 		expect(refused.stderr).toContain('trip it again at once');
 		expect(named(refused.calls, 'cloudwatch', 'set-alarm-state')).toHaveLength(0);
 		expect(refused.calls.some((c) => c.includes('lambda'))).toBe(false);
 
-		const forced = run(busy, { BREAKER_RESET_NOW: '1' });
+		const forced = run(busy, { FAKE_TF_API: '5', BREAKER_RESET_NOW: '1' });
 		expect(forced.status, forced.stderr).toBe(0);
 		expect(named(forced.calls, 'cloudwatch', 'set-alarm-state')).toHaveLength(6);
 	});

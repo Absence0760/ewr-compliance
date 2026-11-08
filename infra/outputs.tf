@@ -79,6 +79,11 @@ output "aws_region" {
   value       = var.aws_region
 }
 
+output "api_reserved_concurrency" {
+  description = "The API's reserved concurrency as Terraform sets it: a number, or \"none\" (unreserved). tools/breaker-reset.sh reopens the API to it."
+  value       = var.api_reserved_concurrency == null ? "none" : tostring(var.api_reserved_concurrency)
+}
+
 output "breaker_protected_functions" {
   description = "The functions the spend breaker (breaker.tf) stops, by its alarm-name prefix; tools/breaker-reset.sh re-arms and reopens them."
   value       = local.breaker_targets

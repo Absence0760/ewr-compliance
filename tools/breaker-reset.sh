@@ -13,11 +13,13 @@
 #      left in ALARM can't trip again: after this the next evaluation goes back to ALARM, and trips
 #      the breaker again, if the flood is still on. A plain `terraform apply` reopens the functions but
 #      leaves the alarms in ALARM, unarmed, so use this instead.
-#   4. Only then reopens each function the breaker set to 0, to Terraform's value: the API to
-#      api_reserved_concurrency from the tfvars (EWR_TFVARS, default
-#      ~/github/infra-secrets/ewr-compliance/prod.tfvars), or unreserved when it sets none; the DWS
-#      pipeline unreserved (Terraform reserves it none). BREAKER_RESET_API_CONCURRENCY overrides the
-#      API's, a number or "none". A function not at 0 is left as it is.
+#   4. Only then reopens each function the breaker set to 0, to Terraform's value. The API's is, in
+#      order: BREAKER_RESET_API_CONCURRENCY (a number, or "none"); `terraform -chdir=infra output
+#      -raw api_reserved_concurrency`; api_reserved_concurrency in the tfvars (EWR_TFVARS, default
+#      ~/github/infra-secrets/ewr-compliance/prod.tfvars; a readable file without the line is
+#      "none", unreserved). With none of the three it refuses (exit 2) before changing anything,
+#      rather than guess "unreserved" and leave the API uncapped. The DWS pipeline goes back to
+#      unreserved (Terraform reserves it none). A function not at 0 is left as it is.
 #   5. Redrives nothing, on purpose. The API has no queue. The pipeline's DLQ holds only daily runs'
 #      {"mode":"daily"} events, which the next day's run makes redundant (infra/dws.tf), so it reports
 #      their count and says to purge it. A backfill the trip failed is resumed by starting the same
@@ -49,15 +51,22 @@ function_of() {
 	esac
 }
 
-# Terraform's reserved concurrency for each: a number, or "none" (unreserved).
+# Terraform's reserved concurrency for the API: a number, or "none" (unreserved). Empty when no
+# source can be read; step 1 refuses then, if the API is one of the functions to reopen.
 api_concurrency=${BREAKER_RESET_API_CONCURRENCY:-}
-if [ -z "$api_concurrency" ] && [ -f "$tfvars" ]; then
-	api_concurrency=$(sed -nE 's/^[[:space:]]*api_reserved_concurrency[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$tfvars" | head -n 1)
+api_source="BREAKER_RESET_API_CONCURRENCY"
+if [ -z "$api_concurrency" ]; then
+	api_concurrency=$(AWS_PROFILE="$profile" terraform -chdir="$root/infra" output -raw api_reserved_concurrency 2>/dev/null || true)
+	api_source="terraform output"
 fi
-api_concurrency=${api_concurrency:-none}
+if [ -z "$api_concurrency" ] && [ -r "$tfvars" ]; then
+	api_concurrency=$(sed -nE 's/^[[:space:]]*api_reserved_concurrency[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$tfvars" | head -n 1)
+	api_concurrency=${api_concurrency:-none}
+	api_source="$tfvars"
+fi
 case $api_concurrency in
-	none | [1-9] | [1-9][0-9]) ;;
-	*) echo "BREAKER_RESET_API_CONCURRENCY must be a number from 1 to 99, or none." >&2; exit 2 ;;
+	'' | none | [1-9] | [1-9][0-9]) ;;
+	*) echo "The API's reserved concurrency from $api_source must be a number from 1 to 99, or none; got '$api_concurrency'." >&2; exit 2 ;;
 esac
 concurrency_of() {
 	case $1 in
@@ -82,6 +91,15 @@ if [ -z "$prefixes" ]; then
 	echo "No $project-breaker-api-* or -dws-* alarms in $region: wrong region or profile?" >&2
 	exit 1
 fi
+case " $prefixes " in
+	*" api "*)
+		if [ -z "$api_concurrency" ]; then
+			echo "Can't tell the API's reserved concurrency: no BREAKER_RESET_API_CONCURRENCY, no 'terraform output api_reserved_concurrency' (run where infra/ is initialised), and no readable $tfvars." >&2
+			echo "Set BREAKER_RESET_API_CONCURRENCY to the number in prod.tfvars (or none if it sets none) and run again. Nothing was changed." >&2
+			exit 2
+		fi
+		;;
+esac
 
 # 2. An hour already over a duration trip would trip again at once.
 hour_start=$(date -u +%Y-%m-%dT%H:00:00Z)

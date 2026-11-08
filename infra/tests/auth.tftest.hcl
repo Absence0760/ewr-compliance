@@ -482,13 +482,31 @@ run "alarms" {
   }
   assert {
     condition = (
-      aws_cloudwatch_metric_alarm.breaker_invocations["api"].metric_name == "Invocations" &&
-      aws_cloudwatch_metric_alarm.breaker_invocations["api"].dimensions.FunctionName == "ewr-compliance-api" &&
-      contains(aws_cloudwatch_metric_alarm.breaker_invocations["api"].alarm_actions, "arn:aws:sns:af-south-1:000000000000:ewr-compliance-prod-alerts") &&
-      length([for k, a in aws_cloudwatch_metric_alarm.breaker_invocations : a if a.dimensions.FunctionName == "ewr-compliance-api"]) == 1
+      aws_cloudwatch_metric_alarm.api_invocations[0].metric_name == "Invocations" &&
+      aws_cloudwatch_metric_alarm.api_invocations[0].threshold == 1000 &&
+      aws_cloudwatch_metric_alarm.api_invocations[0].evaluation_periods == 1 &&
+      aws_cloudwatch_metric_alarm.api_invocations[0].dimensions.FunctionName == "ewr-compliance-api" &&
+      aws_cloudwatch_metric_alarm.api_invocations[0].alarm_actions == toset(["arn:aws:sns:af-south-1:000000000000:ewr-compliance-prod-alerts"]) &&
+      !startswith(aws_cloudwatch_metric_alarm.api_invocations[0].alarm_name, "ewr-compliance-breaker-")
     )
-    error_message = "The API's run count has one alarm, the breaker's trip (breaker.tf), which also pages the regional topic."
+    error_message = "api-invocations mails (only) past 1 000 runs in one 5-minute period, and its name is outside the breaker topic's publishers."
   }
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.api_invocations[0].threshold < aws_cloudwatch_metric_alarm.breaker_invocations["api"].threshold &&
+      aws_cloudwatch_metric_alarm.breaker_invocations["api"].dimensions.FunctionName == "ewr-compliance-api"
+    )
+    error_message = "The early mail comes below the breaker's run-count trip, which is what stops the API."
+  }
+}
+
+run "early_mail_must_come_before_the_trip" {
+  command = plan
+  variables {
+    api_invocations_alarm_per_5min   = 3000
+    breaker_api_invocations_per_5min = 3000
+  }
+  expect_failures = [var.api_invocations_alarm_per_5min]
 }
 
 run "no_alarms_when_alarms_are_off" {
@@ -499,8 +517,8 @@ run "no_alarms_when_alarms_are_off" {
     alarms_enabled = false
   }
   assert {
-    condition     = length(aws_cloudwatch_metric_alarm.api_origin_secret_rejected) == 0 && length(aws_cloudwatch_metric_alarm.breaker_invocations) == 1
-    error_message = "alarms_enabled = false drops api-direct-calls, but never the breaker's trips: they are the breaker, not notices."
+    condition     = length(aws_cloudwatch_metric_alarm.api_origin_secret_rejected) == 0 && length(aws_cloudwatch_metric_alarm.api_invocations) == 0 && length(aws_cloudwatch_metric_alarm.breaker_invocations) == 1
+    error_message = "alarms_enabled = false drops both flood mails, but never the breaker's trips: they are the breaker, not notices."
   }
 }
 
@@ -567,7 +585,7 @@ run "refuses_a_reservation_on_a_new_accounts_limit" {
     auth_enabled             = true
     api_reserved_concurrency = 5
   }
-  expect_failures = [var.api_reserved_concurrency]
+  expect_failures = [var.lambda_account_concurrency_limit]
 }
 
 run "refuses_a_raised_limit_with_no_cap" {
@@ -577,7 +595,7 @@ run "refuses_a_raised_limit_with_no_cap" {
     auth_enabled                     = true
     lambda_account_concurrency_limit = 1000
   }
-  expect_failures = [var.api_reserved_concurrency]
+  expect_failures = [var.lambda_account_concurrency_limit]
 }
 
 run "a_raised_limit_needs_no_cap_without_the_api" {
@@ -600,7 +618,7 @@ run "refuses_a_reservation_into_the_unreserved_100" {
     lambda_account_concurrency_limit = 104
     api_reserved_concurrency         = 5
   }
-  expect_failures = [var.api_reserved_concurrency]
+  expect_failures = [var.lambda_account_concurrency_limit]
 }
 
 # The quota needed is the API's reservation + the breaker's 1 (breaker.tf; the
@@ -613,7 +631,30 @@ run "refuses_a_reservation_that_leaves_the_breaker_no_room" {
     lambda_account_concurrency_limit = 105
     api_reserved_concurrency         = 5
   }
-  expect_failures = [var.api_reserved_concurrency]
+  expect_failures = [var.lambda_account_concurrency_limit]
+}
+
+# The breaker reserves its 1 above 10 even when the API reserves nothing (the
+# store alone): 100 then leaves 99.
+run "refuses_a_raised_limit_the_breaker_alone_cuts_into" {
+  command = plan
+  variables {
+    dws_enabled                      = true
+    lambda_account_concurrency_limit = 100
+  }
+  expect_failures = [var.lambda_account_concurrency_limit]
+}
+
+run "the_breaker_alone_reserves_at_101" {
+  command = plan
+  variables {
+    dws_enabled                      = true
+    lambda_account_concurrency_limit = 101
+  }
+  assert {
+    condition     = aws_lambda_function.breaker[0].reserved_concurrent_executions == 1
+    error_message = "101 = the breaker's 1 + 100 unreserved."
+  }
 }
 
 run "reserves_at_exactly_the_quota" {

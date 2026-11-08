@@ -167,7 +167,7 @@ variable "breaker_api_duration_ms_per_hour" {
 }
 
 variable "breaker_api_invocations_per_5min" {
-  description = "Trip the API when it runs more than this many times in each of 3 consecutive 5-minute periods: a flood of fast calls, which bills requests and log lines but almost no Duration. 3 000 is 10 a second for 15 minutes on end, against a handful of people's tens per 5 minutes (it replaced the mail-only api-invocations alarm, and mails as it trips). Under it all month: 25.92 M x $0.27 per million = $7.00, plus about $7.40 of log lines."
+  description = "Trip the API when it runs more than this many times in each of 3 consecutive 5-minute periods: a flood of fast calls, which bills requests and log lines but almost no Duration. 3 000 is 10 a second for 15 minutes on end, against a handful of people's tens per 5 minutes (api_invocations_alarm_per_5min mails first, at 1 000 in one period). Under it all month: 25.92 M x $0.27 per million = $7.00, plus about $7.40 of log lines."
   type        = number
   default     = 3000
 
@@ -397,7 +397,7 @@ variable "api_log_retention_days" {
 }
 
 variable "api_reserved_concurrency" {
-  description = "Reserved concurrency for the API, which also caps it. null (the default) reserves none: a new account's limit can be 10, all of which must stay unreserved. Required (5 is plenty) once the account's limit is raised and lambda_account_concurrency_limit says so: the plan refuses a raised limit with no cap. The limit must cover every reservation plus Lambda's 100 unreserved: API reserved + DWS reserved (none) + the spend breaker's 1 + 100, so 106 at the least with 5."
+  description = "Reserved concurrency for the API, which also caps it. null (the default) reserves none: a new account's limit can be 10, all of which must stay unreserved. Required (5 is plenty) once the account's limit is raised and lambda_account_concurrency_limit says so: the plan refuses a raised limit with no cap. The limit must cover every reservation plus Lambda's 100 unreserved; lambda_account_concurrency_limit's validation is that rule."
   type        = number
   default     = null
 
@@ -405,34 +405,52 @@ variable "api_reserved_concurrency" {
     condition     = var.api_reserved_concurrency == null ? true : (var.api_reserved_concurrency >= 1 && var.api_reserved_concurrency <= 50)
     error_message = "null, or between 1 and 50."
   }
+}
 
-  # Lambda keeps 100 of the account's concurrency unreserved, for every
-  # function without a reservation, the DWS pipeline among them; an apply that
-  # reserves into it fails. The spend breaker reserves 1 more once the limit
-  # is raised (breaker.tf). Checked here, at plan, against the limit the
-  # operator read and set below.
-  validation {
-    condition     = var.api_reserved_concurrency == null ? true : var.lambda_account_concurrency_limit - var.api_reserved_concurrency - 1 >= 100
-    error_message = "api_reserved_concurrency, with the spend breaker's 1 (breaker.tf), leaves the account fewer than the 100 unreserved executions Lambda keeps for the other functions (the DWS pipeline). Raise the account's Lambda concurrency limit (Service Quotas, \"Concurrent executions\"), set lambda_account_concurrency_limit to the new value (aws lambda get-account-settings), then set api_reserved_concurrency = 5."
-  }
+variable "api_invocations_alarm_per_5min" {
+  description = "Mail (only) when the sign-in API runs more than this many times in 5 minutes: the early warning. A signed-in person makes a few calls a page and one renewal every 15 minutes, so 1000 is many times a busy 5 minutes for a handful of users. Below breaker_api_invocations_per_5min, the spend breaker's trip, so it mails before the breaker acts, and for a flood that never reaches the trip."
+  type        = number
+  default     = 1000
 
-  # The other way round: once the account's limit is raised, the API must be
-  # capped, or a flood of its public Function URL (which skips the WAF) can run
-  # as many copies at once as the new limit allows, each billed.
   validation {
-    condition     = !var.auth_enabled || var.lambda_account_concurrency_limit <= 10 || var.api_reserved_concurrency != null
-    error_message = "lambda_account_concurrency_limit is raised but the API has no cap: set api_reserved_concurrency = 5 in the same apply, so a flood of its Function URL can't run more than 5 at once."
+    condition     = var.api_invocations_alarm_per_5min >= 100 && var.api_invocations_alarm_per_5min < var.breaker_api_invocations_per_5min
+    error_message = "api_invocations_alarm_per_5min must be at least 100 and below breaker_api_invocations_per_5min: the mail comes before the trip."
   }
 }
 
 variable "lambda_account_concurrency_limit" {
-  description = "The account's Lambda concurrent-executions limit in the workload region, as `aws lambda get-account-settings --query AccountLimit.ConcurrentExecutions` reads it. Only checked against api_reserved_concurrency. 10, a new account's limit, until it is raised."
+  description = "The account's Lambda concurrent-executions limit in the workload region, as `aws lambda get-account-settings --query AccountLimit.ConcurrentExecutions` reads it. 10, a new account's limit, until it is raised. Once it is raised it must cover every reservation plus the 100 unreserved executions Lambda keeps: API reserved (api_reserved_concurrency) + DWS reserved (none) + the spend breaker's 1 + 100, so at least 106 with api_reserved_concurrency = 5. At 10 nothing may be reserved."
   type        = number
   default     = 10
 
   validation {
     condition     = var.lambda_account_concurrency_limit >= 10 && floor(var.lambda_account_concurrency_limit) == var.lambda_account_concurrency_limit
     error_message = "A whole number, at least 10."
+  }
+
+  # The other way round: once the account's limit is raised, the API must be
+  # capped, or a flood of its public Function URL (which skips the WAF) can run
+  # as many copies at once as the new limit allows, each billed. Here rather
+  # than on api_reserved_concurrency: two variables' validations may not refer
+  # to each other.
+  validation {
+    condition     = !var.auth_enabled || var.lambda_account_concurrency_limit <= 10 || var.api_reserved_concurrency != null
+    error_message = "lambda_account_concurrency_limit is raised but the API has no cap: set api_reserved_concurrency = 5 in the same apply, so a flood of its Function URL can't run more than 5 at once."
+  }
+
+  # The one quota rule. Lambda keeps 100 of the account's concurrency
+  # unreserved, for every function without a reservation (the DWS pipeline
+  # among them), and refuses a reservation that cuts into it. At 10 nothing is
+  # reserved: the API's reservation must be null, and the breaker reserves none
+  # (breaker.tf breaker_reserved). Above 10 the breaker reserves 1 whatever the
+  # API does, so the rule holds with api_reserved_concurrency null too.
+  validation {
+    condition = (
+      var.lambda_account_concurrency_limit <= 10
+      ? var.api_reserved_concurrency == null
+      : var.lambda_account_concurrency_limit - coalesce(var.api_reserved_concurrency, 0) - 1 >= 100
+    )
+    error_message = "The reservations leave the account fewer than the 100 unreserved executions Lambda keeps: it needs API reserved (api_reserved_concurrency) + DWS reserved (none) + the spend breaker's 1 + 100. At 10 nothing can be reserved. Raise the account's Lambda concurrency limit (Service Quotas, \"Concurrent executions\"), set lambda_account_concurrency_limit to the new value (aws lambda get-account-settings), then api_reserved_concurrency = 5 (at least 106 in all)."
   }
 }
 

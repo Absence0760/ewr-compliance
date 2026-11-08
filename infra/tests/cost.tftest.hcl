@@ -392,6 +392,19 @@ run "breaker_wiring" {
     error_message = "On a new account's limit of 10 the breaker reserves nothing (all 10 must stay unreserved)."
   }
   assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.breaker_throttled[0].metric_name == "Throttles" &&
+      aws_cloudwatch_metric_alarm.breaker_throttled[0].threshold == 1 &&
+      aws_cloudwatch_metric_alarm.breaker_throttled[0].comparison_operator == "GreaterThanOrEqualToThreshold" &&
+      aws_cloudwatch_metric_alarm.breaker_throttled[0].period == 300 &&
+      aws_cloudwatch_metric_alarm.breaker_throttled[0].dimensions["FunctionName"] == "ewr-compliance-breaker" &&
+      aws_cloudwatch_metric_alarm.breaker_throttled[0].alarm_actions == toset(["arn:aws:sns:af-south-1:000000000000:ewr-compliance-prod-alerts"]) &&
+      !startswith(aws_cloudwatch_metric_alarm.breaker_throttled[0].alarm_name, "ewr-compliance-breaker-api-") &&
+      !startswith(aws_cloudwatch_metric_alarm.breaker_throttled[0].alarm_name, "ewr-compliance-breaker-dws-")
+    )
+    error_message = "A throttled breaker (starved at a limit of 10) mails within 5 minutes, and never publishes to the breaker topic."
+  }
+  assert {
     condition     = aws_lambda_function.breaker[0].memory_size == 128 && aws_lambda_function.breaker[0].timeout == 10
     error_message = "The breaker is small and short."
   }

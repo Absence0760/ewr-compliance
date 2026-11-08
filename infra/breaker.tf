@@ -60,24 +60,30 @@
 # The breaker's own concurrency: 1 reserved once the account's limit is
 # raised (lambda_account_concurrency_limit), so the flood it stops can't
 # starve it, and it can't run away itself. Until then (a new account's 10)
-# nothing can be reserved: a flood holding all 10 copies throttles its
-# invocation, which Lambda retries for up to 6 hours, and it runs as soon as
-# a copy frees (the API's copies last at most 10 s).
+# nothing can be reserved: a flood holding all 10 copies throttles the
+# breaker's invocation. Lambda retries a throttled asynchronous invocation
+# with backoff for up to 6 hours, so it runs when a retry happens to find a
+# free copy, which a flood that keeps all 10 busy may never leave, and after
+# 6 hours the event is dropped. breaker-throttled (below) mails on the first
+# throttle, so the operator knows to stop the function by hand; the durable
+# fix is raising the limit, a go-live check (docs/hosting.md).
 #
-# The API's invocations trip replaced auth.tf's mail-only api-invocations
-# alarm (1 000 runs in one 5-minute period), so the API's Invocations metric
-# has one alarm; it mails the regional topic as it trips. api-direct-calls
-# stays mail-only: the go-live check fires it on purpose, and its name is
-# outside the topic's publishers. Never set a breaker alarm's state by hand as
-# a test: it would stop the function (the reset puts them back to OK only).
+# Alarms on the same metrics that are NOT breaker trips, and never publish to
+# its topic (their names are outside <project>-breaker-api-* and -dws-*):
+# auth.tf's api-invocations, the mail-only early warning at 1 000 runs in one
+# 5-minute period, below the trip's 3 000 in each of three; and
+# api-direct-calls, which the go-live check fires once on purpose. Never set a
+# breaker trip's state to ALARM by hand as a test: it would stop the
+# function. The go-live check that proves the breaker invokes it directly,
+# against the pipeline while its schedule is off (docs/hosting.md).
 #
 # Quota: once the account's limit is raised it must cover API reserved + DWS
 # reserved (none) + this function's 1 + Lambda's 100 unreserved; the one rule
-# for that is api_reserved_concurrency's validation (variables.tf).
+# for that is lambda_account_concurrency_limit's validation (variables.tf).
 #
 # Cost: the topic and the function are free at this volume (they run only on
-# a trip); seven alarms with both functions, less the api-invocations alarm
-# they replace: six more, about $0.60 a month.
+# a trip); eight alarms with both functions (six trips, breaker-errors,
+# breaker-throttled), about $0.80 a month.
 # ----------------------------------------------------------------------------
 
 locals {
@@ -87,6 +93,9 @@ locals {
     var.dws_enabled ? { "${local.project}-breaker-dws-" = local.dws_function_name } : {},
   )
   breaker = length(local.breaker_targets) > 0 ? 1 : 0
+
+  # The same test as lambda_account_concurrency_limit's quota rule (variables.tf).
+  breaker_reserved = var.lambda_account_concurrency_limit > 10 ? 1 : null
 
   breaker_function_name = "${local.project}-breaker"
   breaker_function_arns = [
@@ -163,7 +172,8 @@ resource "aws_iam_role" "breaker" {
 # Exactly one action on the protected functions: set their reserved
 # concurrency. Plus its own log group. No DeleteFunctionConcurrency (that
 # would leave a function unreserved, uncapped), no sns:Publish (the alarms
-# mail the operator), no invoke. infra/tests/breaker.tftest.hcl pins it.
+# mail the operator), no invoke. infra/tests/cost.tftest.hcl (breaker_wiring)
+# pins it.
 data "aws_iam_policy_document" "breaker" {
   count = local.breaker
 
@@ -218,7 +228,7 @@ resource "aws_lambda_function" "breaker" {
 
   # 1 once the account's limit is raised, none before (a new account's 10
   # must all stay unreserved): see the header.
-  reserved_concurrent_executions = var.lambda_account_concurrency_limit > 10 ? 1 : null
+  reserved_concurrent_executions = local.breaker_reserved
 
   logging_config {
     log_format            = "JSON"
@@ -358,6 +368,31 @@ resource "aws_cloudwatch_metric_alarm" "breaker_errors" {
   statistic           = "Sum"
   threshold           = 1
   alarm_description   = "The spend breaker failed to stop a function: it is still running. Stop it by hand now (docs/hosting.md § Cost controls: aws lambda put-function-concurrency ... 0), then read /aws/lambda/${local.breaker_function_name}."
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    FunctionName = aws_lambda_function.breaker[0].function_name
+  }
+}
+
+# Throttled: at a new account's limit of 10 a flood can hold every copy, and
+# the breaker's own invocation then waits on Lambda's retries (see the
+# header). An alarm rather than an on-failure destination: it mails within
+# 5 minutes of the first throttle, not after the 6 hours an event can wait,
+# and it needs no sns:Publish in the breaker's role. Its name is outside the
+# breaker topic's publishers.
+resource "aws_cloudwatch_metric_alarm" "breaker_throttled" {
+  count               = local.breaker
+  alarm_name          = "${local.project}-breaker-throttled"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Throttles"
+  namespace           = "AWS/Lambda"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 1
+  alarm_description   = "The spend breaker was throttled: every copy the account allows is busy, so it can't stop the function it was called for until a copy frees, and its call is dropped after 6 hours. Stop the function by hand now (docs/hosting.md § Cost controls), then raise the account's Lambda limit so the breaker reserves its own copy."
   alarm_actions       = [aws_sns_topic.alerts.arn]
   treat_missing_data  = "notBreaching"
 
