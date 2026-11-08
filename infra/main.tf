@@ -23,9 +23,11 @@ terraform {
   }
 
   required_providers {
+    # 6.69 is the first with aws_pricingplanmanager_subscription
+    # (flat_rate_plan.tf); the lock file holds 6.72.0.
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 6.44"
+      version = "~> 6.69"
     }
     # The API's stub package (auth.tf); CI uploads the real code.
     archive = {

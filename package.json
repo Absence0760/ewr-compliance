@@ -21,7 +21,8 @@
 		"test:e2e": "playwright test --config e2e/playwright.config.ts",
 		"test:private": "pnpm data:private && EWR_TIER=private vitest run && EWR_TIER=private playwright test --config e2e/playwright.config.ts",
 		"data:sample": "node tools/sample-data.mjs",
-		"data:private": "bash -e tools/sync-private.sh"
+		"data:private": "bash -e tools/sync-private.sh",
+		"infra:breaker-reset": "bash -e tools/breaker-reset.sh"
 	},
 	"devDependencies": {
 		"@playwright/test": "1.64.1",

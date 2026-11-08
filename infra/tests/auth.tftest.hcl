@@ -89,18 +89,10 @@ override_resource {
 }
 
 override_resource {
-  target          = aws_cloudfront_response_headers_policy.site
+  target          = aws_cloudfront_function.site_response
   override_during = plan
   values = {
-    id = "rhp-site"
-  }
-}
-
-override_resource {
-  target          = aws_cloudfront_response_headers_policy.api
-  override_during = plan
-  values = {
-    id = "rhp-api"
+    arn = "arn:aws:cloudfront::000000000000:function/ewr-compliance-site-response"
   }
 }
 
@@ -391,7 +383,8 @@ run "api_behaviour" {
   assert {
     condition = alltrue([for b in aws_cloudfront_distribution.site[0].ordered_cache_behavior :
       b.cache_policy_id == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" && b.origin_request_policy_id == "b689b0a8-53d0-40ab-baf2-68738e2966ac" &&
-      b.target_origin_id == "lambda-api" && try(length(b.trusted_key_groups), 0) == 0 && b.response_headers_policy_id == "rhp-api" &&
+      b.target_origin_id == "lambda-api" && try(length(b.trusted_key_groups), 0) == 0 &&
+      { for f in b.function_association : f.event_type => f.function_arn } == { "viewer-response" = "arn:aws:cloudfront::000000000000:function/ewr-compliance-site-response" } &&
       b.viewer_protocol_policy == "https-only"
     if b.path_pattern == "/api/*"])
     error_message = "/api/* is never cached (CachingDisabled), forwards cookies and Origin (AllViewerExceptHostHeader), HTTPS only, with the API's headers."
@@ -484,17 +477,17 @@ run "alarms" {
     error_message = "A single call to the Function URL without the origin secret alarms."
   }
   assert {
-    condition = (
-      aws_cloudwatch_metric_alarm.api_invocations[0].metric_name == "Invocations" &&
-      aws_cloudwatch_metric_alarm.api_invocations[0].threshold == 1000 &&
-      aws_cloudwatch_metric_alarm.api_invocations[0].dimensions.FunctionName == "ewr-compliance-api"
-    )
-    error_message = "The API's run count over 5 minutes alarms past api_invocations_alarm_per_5min (1000)."
+    condition     = aws_cloudwatch_metric_alarm.api_origin_secret_rejected[0].alarm_actions == toset(["arn:aws:sns:af-south-1:000000000000:ewr-compliance-prod-alerts"]) && !startswith(aws_cloudwatch_metric_alarm.api_origin_secret_rejected[0].alarm_name, "ewr-compliance-breaker-")
+    error_message = "api-direct-calls (fired once on purpose by the go-live check) pages the regional topic only, and its name is outside the breaker topic's publishers: it never trips the breaker."
   }
   assert {
-    condition = alltrue([for a in [aws_cloudwatch_metric_alarm.api_origin_secret_rejected[0], aws_cloudwatch_metric_alarm.api_invocations[0]] :
-    a.alarm_actions == toset(["arn:aws:sns:af-south-1:000000000000:ewr-compliance-prod-alerts"])])
-    error_message = "The two flood alarms page through the regional topic."
+    condition = (
+      aws_cloudwatch_metric_alarm.breaker_invocations["api"].metric_name == "Invocations" &&
+      aws_cloudwatch_metric_alarm.breaker_invocations["api"].dimensions.FunctionName == "ewr-compliance-api" &&
+      contains(aws_cloudwatch_metric_alarm.breaker_invocations["api"].alarm_actions, "arn:aws:sns:af-south-1:000000000000:ewr-compliance-prod-alerts") &&
+      length([for k, a in aws_cloudwatch_metric_alarm.breaker_invocations : a if a.dimensions.FunctionName == "ewr-compliance-api"]) == 1
+    )
+    error_message = "The API's run count has one alarm, the breaker's trip (breaker.tf), which also pages the regional topic."
   }
 }
 
@@ -506,8 +499,8 @@ run "no_alarms_when_alarms_are_off" {
     alarms_enabled = false
   }
   assert {
-    condition     = length(aws_cloudwatch_metric_alarm.api_origin_secret_rejected) == 0 && length(aws_cloudwatch_metric_alarm.api_invocations) == 0
-    error_message = "alarms_enabled = false creates neither flood alarm."
+    condition     = length(aws_cloudwatch_metric_alarm.api_origin_secret_rejected) == 0 && length(aws_cloudwatch_metric_alarm.breaker_invocations) == 1
+    error_message = "alarms_enabled = false drops api-direct-calls, but never the breaker's trips: they are the breaker, not notices."
   }
 }
 
@@ -551,7 +544,9 @@ run "rejects_an_unknown_signer" {
 
 # --- Reserved concurrency leaves the pipeline its headroom ---------------------
 # Lambda keeps 100 executions unreserved for the functions without a
-# reservation, the DWS pipeline among them; a new account's limit is 10.
+# reservation, the DWS pipeline among them; a new account's limit is 10. The
+# one rule (variables.tf, api_reserved_concurrency) counts every reservation:
+# the API's, the spend breaker's 1, and the DWS pipeline's (none).
 
 run "no_reservation_by_default" {
   command = plan
@@ -606,6 +601,33 @@ run "refuses_a_reservation_into_the_unreserved_100" {
     api_reserved_concurrency         = 5
   }
   expect_failures = [var.api_reserved_concurrency]
+}
+
+# The quota needed is the API's reservation + the breaker's 1 (breaker.tf; the
+# DWS pipeline reserves none) + Lambda's 100 unreserved: 105 leaves 99.
+run "refuses_a_reservation_that_leaves_the_breaker_no_room" {
+  command = plan
+  variables {
+    site_enabled                     = true
+    auth_enabled                     = true
+    lambda_account_concurrency_limit = 105
+    api_reserved_concurrency         = 5
+  }
+  expect_failures = [var.api_reserved_concurrency]
+}
+
+run "reserves_at_exactly_the_quota" {
+  command = plan
+  variables {
+    site_enabled                     = true
+    auth_enabled                     = true
+    lambda_account_concurrency_limit = 106
+    api_reserved_concurrency         = 5
+  }
+  assert {
+    condition     = aws_lambda_function.api[0].reserved_concurrent_executions == 5 && aws_lambda_function.breaker[0].reserved_concurrent_executions == 1
+    error_message = "106 = 5 (API) + 1 (breaker) + 100 unreserved: the smallest limit that plans."
+  }
 }
 
 run "reserves_once_the_limit_is_raised" {
