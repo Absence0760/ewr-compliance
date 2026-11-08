@@ -46,5 +46,10 @@ dws_schedule_enabled = false
 # dws_contact        = "dws-contact@example.org"
 
 # Once the account's Lambda concurrency limit is raised (Deploy readiness, go-live checks):
-# lambda_account_concurrency_limit = 1000  # read it with aws lambda get-account-settings
+# lambda_account_concurrency_limit = 1000  # read it with aws lambda get-account-settings; at least API reserved + 1 (the breaker) + 100
 # api_reserved_concurrency = 5
+
+# Optional, after go-live: CloudFront's flat-rate Pro plan ($15 a month, no
+# overage), created pending and unbilled until approved in the console
+# (docs/hosting.md § Cost controls). "none" is pay as you go.
+# cloudfront_flat_rate_plan = "PRO"

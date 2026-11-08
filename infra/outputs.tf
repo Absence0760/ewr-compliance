@@ -73,3 +73,26 @@ output "dws_api_key_secret_arn" {
   description = "The empty secret the operator puts the DWS API key into, once DWS issues one."
   value       = var.dws_enabled ? aws_secretsmanager_secret.dws_api_key[0].arn : null
 }
+
+output "aws_region" {
+  description = "The workload region, which tools/breaker-reset.sh reads."
+  value       = var.aws_region
+}
+
+output "api_reserved_concurrency" {
+  description = "The API's reserved concurrency as Terraform sets it: a number, or \"none\" (unreserved). tools/breaker-reset.sh reopens the API to it."
+  value       = var.api_reserved_concurrency == null ? "none" : tostring(var.api_reserved_concurrency)
+}
+
+output "breaker_protected_functions" {
+  description = "The functions the spend breaker (breaker.tf) stops, by its alarm-name prefix; tools/breaker-reset.sh re-arms and reopens them."
+  value       = local.breaker_targets
+}
+
+output "cloudfront_flat_rate_subscription" {
+  description = "The CloudFront flat-rate plan subscription (flat_rate_plan.tf), when cloudfront_flat_rate_plan isn't \"none\": its ARN and status (PENDING_APPROVAL until the operator approves it in the console)."
+  value = var.cloudfront_flat_rate_plan == "none" ? null : {
+    arn    = aws_pricingplanmanager_subscription.cloudfront[0].arn
+    status = aws_pricingplanmanager_subscription.cloudfront[0].status
+  }
+}

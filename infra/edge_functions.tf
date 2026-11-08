@@ -22,8 +22,11 @@
 #      the pages use relative paths and must be loaded from the folder
 #      (trailingSlash = 'always', src/routes/+layout.ts).
 #
+#   4. Every answer it makes itself (the 302, 401, 301 and 404) carries the
+#      site's security headers: site_response below never sees those.
+#
 # The code is plain ES5 for cloudfront-js-2.0, and decodes base64 itself so
-# it depends on nothing the runtime may lack. infra/scripts/edge-functions.test.ts
+# it depends on nothing the runtime may lack. tools/edge-functions.test.ts
 # runs it (vitest), from this heredoc.
 #
 # Cost: $0.10 per million invocations.
@@ -98,7 +101,16 @@ resource "aws_cloudfront_function" "site_request" {
       return qs === undefined ? '' : '?' + qs;
     }
 
+    // site_response (below) never runs on an answer made here, so these carry its headers themselves.
+    var SECURITY = {
+      'strict-transport-security': 'max-age=63072000; includeSubDomains',
+      'x-content-type-options': 'nosniff',
+      'content-security-policy': "frame-ancestors 'none'",
+      'referrer-policy': 'strict-origin-when-cross-origin'
+    };
+
     function answer(code, description, headers, body) {
+      for (var name in SECURITY) headers[name] = { value: SECURITY[name] };
       headers['cache-control'] = { value: 'no-store' };
       var r = { statusCode: code, statusDescription: description, headers: headers };
       if (body !== undefined) r.body = { encoding: 'text', data: body };
@@ -108,8 +120,7 @@ resource "aws_cloudfront_function" "site_request" {
     function unsigned(request) {
       if (request.headers['x-requested-with']) {
         return answer(401, 'Unauthorized', {
-          'content-type': { value: 'application/json; charset=utf-8' },
-          'x-content-type-options': { value: 'nosniff' }
+          'content-type': { value: 'application/json; charset=utf-8' }
         }, '{"error":"signin_required","signin":"/signin/"}');
       }
       return answer(302, 'Found', {
@@ -140,6 +151,86 @@ resource "aws_cloudfront_function" "site_request" {
         return answer(301, 'Moved Permanently', { location: { value: uri + '/' + query(request) } });
       }
       return request;
+    }
+  EOT
+}
+
+# ----------------------------------------------------------------------------
+# site_response: the viewer-response CloudFront Function on every behaviour
+# (site.tf), which sets the security headers. It replaced the two
+# response-headers policies (decision Q7, docs/hosting.md § Cost controls):
+# CloudFront's flat-rate Free and Pro plans allow only AWS's managed
+# response-headers policies, and custom ones need Business ($200 a month).
+#
+#   site (every path but /api/*), the retired static/_headers file's three
+#   plus HSTS:
+#     Strict-Transport-Security: max-age=63072000; includeSubDomains
+#     X-Content-Type-Options: nosniff
+#     Content-Security-Policy: frame-ancestors 'none'
+#     Referrer-Policy: strict-origin-when-cross-origin
+#   The page's own policy is SvelteKit's meta tag (vite.config.ts), with the
+#   hash of its start-up script; this adds frame-ancestors, which a meta tag
+#   can't carry. Two policies are enforced together, so it only tightens.
+#   No preload: that is for a registrable domain, and the parent isn't this
+#   project's to preload.
+#
+#   api (/api/*): JSON, nothing in it may load, run or be framed:
+#     the same HSTS and nosniff, Content-Security-Policy: default-src 'none';
+#     base-uri 'none'; form-action 'none'; frame-ancestors 'none', and
+#     Referrer-Policy: no-referrer.
+#
+# Each header is set over whatever the origin sent, as the policies'
+# override = true did. Cache-Control is not touched: it differs by file, and
+# tools/deploy.sh sets it on each object as it uploads.
+#
+# Where a function can't reach. CloudFront never runs a viewer-response
+# function when the origin answers 400 or more, nor on an answer a
+# viewer-request function made. So:
+#   - site_request's own answers set the site's headers themselves (above);
+#   - the API sets its four on every answer, refusals included
+#     (server/src/http.ts BASE_HEADERS);
+#   - left without them: S3's own 404 (and the store's 403) XML error bodies,
+#     the sign-in page CloudFront serves for its own 403 (a cookie whose
+#     signature fails; site.tf custom_error_response), WAF's 429 JSON and
+#     CloudFront's own 5xx. The policies covered those. What it costs:
+#     docs/hosting.md § Headers.
+#
+# One function serves every behaviour of the one distribution. A flat-rate
+# plan forbids a function shared with another distribution, so it is never
+# associated with any other. Plain ES5 for cloudfront-js-2.0, well under the
+# 10 KB limit; tools/edge-functions.test.ts runs it and checks the size, and
+# infra/tests/security_headers.tftest.hcl pins its wiring.
+#
+# Cost: $0.10 per million invocations (one more per request than the
+# policies, which were free), included in a flat-rate plan.
+# ----------------------------------------------------------------------------
+
+resource "aws_cloudfront_function" "site_response" {
+  count   = local.site
+  name    = "${local.project}-site-response"
+  runtime = "cloudfront-js-2.0"
+  comment = "Security headers: the site's, or the API's under /api/"
+  publish = true
+  code    = <<-EOT
+    var HSTS = 'max-age=63072000; includeSubDomains';
+    var SITE = {
+      'strict-transport-security': HSTS,
+      'x-content-type-options': 'nosniff',
+      'content-security-policy': "frame-ancestors 'none'",
+      'referrer-policy': 'strict-origin-when-cross-origin'
+    };
+    var API = {
+      'strict-transport-security': HSTS,
+      'x-content-type-options': 'nosniff',
+      'content-security-policy': "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      'referrer-policy': 'no-referrer'
+    };
+
+    function handler(event) {
+      var response = event.response;
+      var set = event.request.uri.indexOf('/api/') === 0 ? API : SITE;
+      for (var name in set) response.headers[name] = { value: set[name] };
+      return response;
     }
   EOT
 }

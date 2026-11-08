@@ -328,36 +328,44 @@ resource "aws_cloudfront_distribution" "site" {
 
   # Every path but the ones below: signed cookies only.
   default_cache_behavior {
-    target_origin_id           = "s3-site"
-    viewer_protocol_policy     = "redirect-to-https"
-    allowed_methods            = ["GET", "HEAD", "OPTIONS"]
-    cached_methods             = ["GET", "HEAD"]
-    compress                   = true
-    cache_policy_id            = local.cache_policy_caching_optimized
-    response_headers_policy_id = aws_cloudfront_response_headers_policy.site[0].id
-    trusted_key_groups         = [aws_cloudfront_key_group.signing[0].id]
+    target_origin_id       = "s3-site"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD"]
+    compress               = true
+    cache_policy_id        = local.cache_policy_caching_optimized
+    trusted_key_groups     = [aws_cloudfront_key_group.signing[0].id]
 
     function_association {
       event_type   = "viewer-request"
       function_arn = aws_cloudfront_function.site_request[0].arn
+    }
+
+    function_association {
+      event_type   = "viewer-response"
+      function_arn = aws_cloudfront_function.site_response[0].arn
     }
   }
 
   # The sign-in page, unsigned. The same function: it skips the cookie check
   # under /signin/ and still adds index.html.
   ordered_cache_behavior {
-    path_pattern               = "/signin/*"
-    target_origin_id           = "s3-site"
-    viewer_protocol_policy     = "redirect-to-https"
-    allowed_methods            = ["GET", "HEAD"]
-    cached_methods             = ["GET", "HEAD"]
-    compress                   = true
-    cache_policy_id            = local.cache_policy_caching_optimized
-    response_headers_policy_id = aws_cloudfront_response_headers_policy.site[0].id
+    path_pattern           = "/signin/*"
+    target_origin_id       = "s3-site"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    compress               = true
+    cache_policy_id        = local.cache_policy_caching_optimized
 
     function_association {
       event_type   = "viewer-request"
       function_arn = aws_cloudfront_function.site_request[0].arn
+    }
+
+    function_association {
+      event_type   = "viewer-response"
+      function_arn = aws_cloudfront_function.site_response[0].arn
     }
   }
 
@@ -367,19 +375,23 @@ resource "aws_cloudfront_distribution" "site" {
   dynamic "ordered_cache_behavior" {
     for_each = local.dws_served ? [1] : []
     content {
-      path_pattern               = "/dws/*"
-      target_origin_id           = "s3-dws"
-      viewer_protocol_policy     = "redirect-to-https"
-      allowed_methods            = ["GET", "HEAD", "OPTIONS"]
-      cached_methods             = ["GET", "HEAD"]
-      compress                   = true
-      cache_policy_id            = local.cache_policy_caching_optimized
-      response_headers_policy_id = aws_cloudfront_response_headers_policy.site[0].id
-      trusted_key_groups         = [aws_cloudfront_key_group.signing[0].id]
+      path_pattern           = "/dws/*"
+      target_origin_id       = "s3-dws"
+      viewer_protocol_policy = "redirect-to-https"
+      allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+      cached_methods         = ["GET", "HEAD"]
+      compress               = true
+      cache_policy_id        = local.cache_policy_caching_optimized
+      trusted_key_groups     = [aws_cloudfront_key_group.signing[0].id]
 
       function_association {
         event_type   = "viewer-request"
         function_arn = aws_cloudfront_function.site_request[0].arn
+      }
+
+      function_association {
+        event_type   = "viewer-response"
+        function_arn = aws_cloudfront_function.site_response[0].arn
       }
     }
   }
@@ -391,15 +403,19 @@ resource "aws_cloudfront_distribution" "site" {
   dynamic "ordered_cache_behavior" {
     for_each = local.api_enabled ? [1] : []
     content {
-      path_pattern               = "/api/*"
-      target_origin_id           = "lambda-api"
-      viewer_protocol_policy     = "https-only"
-      allowed_methods            = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
-      cached_methods             = ["GET", "HEAD"]
-      compress                   = true
-      cache_policy_id            = local.cache_policy_caching_disabled
-      origin_request_policy_id   = local.origin_request_all_except_host
-      response_headers_policy_id = aws_cloudfront_response_headers_policy.api[0].id
+      path_pattern             = "/api/*"
+      target_origin_id         = "lambda-api"
+      viewer_protocol_policy   = "https-only"
+      allowed_methods          = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+      cached_methods           = ["GET", "HEAD"]
+      compress                 = true
+      cache_policy_id          = local.cache_policy_caching_disabled
+      origin_request_policy_id = local.origin_request_all_except_host
+
+      function_association {
+        event_type   = "viewer-response"
+        function_arn = aws_cloudfront_function.site_response[0].arn
+      }
     }
   }
 

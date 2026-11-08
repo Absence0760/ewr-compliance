@@ -132,6 +132,111 @@ variable "cloudfront_requests_alarm_per_5min" {
   }
 }
 
+# --- Spend breaker (breaker.tf) -----------------------------------------------
+# Each trip stops one function (its reserved concurrency to 0) until the
+# operator resets it. Prices: af-south-1 Lambda arm64 $0.00001768 a GB-second
+# and $0.27 a million requests (docs/hosting.md § Cost controls). A month is
+# 2 592 000 s. The bounds keep a trip both above the function's legitimate
+# peak and below a monthly cost that matters.
+
+variable "breaker_api_concurrency" {
+  description = "Trip the API (reserved concurrency to 0) when it holds this many copies busy in each of 3 consecutive 5-minute periods. A handful of people make one call at a time each; a sign-in step takes its 1-second floor. At saturation (10 copies, the account's limit) it trips in about 15 minutes, having spent at most 10 x 900 s x 0.25 GB x $0.00001768 = $0.04. At least 2, and at most the API's cap (api_reserved_concurrency, else lambda_account_concurrency_limit): above it the alarm could never fire."
+  type        = number
+  default     = 4
+
+  validation {
+    condition     = var.breaker_api_concurrency >= 2 && var.breaker_api_concurrency <= (var.api_reserved_concurrency == null ? var.lambda_account_concurrency_limit : var.api_reserved_concurrency)
+    error_message = "breaker_api_concurrency must be at least 2 and at most api_reserved_concurrency (or, with none, lambda_account_concurrency_limit): above the cap the metric can't reach it."
+  }
+}
+
+variable "breaker_api_duration_ms_per_hour" {
+  description = <<-EOT
+    Trip the API when its billed Duration over a clock hour passes this many
+    milliseconds. 3 600 000 is one copy busy the whole hour, against a handful
+    of people's few seconds a page. Under it all month: 3 600 000 ms x 720 h =
+    2 592 000 s x 0.25 GB x $0.00001768 = $11.46.
+  EOT
+  type        = number
+  default     = 3600000
+
+  validation {
+    condition     = var.breaker_api_duration_ms_per_hour >= 1800000 && var.breaker_api_duration_ms_per_hour <= 7200000
+    error_message = "breaker_api_duration_ms_per_hour must be 1 800 000-7 200 000 (half a copy to two copies busy the whole hour; at most $22.91 a month)."
+  }
+}
+
+variable "breaker_api_invocations_per_5min" {
+  description = "Trip the API when it runs more than this many times in each of 3 consecutive 5-minute periods: a flood of fast calls, which bills requests and log lines but almost no Duration. 3 000 is 10 a second for 15 minutes on end, against a handful of people's tens per 5 minutes (api_invocations_alarm_per_5min mails first, at 1 000 in one period). Under it all month: 25.92 M x $0.27 per million = $7.00, plus about $7.40 of log lines."
+  type        = number
+  default     = 3000
+
+  validation {
+    condition     = var.breaker_api_invocations_per_5min >= 600 && var.breaker_api_invocations_per_5min <= 6000
+    error_message = "breaker_api_invocations_per_5min must be 600-6 000 (2-20 calls a second sustained)."
+  }
+}
+
+variable "breaker_dws_concurrency" {
+  description = "Trip the DWS pipeline when it holds this many copies busy in each of 3 consecutive 5-minute periods. The lease lets one run work at a time and any other ends at once with LeaseBusy, so a legitimate moment holds 2 at most (the backfill's window and the daily run, or a pull by hand), never for 15 minutes. At least 3 for that reason, and at most lambda_account_concurrency_limit."
+  type        = number
+  default     = 3
+
+  validation {
+    condition     = var.breaker_dws_concurrency >= 3 && var.breaker_dws_concurrency <= var.lambda_account_concurrency_limit
+    error_message = "breaker_dws_concurrency must be at least 3 (the lease's legitimate 2 at a moment) and at most lambda_account_concurrency_limit."
+  }
+}
+
+variable "breaker_dws_duration_ms_per_hour" {
+  description = <<-EOT
+    Trip the DWS pipeline when its billed Duration over a clock hour passes
+    this many milliseconds. A backfill holds one copy busy the whole hour at
+    most (a window up to 900 s, then dws_backfill_wait_seconds), and the
+    lease stops any second run within a second. Lambda dates a run's
+    Duration at its start, so a run begun in the hour's last second counts
+    its whole 900 s there: a legitimate hour sums 3 600 000 + 900 000 =
+    4 500 000 ms at most. 5 400 000 (1.5 copies) leaves 900 000 over that.
+    Under it all month:
+    5 400 000 ms x 720 h = 3 888 000 s x 0.25 GB x $0.00001768 = $17.19.
+  EOT
+  type        = number
+  default     = 5400000
+
+  validation {
+    condition     = var.breaker_dws_duration_ms_per_hour > 4500000 && var.breaker_dws_duration_ms_per_hour <= 14400000
+    error_message = "breaker_dws_duration_ms_per_hour must be above 4 500 000 (a backfill's busiest hour: one copy the whole hour, plus a run begun in its last second) and at most 14 400 000 (4 copies busy the whole hour, $45.83 a month)."
+  }
+}
+
+variable "breaker_dws_invocations_per_5min" {
+  description = "Trip the DWS pipeline when it runs more than this many times in each of 3 consecutive 5-minute periods. The daily rule runs it once a day, and the backfill about once a minute at most (a window, then the pause; a LeaseBusy retry every 2 minutes; Lambda's own errors after a minute), so a legitimate 5 minutes holds a handful. 60 (one every 5 s) is a loop, which would also be asking DWS far faster than the one request a second its politeness allows."
+  type        = number
+  default     = 60
+
+  validation {
+    condition     = var.breaker_dws_invocations_per_5min >= 30 && var.breaker_dws_invocations_per_5min <= 600
+    error_message = "breaker_dws_invocations_per_5min must be 30-600."
+  }
+}
+
+# --- CloudFront flat-rate plan (flat_rate_plan.tf) -----------------------------
+
+variable "cloudfront_flat_rate_plan" {
+  description = "CloudFront's flat-rate pricing plan for the distribution: \"none\" (pay as you go, the default) or \"PRO\" ($15 a month, no overage charges: the distribution, its WAF web ACL and the Route 53 zone in one price). With PRO, Terraform creates the subscription with approval_mode MANUAL, so nothing is billed until the operator approves it in the CloudFront console (docs/hosting.md § Cost controls). Needs site_enabled."
+  type        = string
+  default     = "none"
+
+  validation {
+    condition     = contains(["none", "PRO"], var.cloudfront_flat_rate_plan)
+    error_message = "cloudfront_flat_rate_plan is \"none\" or \"PRO\". Business ($200) would be needed only for custom cache, origin-request or response-header policies, which this stack doesn't use."
+  }
+  validation {
+    condition     = var.cloudfront_flat_rate_plan == "none" || var.site_enabled
+    error_message = "cloudfront_flat_rate_plan needs site_enabled: the plan covers the distribution."
+  }
+}
+
 # --- Deploy role (oidc.tf) ---------------------------------------------------
 
 variable "deploy_lambda_functions" {
@@ -145,7 +250,7 @@ variable "deploy_lambda_functions" {
   }
 }
 
-# --- Site (site.tf, edge_functions.tf, security_headers.tf, waf.tf) ----------
+# --- Site (site.tf, edge_functions.tf, waf.tf, flat_rate_plan.tf) -----------
 
 variable "site_enabled" {
   description = "Create the gated site: the private bucket, the certificate, the distribution, its WAF and the signing-key secret (P2). Off by default, so P1's skeleton applies before the CloudFront key pair exists (infra/README.md, H7)."
@@ -292,7 +397,7 @@ variable "api_log_retention_days" {
 }
 
 variable "api_reserved_concurrency" {
-  description = "Reserved concurrency for the API, which also caps it. null (the default) reserves none: a new account's limit can be 10, all of which must stay unreserved. Required (5 is plenty) once the account's limit is raised and lambda_account_concurrency_limit says so: the plan refuses a raised limit with no cap."
+  description = "Reserved concurrency for the API, which also caps it. null (the default) reserves none: a new account's limit can be 10, all of which must stay unreserved. Required (5 is plenty) once the account's limit is raised and lambda_account_concurrency_limit says so: the plan refuses a raised limit with no cap. The limit must cover every reservation plus Lambda's 100 unreserved; lambda_account_concurrency_limit's validation is that rule."
   type        = number
   default     = null
 
@@ -300,44 +405,52 @@ variable "api_reserved_concurrency" {
     condition     = var.api_reserved_concurrency == null ? true : (var.api_reserved_concurrency >= 1 && var.api_reserved_concurrency <= 50)
     error_message = "null, or between 1 and 50."
   }
-
-  # Lambda keeps 100 of the account's concurrency unreserved, for every
-  # function without a reservation, the DWS pipeline among them; an apply that
-  # reserves into it fails. Checked here, at plan, against the limit the
-  # operator read and set below.
-  validation {
-    condition     = var.api_reserved_concurrency == null ? true : var.lambda_account_concurrency_limit - var.api_reserved_concurrency >= 100
-    error_message = "api_reserved_concurrency leaves the account fewer than the 100 unreserved executions Lambda keeps for the other functions (the DWS pipeline). Raise the account's Lambda concurrency limit (Service Quotas, \"Concurrent executions\"), set lambda_account_concurrency_limit to the new value (aws lambda get-account-settings), then set api_reserved_concurrency = 5."
-  }
-
-  # The other way round: once the account's limit is raised, the API must be
-  # capped, or a flood of its public Function URL (which skips the WAF) can run
-  # as many copies at once as the new limit allows, each billed.
-  validation {
-    condition     = !var.auth_enabled || var.lambda_account_concurrency_limit <= 10 || var.api_reserved_concurrency != null
-    error_message = "lambda_account_concurrency_limit is raised but the API has no cap: set api_reserved_concurrency = 5 in the same apply, so a flood of its Function URL can't run more than 5 at once."
-  }
 }
 
 variable "api_invocations_alarm_per_5min" {
-  description = "Alarm when the sign-in API runs more than this many times in 5 minutes. A signed-in person makes a few calls a page and one renewal every 15 minutes, so 1000 is many times a busy 5 minutes for a handful of users."
+  description = "Mail (only) when the sign-in API runs more than this many times in 5 minutes: the early warning. A signed-in person makes a few calls a page and one renewal every 15 minutes, so 1000 is many times a busy 5 minutes for a handful of users. Below breaker_api_invocations_per_5min, the spend breaker's trip, so it mails before the breaker acts, and for a flood that never reaches the trip."
   type        = number
   default     = 1000
 
   validation {
-    condition     = var.api_invocations_alarm_per_5min >= 100 && var.api_invocations_alarm_per_5min <= 100000
-    error_message = "Between 100 and 100000."
+    condition     = var.api_invocations_alarm_per_5min >= 100 && var.api_invocations_alarm_per_5min < var.breaker_api_invocations_per_5min
+    error_message = "api_invocations_alarm_per_5min must be at least 100 and below breaker_api_invocations_per_5min: the mail comes before the trip."
   }
 }
 
 variable "lambda_account_concurrency_limit" {
-  description = "The account's Lambda concurrent-executions limit in the workload region, as `aws lambda get-account-settings --query AccountLimit.ConcurrentExecutions` reads it. Only checked against api_reserved_concurrency. 10, a new account's limit, until it is raised."
+  description = "The account's Lambda concurrent-executions limit in the workload region, as `aws lambda get-account-settings --query AccountLimit.ConcurrentExecutions` reads it. 10, a new account's limit, until it is raised. Once it is raised it must cover every reservation plus the 100 unreserved executions Lambda keeps: API reserved (api_reserved_concurrency) + DWS reserved (none) + the spend breaker's 1 + 100, so at least 106 with api_reserved_concurrency = 5. At 10 nothing may be reserved."
   type        = number
   default     = 10
 
   validation {
     condition     = var.lambda_account_concurrency_limit >= 10 && floor(var.lambda_account_concurrency_limit) == var.lambda_account_concurrency_limit
     error_message = "A whole number, at least 10."
+  }
+
+  # The other way round: once the account's limit is raised, the API must be
+  # capped, or a flood of its public Function URL (which skips the WAF) can run
+  # as many copies at once as the new limit allows, each billed. Here rather
+  # than on api_reserved_concurrency: two variables' validations may not refer
+  # to each other.
+  validation {
+    condition     = !var.auth_enabled || var.lambda_account_concurrency_limit <= 10 || var.api_reserved_concurrency != null
+    error_message = "lambda_account_concurrency_limit is raised but the API has no cap: set api_reserved_concurrency = 5 in the same apply, so a flood of its Function URL can't run more than 5 at once."
+  }
+
+  # The one quota rule. Lambda keeps 100 of the account's concurrency
+  # unreserved, for every function without a reservation (the DWS pipeline
+  # among them), and refuses a reservation that cuts into it. At 10 nothing is
+  # reserved: the API's reservation must be null, and the breaker reserves none
+  # (breaker.tf breaker_reserved). Above 10 the breaker reserves 1 whatever the
+  # API does, so the rule holds with api_reserved_concurrency null too.
+  validation {
+    condition = (
+      var.lambda_account_concurrency_limit <= 10
+      ? var.api_reserved_concurrency == null
+      : var.lambda_account_concurrency_limit - coalesce(var.api_reserved_concurrency, 0) - 1 >= 100
+    )
+    error_message = "The reservations leave the account fewer than the 100 unreserved executions Lambda keeps: it needs API reserved (api_reserved_concurrency) + DWS reserved (none) + the spend breaker's 1 + 100. At 10 nothing can be reserved. Raise the account's Lambda concurrency limit (Service Quotas, \"Concurrent executions\"), set lambda_account_concurrency_limit to the new value (aws lambda get-account-settings), then api_reserved_concurrency = 5 (at least 106 in all)."
   }
 }
 

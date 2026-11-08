@@ -86,18 +86,10 @@ override_resource {
 }
 
 override_resource {
-  target          = aws_cloudfront_response_headers_policy.site
+  target          = aws_cloudfront_function.site_response
   override_during = plan
   values = {
-    id = "rhp-site"
-  }
-}
-
-override_resource {
-  target          = aws_cloudfront_response_headers_policy.api
-  override_during = plan
-  values = {
-    id = "rhp-api"
+    arn = "arn:aws:cloudfront::000000000000:function/ewr-compliance-site-response"
   }
 }
 
@@ -293,8 +285,9 @@ run "site_wiring" {
     error_message = "The edge function runs on every default-behaviour request."
   }
   assert {
-    condition     = one(aws_cloudfront_distribution.site[0].default_cache_behavior).response_headers_policy_id == "rhp-site"
-    error_message = "The site's headers policy is on the default behaviour."
+    condition = one([for f in one(aws_cloudfront_distribution.site[0].default_cache_behavior).function_association :
+    f if f.event_type == "viewer-response"]).function_arn == aws_cloudfront_function.site_response[0].arn
+    error_message = "The headers function (site_response) is on the default behaviour."
   }
   assert {
     condition     = [for b in aws_cloudfront_distribution.site[0].ordered_cache_behavior : b.path_pattern] == ["/signin/*"]

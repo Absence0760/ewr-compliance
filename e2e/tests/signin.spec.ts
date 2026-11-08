@@ -1,5 +1,5 @@
 import { expect, test, USER_API } from '../support/app.ts';
-import type { Page, Request } from '@playwright/test';
+import { test as plain, type Page, type Request } from '@playwright/test';
 
 // The sign-in page (static/signin/), against a made-up API: an address, a code from the email, then
 // back where the person was going. The API's own rules are server/src/app.test.ts's.
@@ -148,3 +148,29 @@ test.describe('sign-in', () => {
 		expect(loaded).toContain('/signin/signin.js');
 	});
 });
+
+// CloudFront serves the sign-in page for its own 403 without frame-ancestors, so the page guards
+// itself (static/signin/signin.js). Framed from another origin (the sub-path server's port), it hides
+// and wires nothing: not even the session refresh it sends on load. Plain test: the guard's own throw
+// is the point, so the app fixture's no-page-error rule doesn't apply. The hidden attribute appearing
+// is what shows the script ran.
+plain('refuses to run inside a frame from another origin', async ({ page }) => {
+	const api: string[] = [];
+	page.on('request', (r) => {
+		if (r.url().includes('/api/')) api.push(r.url());
+	});
+	// A real answer from the other server (its empty 404 outside /ewr/), not a routed one: Chrome's
+	// local-network checks refuse a localhost frame inside a page that came from no address.
+	await page.goto('http://localhost:7796/frame-host');
+	await page.evaluate(() => {
+		const frame = document.createElement('iframe');
+		frame.src = 'http://localhost:7795/signin/';
+		frame.width = frame.height = '600';
+		document.body.append(frame);
+	});
+	const frame = page.frameLocator('iframe');
+	await expect(frame.locator('html')).toHaveAttribute('hidden', '');
+	await expect(frame.getByRole('textbox', { name: 'Email address' })).toBeHidden();
+	expect(api).toEqual([]);
+});
+
