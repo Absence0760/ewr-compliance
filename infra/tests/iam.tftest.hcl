@@ -88,18 +88,10 @@ override_resource {
 }
 
 override_resource {
-  target          = aws_cloudfront_response_headers_policy.site
+  target          = aws_cloudfront_function.site_response
   override_during = plan
   values = {
-    id = "rhp-site"
-  }
-}
-
-override_resource {
-  target          = aws_cloudfront_response_headers_policy.api
-  override_during = plan
-  values = {
-    id = "rhp-api"
+    arn = "arn:aws:cloudfront::000000000000:function/ewr-compliance-site-response"
   }
 }
 

@@ -89,18 +89,10 @@ override_resource {
 }
 
 override_resource {
-  target          = aws_cloudfront_response_headers_policy.site
+  target          = aws_cloudfront_function.site_response
   override_during = plan
   values = {
-    id = "rhp-site"
-  }
-}
-
-override_resource {
-  target          = aws_cloudfront_response_headers_policy.api
-  override_during = plan
-  values = {
-    id = "rhp-api"
+    arn = "arn:aws:cloudfront::000000000000:function/ewr-compliance-site-response"
   }
 }
 
@@ -494,8 +486,11 @@ run "dws_behaviour_is_signed_and_reads_serve_only" {
   }
   assert {
     condition = alltrue([for b in aws_cloudfront_distribution.site[0].ordered_cache_behavior :
-      b.target_origin_id == "s3-dws" && one(b.trusted_key_groups) == "kg-test" && b.response_headers_policy_id == "rhp-site" &&
-      one(b.function_association).function_arn == "arn:aws:cloudfront::000000000000:function/ewr-compliance-site-request" &&
+      b.target_origin_id == "s3-dws" && one(b.trusted_key_groups) == "kg-test" && b.response_headers_policy_id == null &&
+      { for f in b.function_association : f.event_type => f.function_arn } == {
+        "viewer-request"  = "arn:aws:cloudfront::000000000000:function/ewr-compliance-site-request"
+        "viewer-response" = "arn:aws:cloudfront::000000000000:function/ewr-compliance-site-response"
+      } &&
       toset(b.allowed_methods) == toset(["GET", "HEAD", "OPTIONS"])
     if b.path_pattern == "/dws/*"])
     error_message = "/dws/* is signed exactly as the default behaviour: the same key group, function and headers, read-only."

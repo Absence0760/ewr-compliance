@@ -21,11 +21,19 @@ export interface ApiResponse {
 	body: string;
 }
 
-/** Every answer: JSON, never stored by CloudFront or the browser. The security headers come from the API's response-headers policy (infra/security_headers.tf). */
-const BASE_HEADERS = {
+/**
+ * Every answer: JSON, never stored by CloudFront or the browser, and the API's security headers. The
+ * edge sets the same four (infra/edge_functions.tf, site_response), but a CloudFront Function never
+ * runs on a 4xx or 5xx from the origin, so the API sends them itself and its refusals carry them too.
+ * tools/edge-functions.test.ts checks the two lists match.
+ */
+export const BASE_HEADERS = {
 	'Content-Type': 'application/json; charset=utf-8',
 	'Cache-Control': 'no-store',
-	'X-Content-Type-Options': 'nosniff'
+	'X-Content-Type-Options': 'nosniff',
+	'Content-Security-Policy': "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+	'Referrer-Policy': 'no-referrer',
+	'Strict-Transport-Security': 'max-age=63072000; includeSubDomains'
 };
 
 export function json(status: number, value: unknown, extra: { headers?: Record<string, string>; cookies?: string[] } = {}): ApiResponse {

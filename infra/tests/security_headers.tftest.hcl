@@ -1,9 +1,14 @@
 # The response headers, pinned. These replace static/_headers and
 # src/headers.test.ts from the Cloudflare design: the same three headers on
-# every file, now from a CloudFront response-headers policy, plus HSTS.
-# Cache-Control moved to the objects themselves (tools/deploy.sh sets it as it
-# uploads), so the policy must not set it: a policy value would override the
-# per-file one. docs/hosting.md § Headers.
+# every file, plus HSTS, now from the site_response CloudFront Function
+# (edge_functions.tf; decision Q7), which replaced the two response-headers
+# policies so a flat-rate plan can be taken. Its code runs in
+# tools/edge-functions.test.ts; here its text and its wiring are pinned. No
+# response-headers policy is left (Free and Pro allow only AWS's managed ones).
+# Cache-Control is per object (tools/deploy.sh sets it as it uploads), so the
+# function must not set it. The /api/* and /dws/* behaviours' association is
+# pinned in auth.tftest.hcl, dws.tftest.hcl and cost.tftest.hcl.
+# docs/hosting.md § Headers.
 
 # --- Mocks: copied into every test file (a test file can't share them) -------
 # A mocked aws_iam_policy_document renders a random string, which IAM, SNS and
@@ -85,18 +90,10 @@ override_resource {
 }
 
 override_resource {
-  target          = aws_cloudfront_response_headers_policy.site
+  target          = aws_cloudfront_function.site_response
   override_during = plan
   values = {
-    id = "rhp-site"
-  }
-}
-
-override_resource {
-  target          = aws_cloudfront_response_headers_policy.api
-  override_during = plan
-  values = {
-    id = "rhp-api"
+    arn = "arn:aws:cloudfront::000000000000:function/ewr-compliance-site-response"
   }
 }
 
@@ -140,64 +137,59 @@ variables {
   }
 }
 
-run "site_headers" {
+run "headers_function" {
   command = plan
   variables {
     site_enabled = true
   }
 
   assert {
-    condition     = one(one(aws_cloudfront_response_headers_policy.site[0].security_headers_config).content_security_policy).content_security_policy == "frame-ancestors 'none'"
-    error_message = "The header policy adds frame-ancestors 'none' only: the page's own policy is SvelteKit's meta tag, and a second policy can only tighten it."
+    condition     = aws_cloudfront_function.site_response[0].runtime == "cloudfront-js-2.0" && aws_cloudfront_function.site_response[0].publish
+    error_message = "The headers function is cloudfront-js-2.0, published (an unpublished function is only a DEVELOPMENT stage, never served)."
   }
   assert {
-    condition     = length(one(aws_cloudfront_response_headers_policy.site[0].security_headers_config).content_type_options) == 1
-    error_message = "X-Content-Type-Options: nosniff on every file."
+    condition = alltrue([for h in [
+      "'strict-transport-security': HSTS",
+      "var HSTS = 'max-age=63072000; includeSubDomains';",
+      "'x-content-type-options': 'nosniff'",
+      "'content-security-policy': \"frame-ancestors 'none'\"",
+      "'referrer-policy': 'strict-origin-when-cross-origin'",
+      "'content-security-policy': \"default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\"",
+      "'referrer-policy': 'no-referrer'",
+      "indexOf('/api/') === 0 ? API : SITE",
+    ] : strcontains(aws_cloudfront_function.site_response[0].code, h)])
+    error_message = "The site's four headers (frame-ancestors 'none', nosniff, strict-origin-when-cross-origin, HSTS two years with subdomains and no preload) and the API's (default-src 'none' ..., no-referrer) are in the function's code, the API's under /api/ only."
   }
   assert {
-    condition     = one(one(aws_cloudfront_response_headers_policy.site[0].security_headers_config).referrer_policy).referrer_policy == "strict-origin-when-cross-origin"
-    error_message = "Referrer-Policy: strict-origin-when-cross-origin, as on Pages."
+    condition     = !strcontains(lower(aws_cloudfront_function.site_response[0].code), "cache-control") && !strcontains(aws_cloudfront_function.site_response[0].code, "preload")
+    error_message = "No Cache-Control (per object, tools/deploy.sh) and no HSTS preload (the parent domain isn't this project's to preload)."
   }
   assert {
-    condition = (
-      one(one(aws_cloudfront_response_headers_policy.site[0].security_headers_config).strict_transport_security).access_control_max_age_sec == 63072000 &&
-      one(one(aws_cloudfront_response_headers_policy.site[0].security_headers_config).strict_transport_security).include_subdomains &&
-      !one(one(aws_cloudfront_response_headers_policy.site[0].security_headers_config).strict_transport_security).preload
-    )
-    error_message = "HSTS for two years, subdomains included, no preload (the parent domain isn't this project's to preload)."
+    condition     = length(aws_cloudfront_function.site_response[0].code) < 10240 && length(aws_cloudfront_function.site_request[0].code) < 10240
+    error_message = "A CloudFront Function's code is at most 10 KB."
   }
   assert {
-    condition = alltrue([
-      one(one(aws_cloudfront_response_headers_policy.site[0].security_headers_config).content_security_policy).override,
-      one(one(aws_cloudfront_response_headers_policy.site[0].security_headers_config).content_type_options).override,
-      one(one(aws_cloudfront_response_headers_policy.site[0].security_headers_config).referrer_policy).override,
-      one(one(aws_cloudfront_response_headers_policy.site[0].security_headers_config).strict_transport_security).override,
-    ])
-    error_message = "Every header overrides whatever the origin sends."
-  }
-  assert {
-    condition     = length(aws_cloudfront_response_headers_policy.site[0].custom_headers_config) == 0
-    error_message = "No custom headers: in particular no Cache-Control, which is per object (tools/deploy.sh)."
-  }
-  assert {
-    condition = alltrue([for b in aws_cloudfront_distribution.site[0].ordered_cache_behavior :
-    b.response_headers_policy_id == "rhp-site" if b.target_origin_id == "s3-site"])
-    error_message = "Every behaviour on the bucket carries the site's headers."
+    condition = alltrue([for h in [
+      "'strict-transport-security': 'max-age=63072000; includeSubDomains'",
+      "'content-security-policy': \"frame-ancestors 'none'\"",
+      "for (var name in SECURITY) headers[name]",
+    ] : strcontains(aws_cloudfront_function.site_request[0].code, h)])
+    error_message = "The viewer-request function's own answers (302, 401, 301, 404) carry the site's headers: a viewer-response function never runs on them."
   }
 }
 
-run "api_headers" {
+run "every_site_behaviour_sets_the_headers" {
   command = plan
   variables {
     site_enabled = true
   }
 
   assert {
-    condition     = one(one(aws_cloudfront_response_headers_policy.api[0].security_headers_config).content_security_policy).content_security_policy == "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-    error_message = "API JSON: nothing may load, run or frame."
-  }
-  assert {
-    condition     = one(one(aws_cloudfront_response_headers_policy.api[0].security_headers_config).referrer_policy).referrer_policy == "no-referrer"
-    error_message = "The API sends no referrer."
+    condition = alltrue([for b in concat(aws_cloudfront_distribution.site[0].default_cache_behavior, aws_cloudfront_distribution.site[0].ordered_cache_behavior) :
+      b.response_headers_policy_id == null &&
+      one([for f in b.function_association : f.function_arn if f.event_type == "viewer-response"]) == "arn:aws:cloudfront::000000000000:function/ewr-compliance-site-response" &&
+      one([for f in b.function_association : f.function_arn if f.event_type == "viewer-request"]) == "arn:aws:cloudfront::000000000000:function/ewr-compliance-site-request"
+    ])
+    error_message = "The default and /signin/* behaviours run site_request on the request and site_response on the response, and carry no response-headers policy."
   }
 }

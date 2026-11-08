@@ -56,7 +56,7 @@ export function checkBuild({ files, indexJson, mode }) {
 	}
 
 	// Cloudflare Pages' header file means nothing to S3, and would be served as a file.
-	if (files.some((f) => f.path === '_headers')) errors.push('The build has a _headers file. Headers come from the CloudFront policy (infra/security_headers.tf): remove static/_headers.');
+	if (files.some((f) => f.path === '_headers')) errors.push('The build has a _headers file. Headers come from the CloudFront Function site_response (infra/edge_functions.tf): remove static/_headers.');
 
 	// The edge function sends everyone not signed in to /signin/ (infra/edge_functions.tf), and
 	// CloudFront shows its page for any 403. Without it nobody can sign in, or reach anything.

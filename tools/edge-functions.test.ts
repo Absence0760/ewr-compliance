@@ -1,8 +1,10 @@
-// The CloudFront Function in infra/edge_functions.tf, run as code. The Terraform tests can only look
-// at its text, so here its heredoc is extracted, evaluated, and its handler called with viewer-request
-// events shaped as CloudFront's runtime 2.0 hands them over. It sits in tools/ because vitest collects
+// The CloudFront Functions in infra/edge_functions.tf, run as code. The Terraform tests can only look
+// at their text, so here each heredoc is extracted, evaluated, and its handler called with events
+// shaped as CloudFront's runtime 2.0 hands them over: site_request (viewer request) and
+// site_response (viewer response, the security headers). It sits in tools/ because vitest collects
 // tests there; it needs no AWS, only node.
 import { readFileSync } from 'node:fs';
+import { BASE_HEADERS } from '../server/src/http.ts';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 
 const TF = readFileSync(new URL('../infra/edge_functions.tf', import.meta.url), 'utf8');
@@ -114,6 +116,7 @@ describe('site_request', () => {
 		it("answers the app's own fetches with 401 JSON", () => {
 			const r = handler(request('/data/index.json', { headers: { 'x-requested-with': { value: 'fetch' } } }));
 			expect(r.statusCode).toBe(401);
+			expect(r.headers['x-content-type-options'].value).toBe('nosniff');
 			expect(r.headers['content-type'].value).toBe('application/json; charset=utf-8');
 			expect(r.headers['cache-control'].value).toBe('no-store');
 			expect(JSON.parse(r.body.data)).toEqual({ error: 'signin_required', signin: '/signin/' });
@@ -174,5 +177,89 @@ describe('site_request', () => {
 			expect(decode(enc), text).toBe(text);
 		}
 		expect(decode('a$b')).toBeNull();
+	});
+});
+
+const ES5 = (source: string) => {
+	expect(Buffer.byteLength(source)).toBeLessThan(10 * 1024);
+	expect(source).not.toMatch(/\b(let|const|class)\b|=>|`/);
+	expect(source).not.toMatch(/\$\{/);
+};
+
+/** The four headers the retired response-headers policies set, as CloudFront sent them. */
+const SITE_HEADERS = {
+	'strict-transport-security': 'max-age=63072000; includeSubDomains',
+	'x-content-type-options': 'nosniff',
+	'content-security-policy': "frame-ancestors 'none'",
+	'referrer-policy': 'strict-origin-when-cross-origin'
+};
+const API_HEADERS = {
+	'strict-transport-security': 'max-age=63072000; includeSubDomains',
+	'x-content-type-options': 'nosniff',
+	'content-security-policy': "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+	'referrer-policy': 'no-referrer'
+};
+const values = (headers: Record<string, { value: string }>, names: string[]) => Object.fromEntries(names.map((n) => [n, headers[n]?.value]));
+
+describe('site_request answers carry the site headers', () => {
+	vi.useFakeTimers();
+	vi.setSystemTime(NOW);
+
+	it('on its 302, 401, 301 and 404, which site_response never sees', () => {
+		const answers = [
+			handler(request('/nodes/')),
+			handler(request('/data/index.json', { headers: { 'x-requested-with': { value: 'fetch' } } })),
+			handler(request('/nodes', { cookies: live() })),
+			handler(request('/a/../b', { cookies: live() }))
+		];
+		expect(answers.map((r) => r.statusCode)).toEqual([302, 401, 301, 404]);
+		for (const r of answers) expect(values(r.headers, Object.keys(SITE_HEADERS))).toEqual(SITE_HEADERS);
+	});
+});
+
+describe('site_response', () => {
+	const RESPONSE = code('site_response');
+	const respond = (new Function(`${RESPONSE}\nreturn handler;`)() as (event: unknown) => { statusCode: number; headers: Record<string, { value: string }> });
+	const event = (uri: string, headers: Record<string, { value: string }> = {}) => ({
+		request: { method: 'GET', uri, querystring: {}, headers: {}, cookies: {} },
+		response: { statusCode: 200, statusDescription: 'OK', headers, cookies: {} },
+		viewer: { ip: '198.51.100.7' }
+	});
+
+	it('stays within CloudFront Functions limits: 10 KB of code, plain ES5', () => ES5(RESPONSE));
+
+	it('sets the site headers on every path but /api/, exactly as the policy did', () => {
+		for (const uri of ['/index.html', '/nodes/index.html', '/signin/index.html', '/signin/signin.js', '/data/index.json', '/dws/index.json', '/_app/immutable/workers/x.mjs', '/apiary/index.html']) {
+			const r = respond(event(uri));
+			expect(r.statusCode, uri).toBe(200);
+			expect(r.headers, uri).toEqual(Object.fromEntries(Object.entries(SITE_HEADERS).map(([k, v]) => [k, { value: v }])));
+		}
+	});
+
+	it('sets the API headers under /api/', () => {
+		for (const uri of ['/api/me', '/api/auth/code', '/api/users']) {
+			expect(values(respond(event(uri)).headers, Object.keys(API_HEADERS)), uri).toEqual(API_HEADERS);
+		}
+	});
+
+	it('overrides what the origin sent, and leaves its other headers alone, Cache-Control above all', () => {
+		const r = respond(
+			event('/data/index.json', {
+				'referrer-policy': { value: 'unsafe-url' },
+				'content-security-policy': { value: '' },
+				'cache-control': { value: 'private, no-cache' },
+				'content-type': { value: 'application/json' },
+				etag: { value: '"abc"' }
+			})
+		);
+		expect(values(r.headers, Object.keys(SITE_HEADERS))).toEqual(SITE_HEADERS);
+		expect(r.headers['cache-control'].value).toBe('private, no-cache');
+		expect(r.headers['content-type'].value).toBe('application/json');
+		expect(r.headers.etag.value).toBe('"abc"');
+	});
+
+	it('matches what the API sends itself on every answer (server/src/http.ts), which covers its 4xx', () => {
+		const api = Object.fromEntries(Object.entries(BASE_HEADERS).map(([k, v]) => [k.toLowerCase(), v]));
+		expect(values(Object.fromEntries(Object.entries(api).map(([k, v]) => [k, { value: v }])), Object.keys(API_HEADERS))).toEqual(API_HEADERS);
 	});
 });

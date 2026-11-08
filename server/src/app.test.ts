@@ -393,10 +393,13 @@ describe('requests', () => {
 		expect((await call('/api/auth/code', { body: '{"email":"other@example.test"}', headers: { 'content-type': 'Application/JSON; charset=utf-8' } })).status).toBe(202);
 	});
 
-	it('sends no-store and nosniff on every answer', async () => {
+	it('sends no-store and the security headers on every answer, refusals included', async () => {
 		for (const r of [await call('/api/me', { cookie: admin }), await call('/api/me'), await call('/api/nope'), await call('/api/auth/code', { body: { email: 'x' } })]) {
 			expect(r.headers['Cache-Control']).toBe('no-store');
 			expect(r.headers['X-Content-Type-Options']).toBe('nosniff');
+			expect(r.headers['Content-Security-Policy']).toBe("default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+			expect(r.headers['Referrer-Policy']).toBe('no-referrer');
+			expect(r.headers['Strict-Transport-Security']).toBe('max-age=63072000; includeSubDomains');
 		}
 	});
 
