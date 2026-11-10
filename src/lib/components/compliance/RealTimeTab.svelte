@@ -1,13 +1,14 @@
 <script lang="ts">
-	// Flow is measured and compared in m³/s. The unit switch shows all of it in the EWR's units.
+	// 12-minute readings and the daily means worked from them. A gauge's daily record is history, and is in the
+	// Historical Comparison. Flow is measured and compared in m³/s; the unit switch shows it in the EWR's units.
 	import LineChart from '#lib/components/charts/LineChart.svelte';
 	import { timeReadout } from '#lib/components/charts/chart.ts';
 	import { fmt } from '#lib/ewr/format.ts';
 	import { dwsStatus } from '#lib/ewr/dwsStore.ts';
-	import { dailyMeans, isCoded } from '#lib/ewr/parsers.ts';
+	import { dailyMeans } from '#lib/ewr/parsers.ts';
 	import { app } from '#lib/state/app.svelte.ts';
 	import { countOf, defaultMonth, gaugeName, loadedMonths, monthOf, rtLatest, rtRange, rtRows, rtSeries, unitName, unitTitle } from './compare.ts';
-	import CopyTable from './CopyTable.svelte';
+	import DailyMonthTable from './DailyMonthTable.svelte';
 	import DayTable from './DayTable.svelte';
 	import FlowImport from './FlowImport.svelte';
 	import GaugeFactor from './GaugeFactor.svelte';
@@ -16,7 +17,7 @@
 	const EMPTY_RANGE: [number, number] = [0, 86400000];
 	const r = app.rtView;
 	const dws = $derived(r.source === 'dws');
-	/** A linked gauge, or the DWS store's copy of its daily flow and readings, put together and factored the same way. */
+	/** A linked gauge's readings, or the DWS store's copy of them, put together and factored the same way. */
 	const gauge = $derived(r.source === 'gauge' ? app.gaugeRt : dws ? app.dwsRt : null);
 	const link = $derived(r.source === 'gauge' || dws ? app.link : null);
 	const stored = $derived(dws && link && app.dwsStation ? dwsStatus(link.station, app.dwsStation) : null);
@@ -24,7 +25,7 @@
 	const allPoints = $derived(gauge ? gauge.readings : (f?.points ?? []));
 	const daily = $derived(gauge ? gauge.days : dailyMeans(allPoints));
 	const months = $derived(loadedMonths(daily));
-	/** A gauge's record is read a month at a time, so it has no whole-record view. */
+	/** A gauge's readings are read a month at a time, so they have no whole-record view. */
 	const month = $derived(gauge && !months.includes(r.month) ? defaultMonth(daily) : r.month);
 	const inMonth = (t: number) => month === 'all' || monthOf(t) === month;
 	const days = $derived(daily.filter((d) => inMonth(d.t)));
@@ -36,8 +37,6 @@
 	const u = $derived(unitName(app.unit));
 	const rows = $derived(app.lines && (f || gauge) ? rtRows(app.lines, gauge ? days : daily, app.unit) : null);
 	const xLabel = $derived(month === 'all' ? 'Date' : 'Days');
-	const codedDays = $derived(daily.filter((d) => isCoded(d.code)).length);
-	let table = $state<HTMLTableElement>();
 </script>
 
 <FlowImport want="instant" />
@@ -54,13 +53,20 @@
 
 {#if link && gauge}
 	<div class="notice info" role="status">
-		<b>{link.station}{dws ? ', from the DWS store' : ''}.</b> {countOf(daily.length, 'day')} of flow in {countOf(months.length, 'month')}. {countOf(codedDays, 'day')} with a quality code drawn in their own colour, and {countOf(gauge.missing, 'missing day')} not drawn.
+		<b>{link.station}{dws ? ', from the DWS store' : ''}.</b>
+		{#if allPoints.length}
+			{countOf(allPoints.length, 'reading')} over {countOf(daily.length, 'day')}, averaged to a daily mean flow.
+		{:else}
+			No 12-minute readings are held for this gauge. DWS publishes them for about the last month only.
+		{/if}
+		The daily flow record is under Daily flow in the Historical Comparison.
+		<button type="button" onclick={() => app.showHist('daily')}>Show daily flow</button>
 		{#if !dws}<button type="button" onclick={() => app.showGauge(link.station)}>View gauge record</button>{/if}
 	</div>
 	<GaugeFactor {link} />
 {/if}
 
-{#if f || gauge}
+{#if (f || gauge) && months.length}
 	<div class="controls">
 		<MonthSelect {months} all={!gauge} bind:value={() => month, (v) => (r.month = v)} />
 		<label class="check"><input type="checkbox" bind:checked={r.showRaw} /> Show 12-minute readings</label>
@@ -83,45 +89,10 @@
 	<p class="muted">In Mm³, each day is the month's volume at that day's flow, so it reads against the monthly EWR.</p>
 {/if}
 
-{#if gauge && month !== 'all'}
+{#if gauge && month !== 'all' && days.length}
 	<DayTable {days} {month} unit={app.unit} />
 {/if}
 
-{#if rows}
-	<div class="tablehead">
-		<h3>By month, {u}</h3>
-		<CopyTable {table} />
-	</div>
-	<div class="tablewrap">
-		<table bind:this={table}>
-			<thead>
-				<tr>
-					<th>Month</th>
-					<th class="n">Days of data</th>
-					<th class="n">Mean of daily flow</th>
-					<th class="n">EWR Monthly Requirement</th>
-					<th class="n">Urgent action required</th>
-					<th class="n">Drought EWR</th>
-					<th class="n">Days ≥ EWR</th>
-					<th class="n">Days ≥ Drought</th>
-					<th>Status of mean</th>
-				</tr>
-			</thead>
-			<tbody>
-				{#each rows as row (row.label)}
-					<tr>
-						<td>{row.label}</td>
-						<td class="n">{row.days}</td>
-						<td class="n">{fmt(row.mean)}</td>
-						<td class="n">{fmt(row.ewr)}</td>
-						<td class="n">{fmt(row.urgent)}</td>
-						<td class="n">{fmt(row.drought)}</td>
-						<td class="n">{row.daysEwr}</td>
-						<td class="n">{row.daysDrought}</td>
-						<td><span class="status {row.status.key}">{row.status.label}</span></td>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-	</div>
+{#if rows?.length}
+	<DailyMonthTable {rows} unit={app.unit} />
 {/if}

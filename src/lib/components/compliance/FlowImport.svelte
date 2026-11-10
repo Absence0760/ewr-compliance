@@ -11,27 +11,42 @@
 
 	type Message = { level: 'info' | 'error'; text: string };
 
-	const real = $derived(want === 'instant');
-	const view = $derived(real ? app.rtView : app.histView);
+	/** What each comparison reads, and says it reads. */
+	const KIND = {
+		monthly: {
+			file: 'Monthly flow file',
+			gauge: 'Its DWS monthly volumes, held in the app.',
+			sheet: 'Monthly volumes or flows.',
+			text: 'A DWS .mon file, or a table of monthly volumes or flows.'
+		},
+		daily: {
+			file: 'Daily flow file',
+			gauge: 'Its DWS daily flow record, held in the app.',
+			sheet: 'Daily flow in m³/s.',
+			text: 'A DWS .day file, or a table of dated daily flows in m³/s.'
+		},
+		instant: {
+			file: '12-minute flow file',
+			gauge: 'Its 12-minute readings, held in the app.',
+			sheet: '12-minute readings in m³/s.',
+			text: 'A table of dated 12-minute readings in m³/s.'
+		}
+	} as const;
+
+	const k = $derived(KIND[want]);
+	const view = $derived(want === 'instant' ? app.rtView : want === 'daily' ? app.dayView : app.histView);
 	const file = $derived(view.source === 'sheet' || view.source === 'text');
-	const slot = $derived(real ? app.rt : app.hist);
+	const slot = $derived(want === 'instant' ? app.rt : want === 'daily' ? app.day : app.hist);
 	const sheet = $derived(slot.sheet);
-	const fileLabel = $derived(real ? '12-minute flow file' : 'Monthly flow file');
 	const accept = $derived(view.source === 'sheet' ? '.xlsx,.xlsm,.xlsb,.xls,.ods' : '.txt,.csv,.tsv,.dat,.prn,.mrv,.mon,.day');
-	const gaugeStation = $derived(app.link && (real ? app.flowStations.has(app.link.station) : app.gaugeFlow) ? app.link.station : null);
+	const gaugeStation = $derived(app.link && (want === 'monthly' ? app.gaugeFlow : app.flowStations.has(app.link.station)) ? app.link.station : null);
 	const dws = $derived(dwsOffer(app.dws, app.link, want));
 
 	const sources = $derived<{ value: FlowSource; label: string; detail: string; disabled?: boolean }[]>([
-		...(gaugeStation
-			? [{
-				value: 'gauge' as const,
-				label: `Linked gauge, ${gaugeStation}`,
-				detail: real ? 'Its daily flow and 12-minute readings, held in the app.' : 'Its DWS monthly volumes, held in the app.'
-			}]
-			: []),
+		...(gaugeStation ? [{ value: 'gauge' as const, label: `Linked gauge, ${gaugeStation}`, detail: k.gauge }] : []),
 		...(app.link ? [{ value: 'dws' as const, label: `DWS (kept current), ${app.link.station}`, detail: dws.detail, disabled: !dws.ok }] : []),
-		{ value: 'sheet', label: 'Spreadsheet', detail: real ? '12-minute or daily flow in m³/s.' : 'Monthly volumes or flows.' },
-		{ value: 'text', label: 'Text file', detail: real ? 'A DWS .day file, or a table of dated flows in m³/s.' : 'A DWS .mon file, or a table of monthly volumes or flows.' }
+		{ value: 'sheet', label: 'Spreadsheet', detail: k.sheet },
+		{ value: 'text', label: 'Text file', detail: k.text }
 	]);
 
 	/** What is happening now: shown above the status of the data in use, which stays until replaced. */
@@ -40,7 +55,8 @@
 
 	function commit(next: FlowSlot) {
 		working = null;
-		if (real) app.setRt(next);
+		if (want === 'instant') app.setRt(next);
+		else if (want === 'daily') app.setDay(next);
 		else app.setHist(next);
 	}
 
@@ -60,7 +76,8 @@
 	}
 
 	const setSource = (s: FlowSource) => {
-		if (real) app.setRtSource(s);
+		if (want === 'instant') app.setRtSource(s);
+		else if (want === 'daily') app.setDaySource(s);
 		else app.setHistSource(s);
 		working = null;
 	};
@@ -81,7 +98,7 @@
 
 {#if file}
 	<div class="controls">
-		<label class="file">{fileLabel}
+		<label class="file">{k.file}
 			<input type="file" {accept} onchange={onFile} />
 		</label>
 	</div>
@@ -101,7 +118,7 @@
 			</label>
 		{/if}
 		{#if sheet.layout}
-			{#if !real}
+			{#if want === 'monthly'}
 				<label>Values are in
 					<select bind:value={() => slot.unitIn, setUnit}>
 						<option value="mm3">Mm³ per month</option>

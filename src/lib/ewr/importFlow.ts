@@ -102,8 +102,12 @@ export function bestSheet(sheets: Sheet[], want: FlowWant): Sheet {
 		.reduce((best, x) => (x.n > best.n ? x : best)).s;
 }
 
-/** Instantaneous flow is m³/s in this app; applyImport refuses anything that declares otherwise. */
-const defaultUnit = (s: Sheet, want: FlowWant): FlowUnit => (want === 'instant' ? 'cumec' : s.layout?.unit || 'mm3');
+/** Daily and instantaneous flow are m³/s in this app; applyImport refuses anything that declares otherwise. */
+const defaultUnit = (s: Sheet, want: FlowWant): FlowUnit => (want === 'monthly' ? s.layout?.unit || 'mm3' : 'cumec');
+
+/** Where a file of this step belongs, for the line that sends it there. */
+const homeOf = (step: string) =>
+	step === 'instantaneous' ? 'the Real Time Comparison' : step === 'daily' ? "the Historical Comparison's Daily flow" : "the Historical Comparison's Monthly volumes";
 
 export const flowMessage = (level: 'info' | 'error', text: string) => ({ level, text });
 
@@ -119,20 +123,26 @@ export function applyImport(slot: FlowSlot, want: FlowWant): FlowSlot {
 	const fail = (text: string) => ({ ...slot, flow: null, message: flowMessage('error', text) });
 	if (!f.months && !f.points?.some((p) => p.v !== null)) return fail('No flow values were found.');
 	if (want === 'monthly') {
-		if (!f.first || !f.last) return fail(`This data covers less than a full month of ${f.step} readings. Use it in the Real Time Comparison.`);
+		if (!f.first || !f.last) return fail(`This data covers less than a full month of ${f.step} readings. Use it in ${homeOf(f.step)}.`);
 		const span = `${CALENDAR[f.first.m]} ${f.first.y} to ${CALENDAR[f.last.m]} ${f.last.y}`;
 		const layout = sh.layout.kind === 'matrix' ? 'year rows by month columns' : `${f.step} date column`;
 		const text = `Read ${f.months} months, ${span}${f.missing ? `, with ${f.missing} missing` : ''}. Layout: ${layout}.`;
 		return { ...slot, flow: f, message: flowMessage('info', text) };
 	}
+	const needs = want === 'daily' ? 'Daily flow needs' : 'The Real Time Comparison needs';
 	if (!f.points?.length) {
-		return fail('This data has monthly values only. The Real Time Comparison needs dated readings; use the Historical Comparison for it.');
+		return fail(`This data has monthly values only. ${needs} dated flow; use ${homeOf('monthly')} for it.`);
 	}
 	// A volume per reading has no defined interval, so it cannot be converted.
-	if (sh.layout.unit === 'mm3') return fail('This data is in Mm³. The Real Time Comparison needs flow in m³/s, so it was not loaded.');
+	if (sh.layout.unit === 'mm3') return fail(`This data is in Mm³. ${needs} flow in m³/s, so it was not loaded.`);
+	// The daily record is history: the Real Time Comparison is for 12-minute readings and the days worked from them.
+	if (want === 'instant' && f.step === 'daily') {
+		return fail(`This is daily flow, not 12-minute readings. Use it in ${homeOf('daily')}.`);
+	}
 	const pts = f.points.filter((p) => p.v !== null);
 	const day = (t: number) => new Date(t).toISOString().slice(0, 10);
-	const text = `Read ${pts.length.toLocaleString()} readings, ${day(pts[0].t)} to ${day(pts[pts.length - 1].t)}.`;
+	const what = want === 'daily' && f.step === 'daily' ? 'days' : 'readings';
+	const text = `Read ${pts.length.toLocaleString()} ${what}, ${day(pts[0].t)} to ${day(pts[pts.length - 1].t)}.`;
 	return { ...slot, flow: f, message: flowMessage('info', text) };
 }
 

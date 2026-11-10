@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { parseTab, parseRevised, ewrLines, toCumec, nearestEc, parseDelimited, detectLayout, buildFlow, meanMonthly, ymKey, monthStatus, dailyMeans, cellNumber, parseDate, dayRows, gaugeFlow, gaugeSeries, isCoded, isDay, isMon, monRows, parseDay, parseFactor, parseMon, parseReadings } from './parsers.ts';
+import { parseTab, parseRevised, ewrLines, toCumec, nearestEc, parseDelimited, detectLayout, buildFlow, meanMonthly, ymKey, monthStatus, dailyMeans, cellNumber, parseDate, dayRows, gaugeDays, gaugeFlow, gaugeReadings, gaugeSeries, isCoded, isDay, isMon, monRows, parseDay, parseFactor, parseMon, parseReadings } from './parsers.ts';
 import type { Cell } from './types.ts';
 
 // The synthetic dataset, read from its committed source so these tests need no `pnpm data:sample`.
@@ -316,6 +316,23 @@ test('gauge series: missing days have no flow, the record wins a day, the factor
   ]);
   assert.equal(s.missing, 2);
   assert.deepEqual(s.readings.map((p) => p.v), [50, 1, 2]);
+});
+
+test('gauge days are the daily record alone, and gauge readings the readings alone with their daily means', () => {
+  const daily = parseDay(DAILY);
+  const readings = [{ t: jan(3), v: 100 }, { t: jan(6), v: 2 }, { t: jan(6) + 1, v: 4 }];
+  const d = gaugeDays({ daily, readings }, 0.5);
+  assert.deepEqual(d.days, [
+    { t: jan(1), mean: 0.75, n: 1, code: '2' },
+    { t: jan(3), mean: 1.5, n: 1, code: '1' },
+    { t: jan(4), mean: 2, n: 1, code: '91' },
+  ]);
+  assert.equal(d.missing, 2);
+  assert.deepEqual(d.readings, []);
+  const r = gaugeReadings({ daily, readings }, 0.5);
+  assert.deepEqual(r.days, [{ t: jan(3), mean: 50, n: 1 }, { t: jan(6), mean: 1.5, n: 2 }]);
+  assert.deepEqual(r.readings.map((p) => p.v), [50, 1, 2]);
+  assert.equal(r.missing, 0);
 });
 
 test('readings as stored for a gauge', () => {

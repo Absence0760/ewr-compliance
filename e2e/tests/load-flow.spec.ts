@@ -1,4 +1,4 @@
-import { expect, fixture, historical, MAP, openNode, panel, realTime, sourceInUse, test } from '../support/app.ts';
+import { chooseSource, expect, fixture, historical, MAP, openNode, panel, realTime, sourceInUse, test } from '../support/app.ts';
 import type { Page } from '@playwright/test';
 
 // The Load flow data window: the same importers as each comparison's Data source, in a window of their own.
@@ -20,7 +20,7 @@ test.describe('the Load flow data window', () => {
 		const w = await openWindow(page);
 		await w.getByLabel('Choose a monthly flow file').setInputFiles(fixture('monthly.xlsx'));
 		await expect(w.getByRole('status')).toHaveText(XLSX_READ);
-		await w.getByRole('button', { name: 'Show in the Historical Comparison' }).click();
+		await w.getByRole('button', { name: 'Show monthly flow in the Historical Comparison' }).click();
 		await expect(w).toBeHidden();
 		await expect(page.getByRole('tab', { name: 'Historical Comparison' })).toHaveAttribute('aria-selected', 'true');
 		const hist = historical(page);
@@ -32,8 +32,9 @@ test.describe('the Load flow data window', () => {
 		await page.goto(MAP);
 		const w = await openWindow(page);
 		const note = /12-minute readings for about the last month only/;
-		await expect(w.getByRole('region', { name: '12-minute or daily flow for the Real Time Comparison' })).toContainText(note);
+		await expect(w.getByRole('region', { name: '12-minute readings for the Real Time Comparison' })).toContainText(note);
 		await expect(w.getByRole('region', { name: 'Monthly flow for the Historical Comparison' })).not.toContainText(note);
+		await expect(w.getByRole('region', { name: 'Daily flow for the Historical Comparison' })).not.toContainText(note);
 	});
 
 	test('loads 12-minute readings into the Real Time Comparison, in place of a linked gauge', async ({ page }) => {
@@ -43,12 +44,28 @@ test.describe('the Load flow data window', () => {
 		await expect(sourceInUse(realTime(page))).toHaveValue('gauge');
 
 		const w = await openWindow(page);
-		await w.getByLabel('Choose a 12-minute or daily flow file').setInputFiles(fixture('readings-12min.csv'));
+		await w.getByLabel('Choose a 12-minute readings file').setInputFiles(fixture('readings-12min.csv'));
 		await expect(w.getByRole('status')).toHaveText(CSV_READ);
-		await w.getByRole('button', { name: 'Show in the Real Time Comparison' }).click();
+		await w.getByRole('button', { name: 'Show 12-minute readings in the Real Time Comparison' }).click();
 		const rt = realTime(page);
 		await expect(sourceInUse(rt)).toHaveValue('text');
 		await expect(rt.getByRole('status').first()).toHaveText(CSV_READ);
+	});
+
+	test("loads daily flow into the Historical Comparison's daily view, in place of a linked gauge", async ({ page }) => {
+		await openNode(page, 'syq1');
+		const w = await openWindow(page);
+		const row = (date: string, v: string) => `${date}${v.padStart(10)}${'1'.padStart(6)}`;
+		const text = ['DATE     D AVG F/R  QUAL', row('20030101', '1.000'), row('20030102', '3.000')].join('\r\n');
+		await w.getByLabel('Choose a daily flow file').setInputFiles({ name: 'X0H001.day', mimeType: 'text/plain', buffer: Buffer.from(text) });
+		await expect(w.getByRole('status')).toHaveText('X0H001.day. Read 2 days, 2003-01-01 to 2003-01-02.');
+		await w.getByRole('button', { name: 'Show daily flow in the Historical Comparison' }).click();
+		await expect(page.getByRole('tab', { name: 'Historical Comparison' })).toHaveAttribute('aria-selected', 'true');
+		const hist = historical(page);
+		await expect(hist.getByRole('radio', { name: /^Daily flow/ })).toBeChecked();
+		await expect(sourceInUse(hist)).toHaveValue('text');
+		await chooseSource(hist, 'Linked gauge, X0H999');
+		await expect(sourceInUse(hist)).toHaveValue('gauge');
 	});
 
 	test('takes a dropped file', async ({ page }) => {
@@ -60,7 +77,7 @@ test.describe('the Load flow data window', () => {
 			dt.items.add(new File([body], 'dropped.csv', { type: 'text/csv' }));
 			return dt;
 		}, text);
-		await w.getByRole('group', { name: '12-minute or daily flow file' }).dispatchEvent('drop', { dataTransfer: data });
+		await w.getByRole('group', { name: '12-minute readings file' }).dispatchEvent('drop', { dataTransfer: data });
 		await expect(w.getByRole('status')).toHaveText('dropped.csv. Read 2 readings, 2025-11-29 to 2025-11-29.');
 	});
 
@@ -71,7 +88,7 @@ test.describe('the Load flow data window', () => {
 		await expect(w.getByRole('alert')).toHaveText(
 			'junk.txt. No flow table found in "junk.txt". Expected a row of month names above year rows, or Date and Flow columns.'
 		);
-		await expect(w.getByRole('button', { name: /^Show in/ })).toHaveCount(0);
+		await expect(w.getByRole('button', { name: /^Show / })).toHaveCount(0);
 	});
 
 	test('closes with Escape or its button, and opens again on what is loaded', async ({ page }) => {
