@@ -111,11 +111,8 @@ function preText(page: string): string | null {
 	return null;
 }
 
-/** Every tag removed, repeating until a pass changes nothing (CodeQL js/incomplete-multi-character-sanitization). */
-function stripTags(s: string): string {
-	for (let prev = ''; prev !== s; ) [prev, s] = [s, s.replace(/<[^>]*>/g, '')];
-	return s;
-}
+/** Every tag removed, then any `<` an unclosed tag left behind: a table's own `<` arrives as `&lt;`. */
+const stripTags = (s: string) => s.replace(/<[^>]*>/g, '').replace(/</g, '');
 
 const decode = (s: string) =>
 	stripTags(s.replace(/<br\s*\/?>/gi, '\n'))
