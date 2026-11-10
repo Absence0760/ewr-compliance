@@ -51,6 +51,16 @@ describe('readPage', () => {
 		expect(readPage(fixture('X0H001-nodata.synthetic.html'), Q1)).toEqual({ rows: [], outside: 0, blanked: 0 });
 	});
 
+	it('strips every tag inside the table, nested ones included', () => {
+		const raw = page('X0H001', [`<b><i>20100102</i></b>${'1.000'.padStart(10)}<span>     1</span>`]);
+		expect(readPage(raw, Q1).rows).toEqual([{ day: '20100102', flow: '1.000', code: '1' }]);
+	});
+
+	it('drops the < of a tag left unclosed', () => {
+		const raw = page('X0H001', ['<' + row('2010-01-02', '1.000', '1')]);
+		expect(readPage(raw, Q1).rows).toEqual([{ day: '20100102', flow: '1.000', code: '1' }]);
+	});
+
 	it('ignores a <pre> inside an HTML comment', () => {
 		const raw = `<!-- <pre>DATE     D AVG F/R  QUAL\n20100101     9.000     1</pre> -->\n${page('X0H001', [row('2010-01-02', '1.000', '1')])}`;
 		expect(readPage(raw, Q1).rows.map((r) => r.day)).toEqual(['20100102']);
