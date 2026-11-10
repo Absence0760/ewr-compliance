@@ -163,6 +163,15 @@ export async function openNode(page: Page, text: string, heading: string = text)
 export const historical = (page: Page) => page.getByRole('tabpanel', { name: 'Historical Comparison' });
 export const realTime = (page: Page) => page.getByRole('tabpanel', { name: 'Real Time Comparison' });
 
+/** The Historical Comparison's daily flow, a month at a time. */
+export async function showDaily(page: Page) {
+	await page.getByRole('tab', { name: 'Historical Comparison' }).click();
+	const daily = historical(page).getByRole('radio', { name: /^Daily flow/ });
+	await daily.check();
+	await expect(daily).toBeChecked();
+	return historical(page);
+}
+
 export async function showRealTime(page: Page) {
 	await page.getByRole('tab', { name: 'Real Time Comparison' }).click();
 	await expect(realTime(page)).toBeVisible();

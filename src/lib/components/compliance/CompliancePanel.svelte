@@ -60,7 +60,7 @@
 
 		<div class="loadbar">
 			<button type="button" onclick={() => (loading = true)}>Load flow data…</button>
-			<span class="muted">from a spreadsheet or text file, for either comparison</span>
+			<span class="muted">monthly, daily or 12-minute flow, from a spreadsheet or text file</span>
 		</div>
 		<LoadFlowDialog bind:open={loading} />
 

@@ -1,49 +1,57 @@
 <!--
-	A window for loading observed flow from a file: monthly flow for the Historical Comparison, and
-	12-minute or daily flow for the Real Time Comparison. Each file is chosen or dropped, read in the
+	A window for loading observed flow from a file: monthly or daily flow for the Historical Comparison,
+	and 12-minute readings for the Real Time Comparison. Each file is chosen or dropped, read in the
 	browser by the same importer as each comparison's own Data source, and put in use there. The file
 	never leaves the browser. Sheet, units and year are set in the comparison afterwards.
 -->
 <script lang="ts">
 	import { importFile, looksLikeBook } from '#lib/ewr/importFlow.ts';
 	import { app } from '#lib/state/app.svelte.ts';
-	import type { FlowWant } from '#lib/ewr/types.ts';
+	import type { FlowWant, HistStep } from '#lib/ewr/types.ts';
 
 	let { open = $bindable(false) }: { open?: boolean } = $props();
 
 	const ACCEPT = '.xlsx,.xlsm,.xlsb,.xls,.ods,.txt,.csv,.tsv,.dat,.prn,.mrv,.mon,.day';
-	const KINDS: { want: FlowWant; tab: 'hist' | 'rt'; title: string; tabName: string; what: string; note?: string }[] = [
+	const KINDS: { want: FlowWant; step: HistStep | null; title: string; tabName: string; what: string; note?: string }[] = [
 		{
 			want: 'monthly',
-			tab: 'hist',
+			step: 'monthly',
 			title: 'Monthly flow',
 			tabName: 'Historical Comparison',
 			what: 'A DWS monthly file (.mon), or a spreadsheet or text table of monthly volumes or flows.'
 		},
 		{
+			want: 'daily',
+			step: 'daily',
+			title: 'Daily flow',
+			tabName: 'Historical Comparison',
+			what: 'A DWS daily file (.day), or a spreadsheet or text table of dated daily flows in m³/s.'
+		},
+		{
 			want: 'instant',
-			tab: 'rt',
-			title: '12-minute or daily flow',
+			step: null,
+			title: '12-minute readings',
 			tabName: 'Real Time Comparison',
-			what: 'A DWS daily file (.day), or a spreadsheet or text table of dated readings in m³/s, such as 12-minute telemetry.',
-			note: 'DWS publishes 12-minute readings for about the last month only, until its hydrologists verify them into daily flow. For earlier months, load a daily file.'
+			what: 'A spreadsheet or text table of dated 12-minute readings in m³/s, such as telemetry.',
+			note: 'DWS publishes 12-minute readings for about the last month only, until its hydrologists verify them into daily flow. For earlier months, load a daily file for the Historical Comparison.'
 		}
 	];
 
 	let dialog = $state<HTMLDialogElement>();
 	/** Reading, or a file that could not be read, for each kind. A file read is reported from the app's own slot. */
-	let working = $state<Record<FlowWant, { level: 'info' | 'error'; text: string } | null>>({ monthly: null, instant: null });
+	let working = $state<Record<FlowWant, { level: 'info' | 'error'; text: string } | null>>({ monthly: null, daily: null, instant: null });
 	let over = $state<FlowWant | null>(null);
-	const request: Record<FlowWant, number> = { monthly: 0, instant: 0 };
+	const request: Record<FlowWant, number> = { monthly: 0, daily: 0, instant: 0 };
 
 	$effect(() => {
 		if (open && !dialog?.open) dialog?.showModal();
 		else if (!open && dialog?.open) dialog.close();
 	});
 
-	const slotOf = (want: FlowWant) => (want === 'monthly' ? app.hist : app.rt);
+	const slotOf = (want: FlowWant) => (want === 'monthly' ? app.hist : want === 'daily' ? app.day : app.rt);
+	const viewOf = (want: FlowWant) => (want === 'monthly' ? app.histView : want === 'daily' ? app.dayView : app.rtView);
 	/** A file is reported only while it is what the comparison uses, not a gauge or the DWS store. */
-	const fileInUse = (want: FlowWant) => ['sheet', 'text'].includes((want === 'monthly' ? app.histView : app.rtView).source);
+	const fileInUse = (want: FlowWant) => ['sheet', 'text'].includes(viewOf(want).source);
 
 	/** Read the file, put it in use in its comparison in place of a gauge or the DWS store, and say how it went. */
 	async function load(want: FlowWant, file: File | undefined) {
@@ -57,6 +65,9 @@
 			if (want === 'monthly') {
 				app.setHist(slot);
 				app.setHistSource(source);
+			} else if (want === 'daily') {
+				app.setDay(slot);
+				app.setDaySource(source);
 			} else {
 				app.setRt(slot);
 				app.setRtSource(source);
@@ -79,8 +90,10 @@
 		void load(want, e.dataTransfer?.files[0]);
 	}
 
-	function show(tab: 'hist' | 'rt') {
-		app.tab = tab;
+	/** Go to where the file is in use: one of the Historical Comparison's views, or the Real Time Comparison. */
+	function show(step: HistStep | null) {
+		if (step) app.showHist(step);
+		else app.tab = 'rt';
 		dialog?.close();
 	}
 </script>
@@ -127,7 +140,7 @@
 					<b>{slot.name}.</b> {slot.message.text}
 				</div>
 				{#if slot.flow}
-					<button type="button" onclick={() => show(k.tab)}>Show in the {k.tabName}</button>
+					<button type="button" onclick={() => show(k.step)}>Show {k.title.toLowerCase()} in the {k.tabName}</button>
 				{/if}
 			{/if}
 		</section>

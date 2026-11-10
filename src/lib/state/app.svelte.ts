@@ -1,10 +1,10 @@
 // The one app state. Components read it and call its methods; none fetch data themselves.
 import { asset } from '$app/paths';
-import { ewrLines, gaugeFlow, gaugeSeries, parseGaugeFlows, parseMon, parseRevised, parseTab, ymKey } from '#lib/ewr/parsers.ts';
+import { ewrLines, gaugeDays, gaugeFlow, gaugeReadings, parseGaugeFlows, parseMon, parseRevised, parseTab, ymKey } from '#lib/ewr/parsers.ts';
 import { dwsEntry, dwsOffer, dwsPath, dwsUnavailable, parseDwsIndex, type DwsMonthlyFile, type DwsState, type DwsWant } from '#lib/ewr/dwsStore.ts';
 import { allFiles, buildNotices, resolveView } from '#lib/ewr/resolve.ts';
 import type {
-	EcBasis, EwrNode, EwrSite, Flow, FlowSource, FlowUnit, GaugeData, GaugeFlowFile, GaugeFlows, GaugeLink, GaugeRecord, HistView, IndexData, Issue, NodeChoices, NodeFile, NodeInfo, NodeInfoData, NodeView, Notice, ResolvedLines, RtView, Sheet, YearIs
+	DayView, EcBasis, EwrNode, EwrSite, Flow, FlowSource, FlowUnit, GaugeData, GaugeFlowFile, GaugeFlows, GaugeLink, GaugeRecord, HistStep, HistView, IndexData, Issue, NodeChoices, NodeFile, NodeInfo, NodeInfoData, NodeView, Notice, ResolvedLines, RtView, Sheet, YearIs
 } from '#lib/ewr/types.ts';
 import { readStored, STORAGE, writeStored } from './storage.ts';
 import { siteFetch } from '#lib/users/siteFetch.ts';
@@ -51,11 +51,16 @@ class AppState {
 
 	unit = $state<FlowUnit>('cumec');
 	tab = $state<'hist' | 'rt'>('hist');
+	/** The Historical Comparison's view: mean monthly volumes over a period, or the daily record a month at a time. */
+	histStep = $state<HistStep>('monthly');
 	hist = $state.raw<FlowSlot>(emptySlot('mm3'));
+	day = $state.raw<FlowSlot>(emptySlot('cumec'));
 	rt = $state.raw<FlowSlot>(emptySlot('cumec'));
 	/** A node starts on its linked gauge where the gauge has data, and otherwise on a spreadsheet. */
 	histView = $state<HistView>({ source: 'sheet', preset: 'full', from: 0, to: 0, overlay: true });
-	rtView = $state<RtView>({ source: 'sheet', month: 'all', showRaw: false });
+	dayView = $state<DayView>({ source: 'sheet', month: 'all' });
+	/** The Real Time Comparison is the 12-minute readings, so they are drawn from the start. */
+	rtView = $state<RtView>({ source: 'sheet', month: 'all', showRaw: true });
 
 	/** Our own store of DWS flow, under dws/: its index, read once at start. */
 	dws = $state.raw<DwsState>({ status: 'loading' });
@@ -86,20 +91,30 @@ class AppState {
 		const record = this.link && this.gaugeRecords.get(this.link.station);
 		return record ? gaugeFlow(record, this.factor) : null;
 	});
-	/** The selected node's gauge flow for the Real Time Comparison, factored to the node. */
+	/** The selected node's gauge daily record, for the Historical Comparison's daily flow, factored to the node. */
+	gaugeDay = $derived.by(() => {
+		const flows = this.link && this.flows[this.link.station];
+		return flows ? gaugeDays(flows, this.factor) : null;
+	});
+	/** The selected node's gauge 12-minute readings for the Real Time Comparison, factored to the node. */
 	gaugeRt = $derived.by(() => {
 		const flows = this.link && this.flows[this.link.station];
-		return flows ? gaugeSeries(flows, this.factor) : null;
+		return flows ? gaugeReadings(flows, this.factor) : null;
 	});
 	/** The store's monthly volumes for the selected node's gauge, factored to the node like the gauge's own. */
 	dwsHist = $derived.by(() => {
 		const record = this.link && this.dwsMonthly[this.link.station];
 		return record ? gaugeFlow(record, this.factor) : null;
 	});
-	/** The store's daily flow and readings for the selected node's gauge, factored to the node like the gauge's own. */
+	/** The store's daily flow for the selected node's gauge, factored to the node like the gauge's own. */
+	dwsDay = $derived.by(() => {
+		const flows = this.link && this.dwsFlows[this.link.station];
+		return flows ? gaugeDays(flows, this.factor) : null;
+	});
+	/** The store's 12-minute readings for the selected node's gauge, factored to the node like the gauge's own. */
 	dwsRt = $derived.by(() => {
 		const flows = this.link && this.dwsFlows[this.link.station];
-		return flows ? gaugeSeries(flows, this.factor) : null;
+		return flows ? gaugeReadings(flows, this.factor) : null;
 	});
 	/** The store's entry for the selected node's gauge, once the index is read. */
 	dwsStation = $derived(dwsEntry(this.dws, this.link));
@@ -163,6 +178,7 @@ class AppState {
 		}
 		if (this.selected) {
 			this.syncHistSource();
+			this.syncDaySource();
 			this.syncRtSource();
 		}
 	}
@@ -249,6 +265,7 @@ class AppState {
 		this.selectedId = id;
 		this.gaugeView = null;
 		this.syncHistSource();
+		this.syncDaySource();
 		this.syncRtSource();
 		if (opts.focus) this.focus = { id, n: (this.focus?.n ?? 0) + 1 };
 		void this.refresh();
@@ -269,21 +286,41 @@ class AppState {
 		if (h.source === 'dws') void this.loadDwsMonthly();
 	}
 
-	private syncRtSource() {
-		const r = this.rtView;
+	/** The daily record and the 12-minute readings come from the same gauge file, and choose their source the same way. */
+	private syncFlowSource(view: DayView, slot: FlowSlot, want: 'daily' | 'instant', set: (s: FlowSource) => void) {
 		const station = this.link && this.flowStations.has(this.link.station) ? this.link.station : null;
-		const dws = this.dwsOk('instant');
-		if (r.source === 'gauge' && !station) this.setRtSource(dws ? 'dws' : 'sheet');
-		else if (r.source === 'dws' && !dws) this.setRtSource(station ? 'gauge' : 'sheet');
-		else if (station && r.source !== 'gauge' && r.source !== 'dws' && !this.rt.flow) r.source = 'gauge';
+		const dws = this.dwsOk(want);
+		if (view.source === 'gauge' && !station) set(dws ? 'dws' : 'sheet');
+		else if (view.source === 'dws' && !dws) set(station ? 'gauge' : 'sheet');
+		else if (station && view.source !== 'gauge' && view.source !== 'dws' && !slot.flow) view.source = 'gauge';
 		if (station) void this.loadFlows(station);
-		if (r.source === 'dws') void this.loadDwsFlows();
+		if (view.source === 'dws') void this.loadDwsFlows();
+	}
+
+	private syncDaySource() {
+		this.syncFlowSource(this.dayView, this.day, 'daily', (s) => this.setDaySource(s));
+	}
+
+	private syncRtSource() {
+		this.syncFlowSource(this.rtView, this.rt, 'instant', (s) => this.setRtSource(s));
+	}
+
+	setDaySource(source: FlowSource) {
+		this.dayView.source = source;
+		this.dayView.month = 'all';
+		if (source === 'dws') void this.loadDwsFlows();
 	}
 
 	setRtSource(source: FlowSource) {
 		this.rtView.source = source;
 		this.rtView.month = 'all';
 		if (source === 'dws') void this.loadDwsFlows();
+	}
+
+	/** Show one of the Historical Comparison's views, on its tab. */
+	showHist(step: HistStep) {
+		this.tab = 'hist';
+		this.histStep = step;
 	}
 
 	/** Fetch one file of the store, revalidated, or throw with its HTTP status. */
@@ -293,7 +330,7 @@ class AppState {
 		return (await res.json()) as T;
 	}
 
-	/** The store's daily flow and readings for the selected node's gauge, read once. A failure is said, and tried again next time. */
+	/** The store's daily flow and readings for the selected node's gauge, read once, for both comparisons. A failure is said, and tried again next time. */
 	async loadDwsFlows(): Promise<void> {
 		const station = this.link?.station;
 		// Not before the index says the store holds it: a store that is not there should cost one request, not one a station.
@@ -380,6 +417,11 @@ class AppState {
 			this.histView.from = ymKey(f.first.y, f.first.m);
 			this.histView.to = ymKey(f.last.y, f.last.m);
 		}
+	}
+
+	setDay(slot: FlowSlot) {
+		this.day = slot;
+		if (slot.flow) this.dayView.month = 'all';
 	}
 
 	setRt(slot: FlowSlot) {

@@ -88,8 +88,14 @@ export function fetchedText(iso: string): string {
 	return `${d.getUTCDate()} ${CALENDAR[d.getUTCMonth() + 1]} ${d.getUTCFullYear()}, ${two(d.getUTCHours())}:${two(d.getUTCMinutes())} SAST`;
 }
 
-/** What a comparison wants of the store: monthly volumes, or daily flow and readings. */
-export type DwsWant = 'monthly' | 'instant';
+/** What a comparison wants of the store: monthly volumes, daily flow, or 12-minute readings. */
+export type DwsWant = 'monthly' | 'daily' | 'instant';
+
+const DWS_WHAT: Record<DwsWant, string> = {
+	monthly: 'Monthly volumes',
+	daily: 'Daily flow',
+	instant: '12-minute readings, where DWS has them'
+};
 
 /** Whether the DWS source can be picked for this node, and the line that says what it holds or why not. */
 export function dwsOffer(state: DwsState, link: GaugeLink | null, want: DwsWant): { ok: boolean; detail: string } {
@@ -99,8 +105,7 @@ export function dwsOffer(state: DwsState, link: GaugeLink | null, want: DwsWant)
 	const e = state.index.stations[link.station];
 	if (!e) return { ok: false, detail: `The store holds nothing for ${link.station} yet.` };
 	if (want === 'monthly' && !e.monthly) return { ok: false, detail: `The store has no monthly volumes for ${link.station} yet.` };
-	const what = want === 'monthly' ? 'Monthly volumes' : 'Daily flow, and 12-minute readings where DWS has them';
-	return { ok: true, detail: `${what}, pulled from DWS. Fetched ${fetchedText(e.fetchedAt)}${e.stale ? ', and out of date' : ''}.` };
+	return { ok: true, detail: `${DWS_WHAT[want]}, pulled from DWS. Fetched ${fetchedText(e.fetchedAt)}${e.stale ? ', and out of date' : ''}.` };
 }
 
 /** The store's entry for this node's gauge, when the store has been read and holds one. */

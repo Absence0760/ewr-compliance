@@ -33,9 +33,9 @@ test.describe('Real Time Comparison', () => {
 	test('loads 12-minute readings from a CSV', async ({ page }) => {
 		const rt = await loadCsv(page);
 		const keys = legend(rt, 'Real Time Comparison');
-		await expect(keys.getByRole('button')).toHaveText(['Daily mean flow', 'EWR Monthly Requirement', 'Urgent action required', 'Drought EWR']);
+		await expect(keys.getByRole('button')).toHaveText(['Daily mean flow', 'EWR Monthly Requirement', 'Urgent action required', 'Drought EWR', '12-minute readings']);
 		await expect(rt.getByRole('img')).toHaveAccessibleName(
-			'Real Time Comparison. Shows Daily mean flow, EWR Monthly Requirement, Urgent action required, Drought EWR. Discharge (m³/s) against Date, 2025-11-29 to 2025-12-02.'
+			'Real Time Comparison. Shows Daily mean flow, EWR Monthly Requirement, Urgent action required, Drought EWR, 12-minute readings. Discharge (m³/s) against Date, 2025-11-29 to 2025-12-02.'
 		);
 	});
 
@@ -79,12 +79,12 @@ test.describe('Real Time Comparison', () => {
 		await expect(rt.getByRole('img')).toHaveAccessibleName(/against Days, 2025-11-01 to 2025-12-01\.$/);
 	});
 
-	test('shows the 12-minute readings on request', async ({ page }) => {
+	test('draws the 12-minute readings from the start, and can leave them off', async ({ page }) => {
 		const rt = await loadCsv(page);
 		const keys = legend(rt, 'Real Time Comparison');
-		await expect(keys.getByRole('button', { name: '12-minute readings' })).toHaveCount(0);
-		await rt.getByRole('checkbox', { name: 'Show 12-minute readings' }).check();
 		await expect(keys.getByRole('button', { name: '12-minute readings' })).toBeVisible();
+		await rt.getByRole('checkbox', { name: 'Show 12-minute readings' }).uncheck();
+		await expect(keys.getByRole('button', { name: '12-minute readings' })).toHaveCount(0);
 	});
 
 	test('finds the 12-minute sheet of a workbook, whatever its position', async ({ page }) => {
@@ -119,7 +119,7 @@ test.describe('Real Time Comparison', () => {
 		const rt = realTime(page);
 		await chooseSource(rt, 'Spreadsheet');
 		await loadFile(rt, '12-minute flow file', 'monthly.xlsx');
-		await expect(rt.getByRole('alert')).toContainText('use the Historical Comparison for it.');
+		await expect(rt.getByRole('alert')).toContainText("use the Historical Comparison's Monthly volumes for it.");
 	});
 
 	test('readings in Mm³ are refused, not plotted as m³/s', async ({ page }) => {

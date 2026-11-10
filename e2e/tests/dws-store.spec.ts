@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import {
-	chooseSource, DWS_STORE, expect, expectRow, fixture, historical, legend, openNode, realTime, select, serveStore, showRealTime, source, sourceInUse, test
+	chooseSource, DWS_STORE, expect, expectRow, fixture, historical, legend, openNode, realTime, select, serveStore, showDaily, showRealTime, source, sourceInUse, test
 } from '../support/app.ts';
 import type { Locator, Page } from '@playwright/test';
 
@@ -8,8 +8,8 @@ import type { Locator, Page } from '@playwright/test';
 //
 // X0H999 is current, fetched 2024-11-02T04:15Z, 06:15 SAST. Its daily flow is Oct 2024, day d × 0.2 m³/s,
 // day 5 missing (code 170) and day 8 coded 91, and its readings two days of Nov 2024, with means 3 and 6.
-// syq1 links to it with a factor of 0.5: day d is 0.1 d, and Nov 1 and 2 are 1.5 and 3. So 32 days of flow
-// in 2 months, 1 coded and 1 missing. Oct sums to (496 - 5) × 0.1 = 49.1 over 30 days, a mean of 1.637.
+// syq1 links to it with a factor of 0.5: day d is 0.1 d, and Nov 1 and 2 are 1.5 and 3. So the daily flow is
+// 30 days in 1 month, 1 coded and 1 missing, and the readings 3 over 2 days. Oct sums to (496 - 5) × 0.1 = 49.1 over 30 days, a mean of 1.637.
 // syq1 is EC B, at 2.5 times the sample's tables: Oct EWR 5.000 Mm³ = 1.867 m³/s over 31 days, Urgent 1.680,
 // Drought 2.500 Mm³ = 0.933. Days ≥ EWR from day 19: 13. Days ≥ Drought from day 10: 22.
 //
@@ -33,39 +33,52 @@ async function atSyq1(page: Page, files: Record<string, unknown> = STORE) {
 }
 
 test.describe('the DWS store, kept current', () => {
-	test('the Real Time Comparison reads daily flow and readings for the linked gauge, factored to the node', async ({ page }) => {
+	test("the Historical Comparison's daily flow reads the store's daily flow for the linked gauge, factored to the node", async ({ page }) => {
+		const asked = await atSyq1(page);
+		const day = await showDaily(page);
+		await expect(sourceInUse(day)).toHaveValue('gauge');
+		await expect(detail(day, DWS_SOURCE)).toHaveText('Daily flow, pulled from DWS. Fetched 2 Nov 2024, 06:15 SAST.');
+		await chooseSource(day, DWS_SOURCE);
+		await expect(day.getByRole('status').filter({ hasText: 'DWS store, X0H999.' })).toHaveText(
+			'DWS store, X0H999. Fetched 2 Nov 2024, 06:15 SAST, with daily flow from 2024-10-01 to 2024-10-31.'
+		);
+		await expect(day.getByRole('status').filter({ hasText: 'from the DWS store' })).toContainText(
+			'X0H999, from the DWS store. 30 days of flow in 1 month. 1 day with a quality code drawn in their own colour, and 1 missing day not drawn.'
+		);
+		await expect(select(day, /^Month/)).toHaveValue('2024-10');
+		await expect(select(day, /^Month/).getByRole('option')).toHaveText(['Oct 2024']);
+		await expectRow(monthTable(day), 'Oct 2024', {
+			'Days of data': '30', 'Mean of daily flow': '1.637', 'EWR Monthly Requirement': '1.867', 'Urgent action required': '1.680', 'Drought EWR': '0.933',
+			'Days ≥ EWR': '13', 'Days ≥ Drought': '22'
+		});
+		await expect(legend(day, 'Historical Comparison, daily flow').getByRole('button', { name: 'Daily flow, X0H999 × 0.5' })).toBeVisible();
+		expect(asked).toEqual(['index.json', 'flows-X0H999.json']);
+	});
+
+	test("the Real Time Comparison reads the store's 12-minute readings for the linked gauge, from the same file", async ({ page }) => {
 		const asked = await atSyq1(page);
 		await showRealTime(page);
 		const rt = realTime(page);
 		await expect(sourceInUse(rt)).toHaveValue('gauge');
-		await expect(detail(rt, DWS_SOURCE)).toHaveText('Daily flow, and 12-minute readings where DWS has them, pulled from DWS. Fetched 2 Nov 2024, 06:15 SAST.');
+		await expect(detail(rt, DWS_SOURCE)).toHaveText('12-minute readings, where DWS has them, pulled from DWS. Fetched 2 Nov 2024, 06:15 SAST.');
 		await chooseSource(rt, DWS_SOURCE);
-		await expect(rt.getByRole('status').filter({ hasText: 'DWS store, X0H999.' })).toHaveText(
-			'DWS store, X0H999. Fetched 2 Nov 2024, 06:15 SAST, with daily flow from 2024-10-01 to 2024-10-31.'
-		);
 		await expect(rt.getByRole('status').filter({ hasText: 'from the DWS store' })).toContainText(
-			'X0H999, from the DWS store. 32 days of flow in 2 months. 1 day with a quality code drawn in their own colour, and 1 missing day not drawn.'
+			'X0H999, from the DWS store. 3 readings over 2 days, averaged to a daily mean flow.'
 		);
-		await expect(select(rt, /^Month/)).toHaveValue('2024-10');
-		await expectRow(monthTable(rt), 'Oct 2024', {
-			'Days of data': '30', 'Mean of daily flow': '1.637', 'EWR Monthly Requirement': '1.867', 'Urgent action required': '1.680', 'Drought EWR': '0.933',
-			'Days ≥ EWR': '13', 'Days ≥ Drought': '22'
-		});
-		await expect(legend(rt, 'Real Time Comparison').getByRole('button', { name: 'Daily mean flow, X0H999 × 0.5' })).toBeVisible();
-		await select(rt, /^Month/).selectOption({ label: 'Nov 2024' });
+		await expect(select(rt, /^Month/).getByRole('option')).toHaveText(['Nov 2024']);
 		await expectRow(monthTable(rt), 'Nov 2024', { 'Days of data': '2', 'Mean of daily flow': '2.250' });
+		await expect(legend(rt, 'Real Time Comparison').getByRole('button', { name: 'Daily mean flow, X0H999 × 0.5' })).toBeVisible();
 		expect(asked).toEqual(['index.json', 'flows-X0H999.json']);
 	});
 
 	test('the factor is the node\'s own, in the store as on the gauge', async ({ page }) => {
 		await atSyq1(page);
-		await showRealTime(page);
-		const rt = realTime(page);
-		await chooseSource(rt, DWS_SOURCE);
-		await rt.getByLabel('Factor on the gauge record').fill('1');
-		await rt.getByLabel('Factor on the gauge record').blur();
-		await expectRow(monthTable(rt), 'Oct 2024', { 'Mean of daily flow': '3.273' });
-		await expect(legend(rt, 'Real Time Comparison').getByRole('button', { name: 'Daily mean flow, X0H999' })).toBeVisible();
+		const day = await showDaily(page);
+		await chooseSource(day, DWS_SOURCE);
+		await day.getByLabel('Factor on the gauge record').fill('1');
+		await day.getByLabel('Factor on the gauge record').blur();
+		await expectRow(monthTable(day), 'Oct 2024', { 'Mean of daily flow': '3.273' });
+		await expect(legend(day, 'Historical Comparison, daily flow').getByRole('button', { name: 'Daily flow, X0H999' })).toBeVisible();
 	});
 
 	test('the Historical Comparison reads monthly volumes where the store has them, and the gauge keeps its own', async ({ page }) => {
@@ -89,16 +102,13 @@ test.describe('the DWS store, kept current', () => {
 		const hist = historical(page);
 		await expect(source(hist, 'DWS (kept current), X0H998')).toBeDisabled();
 		await expect(detail(hist, 'DWS (kept current), X0H998')).toHaveText('The store has no monthly volumes for X0H998 yet.');
-		await showRealTime(page);
-		const rt = realTime(page);
-		await expect(detail(rt, 'DWS (kept current), X0H998')).toHaveText(
-			'Daily flow, and 12-minute readings where DWS has them, pulled from DWS. Fetched 30 Sep 2024, 06:00 SAST, and out of date.'
-		);
-		await chooseSource(rt, 'DWS (kept current), X0H998');
-		await expect(rt.getByRole('status').filter({ hasText: 'DWS store, X0H998.' })).toHaveText(
+		const day = await showDaily(page);
+		await expect(detail(day, 'DWS (kept current), X0H998')).toHaveText('Daily flow, pulled from DWS. Fetched 30 Sep 2024, 06:00 SAST, and out of date.');
+		await chooseSource(day, 'DWS (kept current), X0H998');
+		await expect(day.getByRole('status').filter({ hasText: 'DWS store, X0H998.' })).toHaveText(
 			"DWS store, X0H998. Out of date: the store's pulls of X0H998 have stopped keeping it current. Last fetched 30 Sep 2024, 06:00 SAST, with daily flow to 2024-09-29."
 		);
-		await expectRow(monthTable(rt), 'Sep 2024', { 'Days of data': '29', 'Mean of daily flow': '1.500' });
+		await expectRow(monthTable(day), 'Sep 2024', { 'Days of data': '29', 'Mean of daily flow': '1.500' });
 	});
 
 	test('a linked gauge the store does not hold cannot be picked, and says why', async ({ page }) => {

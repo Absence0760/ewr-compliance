@@ -288,7 +288,10 @@ export interface Notice {
 
 /** Where observed flow comes from. dws is our own store of DWS flow, kept current: src/lib/ewr/dwsStore.ts. */
 export type FlowSource = 'sheet' | 'text' | 'dws' | 'gauge';
-export type FlowWant = 'monthly' | 'instant';
+/** What a comparison reads: monthly volumes or the daily record (Historical), or 12-minute readings (Real Time). */
+export type FlowWant = 'monthly' | 'daily' | 'instant';
+/** The Historical Comparison's two views of the record. */
+export type HistStep = 'monthly' | 'daily';
 export type PeriodPreset = 'full' | '10' | '20' | 'custom';
 
 /** The Historical Comparison's choices. from and to are ymKey values. */
@@ -298,6 +301,12 @@ export interface HistView {
 	from: number;
 	to: number;
 	overlay: boolean;
+}
+
+/** The Historical Comparison's daily view. month is 'all' or YYYY-MM. */
+export interface DayView {
+	source: FlowSource;
+	month: string;
 }
 
 /** The Real Time Comparison's choices. month is 'all' or YYYY-MM. */

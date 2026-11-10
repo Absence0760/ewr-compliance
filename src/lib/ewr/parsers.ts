@@ -453,6 +453,17 @@ export const parseGaugeFlows = (file: GaugeFlowFile): GaugeFlows => ({
 
 const scaled = (pts: FlowPoint[], factor: number) => pts.map((p) => ({ ...p, v: p.v === null ? null : p.v * factor }));
 
+/** A gauge's daily record alone, scaled by the factor: the Historical Comparison's daily flow. */
+export function gaugeDays(flows: GaugeFlows, factor = 1): GaugeSeries {
+  return { days: dailyMeans(scaled(flows.daily, factor)), readings: [], missing: flows.daily.filter((p) => p.v === null).length };
+}
+
+/** A gauge's 12-minute readings alone, scaled by the factor, with the daily means worked from them: the Real Time Comparison's flow. */
+export function gaugeReadings(flows: GaugeFlows, factor = 1): GaugeSeries {
+  const readings = scaled(flows.readings, factor);
+  return { days: dailyMeans(readings), readings, missing: 0 };
+}
+
 /** Days and readings scaled by the factor. A day the daily record holds is left out of the readings' days. */
 export function gaugeSeries(flows: GaugeFlows, factor = 1): GaugeSeries {
   const readings = scaled(flows.readings, factor);

@@ -197,7 +197,20 @@ describe('importFile', () => {
 
 	it('still sends a monthly table in Mm³ to the historical comparison from real time', async () => {
 		const s = await importFile(book({ Flow: monthly }), 'instant');
-		expect(s.message?.text).toContain('use the Historical Comparison');
+		expect(s.message?.text).toContain("use the Historical Comparison's Monthly volumes");
+	});
+
+	it('takes 12-minute readings as daily flow too, averaged to the day', async () => {
+		const s = await importFile(book({ 'Raw Data': rawSheet() }), 'daily');
+		expect(s.unitIn).toBe('cumec');
+		expect(s.flow?.points).toHaveLength(300);
+		expect(s.message?.text).toBe('Read 300 readings, 2025-11-15 to 2025-11-17.');
+	});
+
+	it('sends a monthly table from daily flow to monthly volumes', async () => {
+		const s = await importFile(book({ Flow: monthly }), 'daily');
+		expect(s.flow).toBeNull();
+		expect(s.message?.text).toBe("This data has monthly values only. Daily flow needs dated flow; use the Historical Comparison's Monthly volumes for it.");
 	});
 
 	it('reports a sheet with no flow table', async () => {
@@ -268,10 +281,17 @@ describe('a DWS daily flow file', () => {
 	const text = ['DATE     D AVG F/R  QUAL', row('20030101', '1.000', '1'), row('20030102', '', '170'), row('20030103', '3.000', '91')].join('\r\n');
 	const file = { name: 'X0H001.day', size: text.length, text: async () => text, arrayBuffer: async () => new ArrayBuffer(0) };
 
-	it('loads for the Real Time Comparison in m³/s, with missing days and codes kept', async () => {
-		const slot = await importFile(file, 'instant');
-		expect(slot.message?.text).toBe('Read 2 readings, 2003-01-01 to 2003-01-03.');
+	it("loads for the Historical Comparison's daily flow in m³/s, with missing days and codes kept", async () => {
+		const slot = await importFile(file, 'daily');
+		expect(slot.unitIn).toBe('cumec');
+		expect(slot.message?.text).toBe('Read 2 days, 2003-01-01 to 2003-01-03.');
 		expect(slot.flow?.points?.map((p) => [p.v, p.code])).toEqual([[1, '1'], [null, '170'], [3, '91']]);
+	});
+
+	it('is history, so the Real Time Comparison sends it to daily flow', async () => {
+		const slot = await importFile(file, 'instant');
+		expect(slot.flow).toBeNull();
+		expect(slot.message).toEqual({ level: 'error', text: "This is daily flow, not 12-minute readings. Use it in the Historical Comparison's Daily flow." });
 	});
 });
 

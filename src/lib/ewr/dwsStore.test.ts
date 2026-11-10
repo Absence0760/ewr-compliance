@@ -66,11 +66,13 @@ describe('dwsOffer', () => {
 	});
 
 	it('says when it was fetched, and when it is out of date', () => {
-		expect(dwsOffer(ready, link('X0H001'), 'instant').detail).toBe('Daily flow, and 12-minute readings where DWS has them, pulled from DWS. Fetched 2 Nov 2024, 06:15 SAST.');
-		expect(dwsOffer(ready, link('X0H002'), 'instant')).toEqual({
-			ok: true,
-			detail: 'Daily flow, and 12-minute readings where DWS has them, pulled from DWS. Fetched 2 Nov 2024, 06:15 SAST, and out of date.'
-		});
+		expect(dwsOffer(ready, link('X0H001'), 'daily').detail).toBe('Daily flow, pulled from DWS. Fetched 2 Nov 2024, 06:15 SAST.');
+		expect(dwsOffer(ready, link('X0H002'), 'daily')).toEqual({ ok: true, detail: 'Daily flow, pulled from DWS. Fetched 2 Nov 2024, 06:15 SAST, and out of date.' });
+	});
+
+	it('offers the 12-minute readings to the Real Time Comparison, from the same file as the daily flow', () => {
+		expect(dwsOffer(ready, link('X0H001'), 'instant').detail).toBe('12-minute readings, where DWS has them, pulled from DWS. Fetched 2 Nov 2024, 06:15 SAST.');
+		expect(dwsOffer(ready, link('X0H002'), 'instant').ok).toBe(true);
 	});
 });
 
