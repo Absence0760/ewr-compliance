@@ -57,7 +57,7 @@ describe('readPage', () => {
 	});
 
 	it('drops the < of a tag left unclosed', () => {
-		const raw = page('X0H001', [row('2010-01-02', '1.000', '1') + '<script']);
+		const raw = page('X0H001', ['<' + row('2010-01-02', '1.000', '1')]);
 		expect(readPage(raw, Q1).rows).toEqual([{ day: '20100102', flow: '1.000', code: '1' }]);
 	});
 

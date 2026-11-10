@@ -111,8 +111,20 @@ function preText(page: string): string | null {
 	return null;
 }
 
-/** Every tag removed, then any `<` an unclosed tag left behind: a table's own `<` arrives as `&lt;`. */
-const stripTags = (s: string) => s.replace(/<[^>]*>/g, '').replace(/</g, '');
+/**
+ * Every tag removed, by a scan for the same reason as above: from each `<` to the next `>`. A `<`
+ * that never closes is dropped on its own; a table's own `<` arrives as `&lt;`, decoded after.
+ */
+function stripTags(s: string): string {
+	let out = '';
+	let at = 0;
+	for (let open = s.indexOf('<'); open >= 0; open = s.indexOf('<', at)) {
+		out += s.slice(at, open);
+		const close = s.indexOf('>', open + 1);
+		at = close < 0 ? open + 1 : close + 1;
+	}
+	return out + s.slice(at);
+}
 
 const decode = (s: string) =>
 	stripTags(s.replace(/<br\s*\/?>/gi, '\n'))
