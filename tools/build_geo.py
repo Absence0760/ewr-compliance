@@ -15,6 +15,8 @@ geo, ms = sys.argv[1:3]
 # Simplify with shared topology so neighbouring catchments still meet.
 subprocess.run([ms, f'{geo}/q4.geojson', '-simplify', 'visvalingam', 'weighted', 'interval=60', 'keep-shapes',
                 '-clean', '-o', f'{geo}/q4s.geojson', 'format=geojson', 'precision=0.0001', 'force'], check=True)
-quat = json.load(open(f'{geo}/q4s.geojson'))
-json.dump(quat, open(f'{geo}/quaternaries-private.geojson', 'w'), separators=(',', ':'))
+with open(f'{geo}/q4s.geojson') as f:
+    quat = json.load(f)
+with open(f'{geo}/quaternaries-private.geojson', 'w') as f:
+    json.dump(quat, f, separators=(',', ':'))
 print(len(quat['features']))
