@@ -190,6 +190,8 @@ jobs:
           node-version: 24
           # No `cache: pnpm`: the store would hold the private auth-kit, and a cache entry written on
           # main can be restored by any run on this public repo, a fork PR's included.
+          # Nor setup-node's automatic cache (tools/workflows.test.ts).
+          package-manager-cache: false
 
       - name: Install
         if: steps.token.outputs.available == 'true'
