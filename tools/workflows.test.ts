@@ -35,6 +35,10 @@ export function leaks(job: string): string[] {
 		if (/^\s+cache:\s*['"]?pnpm\b/m.test(text)) out.push('installs server/ with `cache: pnpm`');
 		if (/uses:\s*actions\/cache[@/]/.test(text)) out.push('installs server/ with actions/cache');
 		if (/uses:\s*actions\/upload-artifact@/.test(text)) out.push('installs server/ and uploads an artifact');
+		// setup-node v5+ caches by itself when packageManager names npm; only `false` rules that out.
+		if (/uses:\s*actions\/setup-node@/.test(text) && !/^\s+package-manager-cache:\s*false\b/m.test(text)) {
+			out.push('installs server/ with setup-node and no `package-manager-cache: false`');
+		}
 	}
 	return out;
 }
@@ -73,7 +77,25 @@ describe('workflows keep auth-kit out of artifacts and caches', () => {
         with:
           path: server/dist/api.zip
 `;
-		expect(leaks(build)).toEqual(['uploads an artifact from server/', 'installs server/ with `cache: pnpm`', 'installs server/ and uploads an artifact']);
+		expect(leaks(build)).toEqual([
+			'uploads an artifact from server/',
+			'installs server/ with `cache: pnpm`',
+			'installs server/ and uploads an artifact',
+			'installs server/ with setup-node and no `package-manager-cache: false`',
+		]);
+	});
+
+	it("refuses setup-node's automatic cache unless it is turned off", () => {
+		const step = (extra: string) => `
+      - uses: actions/setup-node@x # v7
+        with:
+          node-version: 24
+${extra}      - working-directory: server
+        run: pnpm install --frozen-lockfile
+`;
+		expect(leaks(step(''))).toEqual(['installs server/ with setup-node and no `package-manager-cache: false`']);
+		expect(leaks(step('          # package-manager-cache: false\n'))).toEqual(['installs server/ with setup-node and no `package-manager-cache: false`']);
+		expect(leaks(step('          package-manager-cache: false\n'))).toEqual([]);
 	});
 
 	it('leaves a job that does not install server/ alone, and ignores comments', () => {
