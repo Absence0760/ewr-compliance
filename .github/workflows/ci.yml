@@ -290,7 +290,11 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    uses: ./.github/workflows/terraform.yml
+    # `./`, not GitHub's `$/` self-repository form (zizmor self-repository,
+    # suppressed): actionlint 1.7.12 rejects `$/` (rhysd/actionlint#711), and
+    # a job-level reusable-workflow call is resolved from this commit by
+    # GitHub, not read from a runner workspace.
+    uses: ./.github/workflows/terraform.yml # zizmor: ignore[self-repository]
 
   # Secret scan, called so a detection fails the gate. Ungated on purpose: a
   # pasted credential arrives in a markdown file as easily as in code, and a
@@ -300,7 +304,11 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    uses: ./.github/workflows/gitleaks.yml
+    # `./`, not GitHub's `$/` self-repository form (zizmor self-repository,
+    # suppressed): actionlint 1.7.12 rejects `$/` (rhysd/actionlint#711), and
+    # a job-level reusable-workflow call is resolved from this commit by
+    # GitHub, not read from a runner workspace.
+    uses: ./.github/workflows/gitleaks.yml # zizmor: ignore[self-repository]
 
   # The single required status check for branch protection. It fans in on every
   # job above via `needs` + always(), failing if any upstream job did not

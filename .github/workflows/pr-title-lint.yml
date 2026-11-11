@@ -8,8 +8,12 @@ name: pr-title-lint
 # word) and optional. .claude/hooks/git-scope-guard.py applies the same rule
 # to `gh pr create --title`, and its test fails if the two drift.
 
+# `pull_request`, not `pull_request_target`: the check only reads the PR's
+# title, which the run's read-only token can do on a fork's PR too, so it
+# needs neither this repo's write token nor its secrets (zizmor
+# dangerous-triggers).
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, edited, reopened, synchronize]
 
 permissions: read-all

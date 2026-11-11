@@ -14,13 +14,16 @@ on:
     - cron: '0 6 * * 1'
   workflow_dispatch:
 
-permissions:
-  contents: read
-  issues: write
+# Nothing at the workflow level; the one job names what it needs (zizmor
+# excessive-permissions: a workflow-level write reaches every job added later).
+permissions: {}
 
 jobs:
   audit:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # check out the lockfiles
+      issues: write # open or close the audit issue
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
