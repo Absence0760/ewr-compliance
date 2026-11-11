@@ -310,17 +310,46 @@ gh release create api@0.1.0 --target main --generate-notes --repo Absence0760/ew
 
 Then `curl -s https://<domain>/api/me` should print the 401 JSON (`"signin":"/signin/"`), not the stub's 503.
 
-**H9. The first admin.** Once the API is deployed and SES is out of the sandbox: install `server/` (needs H0's access over SSH on the workstation), then run the tool, which asks for your address and confirms it:
+**H9. The first admin.** Until this runs the list is empty and nobody can get past the sign-in page. The tool works once, and is refused as soon as any admin exists; every admin after it is added on the Users page. It can run from any workstation that has the pieces below, not only the one that did H6. Each command works on its own in a new terminal.
 
-```
-cd ~/github/ewr-compliance/server && pnpm install --frozen-lockfile
-```
+1. **SES is out of the sandbox.** Until it is, the code mail reaches only verified addresses. This should print `true`; if it prints `false`, wait for AWS's answer to H8's request (or its email asking for more detail):
 
-```
-cd ~/github/ewr-compliance && tools/first-admin
-```
+   ```
+   aws sso login --profile ewr-compliance
+   ```
 
-Sign in at `https://<domain>/` with that address, open Users, and add a second admin, so one locked out can't leave the site without one. `tools/recover-admin` is the break-glass, `tools/clear-lock` clears a sign-in lockout without changing anyone's role, and `tools/erase-user` is the erasure: `docs/hosting.md` § Access control.
+   ```
+   aws sesv2 get-account --region af-south-1 --profile ewr-compliance --query 'ProductionAccessEnabled'
+   ```
+
+2. **The API answers.** This should print the 401 JSON (`"signin":"/signin/"`). A 503 means H10 hasn't deployed it:
+
+   ```
+   curl -s https://<domain>/api/me
+   ```
+
+3. **The workstation can read the outputs.** On a workstation that didn't do H6, first make `infra/backend.config` (the first command in H6) and run `terraform init` (the second). Then this should print a name starting `ewr-compliance-`:
+
+   ```
+   cd ~/github/ewr-compliance && AWS_PROFILE=ewr-compliance terraform -chdir=infra output -raw users_table
+   ```
+
+4. **`server/` is installed.** It needs H0's read access to `auth-kit` over SSH on this workstation:
+
+   ```
+   cd ~/github/ewr-compliance/server && pnpm install --frozen-lockfile
+   ```
+
+5. **Run the tool.** It asks for your address at the prompt (never as an argument, so it stays out of shell history), shows it back and asks you to type `yes`:
+
+   ```
+   cd ~/github/ewr-compliance && tools/first-admin
+   ```
+
+6. **Sign in** at `https://<domain>/` with that address and the code it mails you. The app bar shows Users and Sign out.
+7. **Add a second admin** on the Users page (tick Admin when adding them), so one locked out can't leave the site without one. They sign in the same way. There is no upper limit on admins, and the site refuses to remove the last one.
+
+`tools/recover-admin` is the break-glass, `tools/clear-lock` clears a sign-in lockout without changing anyone's role, and `tools/erase-user` is the erasure: `docs/hosting.md` § Access control.
 
 **H11. The DWS store (P4).** One at a time, each when the last is done. What each part does, and what its alarms mean: `docs/hosting.md` § The DWS store.
 
