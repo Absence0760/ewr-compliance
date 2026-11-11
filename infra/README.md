@@ -312,7 +312,7 @@ Then `curl -s https://<domain>/api/me` should print the 401 JSON (`"signin":"/si
 
 **H9. The first admin.** Until this runs the list is empty and nobody can get past the sign-in page. The tool works once, and is refused as soon as any admin exists; every admin after it is added on the Users page. It can run from any workstation that has the pieces below, not only the one that did H6. Each command works on its own in a new terminal.
 
-1. **SES is out of the sandbox.** Until it is, the code mail reaches only verified addresses. This should print `true`; if it prints `false`, wait for AWS's answer to H8's request (or its email asking for more detail):
+1. **SES is out of the sandbox.** Until it is, the code mail reaches only verified addresses. This should print `true`; if it prints `false`, wait for AWS's answer to H8's request (or its email asking for more detail). To go ahead in the sandbox, verify your own address first (SES console, af-south-1, Identities, Create identity, Email address, then the link in the mail it sends). That one address, and any other verified the same way, can then sign in; nobody else can until production access is granted:
 
    ```
    aws sso login --profile ewr-compliance
@@ -334,19 +334,19 @@ Then `curl -s https://<domain>/api/me` should print the 401 JSON (`"signin":"/si
    cd ~/github/ewr-compliance && AWS_PROFILE=ewr-compliance terraform -chdir=infra output -raw users_table
    ```
 
-4. **`server/` is installed.** It needs H0's read access to `auth-kit` over SSH on this workstation:
+4. **`server/` is installed.** It needs Node 24 (`node --version`) and H0's read access to `auth-kit` over SSH on this workstation: `ssh -T git@github.com` should greet you by your GitHub name. A `Permission denied (publickey)` from the install means this workstation's SSH key isn't on GitHub:
 
    ```
    cd ~/github/ewr-compliance/server && pnpm install --frozen-lockfile
    ```
 
-5. **Run the tool.** It asks for your address at the prompt (never as an argument, so it stays out of shell history), shows it back and asks you to type `yes`:
+5. **Run the tool.** It asks for your address at the prompt (never as an argument, so it stays out of shell history), shows it back and asks you to type `yes`. **Check the address letter by letter before you type `yes`:** once any admin has existed the tool is refused for good, `tools/recover-admin` only restores an address already on the list, and a mistyped address can't receive the code to sign in and add the right one. If it says it can't read the terraform outputs, do step 3 again:
 
    ```
    cd ~/github/ewr-compliance && tools/first-admin
    ```
 
-6. **Sign in** at `https://<domain>/` with that address and the code it mails you. The app bar shows Users and Sign out.
+6. **Sign in** at `https://<domain>/` with that address and the code it mails you, from `no-reply@<domain>`. A new sender often lands in junk mail, so look there before asking for another: an address gets one code a minute and 10 a day, and 5 wrong codes in a row lock it for a while (`tools/clear-lock` lifts either). The code works for 10 minutes. Once in, the app bar shows Users and Sign out.
 7. **Add a second admin** on the Users page (tick Admin when adding them), so one locked out can't leave the site without one. They sign in the same way. There is no upper limit on admins, and the site refuses to remove the last one.
 
 `tools/recover-admin` is the break-glass, `tools/clear-lock` clears a sign-in lockout without changing anyone's role, and `tools/erase-user` is the erasure: `docs/hosting.md` § Access control.
