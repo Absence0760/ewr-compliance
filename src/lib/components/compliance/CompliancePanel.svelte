@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { app } from '#lib/state/app.svelte.ts';
+	import { session } from '#lib/state/session.svelte.ts';
 	import { tecOf } from './compare.ts';
 	import GaugePanel from './GaugePanel.svelte';
 	import HistoricalTab from './HistoricalTab.svelte';
@@ -38,6 +39,12 @@
 				<h2>{n.label}{#if n.sites.length}{' '}<span class="muted">/ {n.sites.map((s) => s.label).join(', ')}</span>{/if}</h2>
 				<span class="muted">{n.river} · {n.quat} · {n.basin}{n.iua ? ` · IUA ${n.iua}` : ''}</span>
 			</div>
+			{#if app.isUploaded(n.id) || session.me?.admin}
+				<div class="stored">
+					{#if app.isUploaded(n.id)}<span class="muted">Added on the site</span>{/if}
+					{#if session.me?.admin}<button type="button" class="delete" onclick={() => app.askDelete(n.id)}>Delete node…</button>{/if}
+				</div>
+			{/if}
 			<div class="chips">
 				<span class="chip">PES <b>{n.pes || '–'}</b></span>
 				<span class="chip">REC <b>{n.rec || '–'}</b></span>
@@ -91,6 +98,19 @@
 </aside>
 
 <style>
+	.stored {
+		display: flex;
+		gap: 10px;
+		align-items: center;
+		margin-top: 2px;
+		font-size: 13px;
+	}
+	.delete {
+		margin-left: auto;
+		padding: 1px 8px;
+		font-size: 12px;
+		color: var(--critical);
+	}
 	.loadbar {
 		display: flex;
 		align-items: center;

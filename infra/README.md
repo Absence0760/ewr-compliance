@@ -291,6 +291,8 @@ It should print `SUCCESS`. Until production access is granted, SES delivers only
 aws sesv2 get-account --region af-south-1 --profile ewr-compliance --query 'ProductionAccessEnabled'
 ```
 
+AWS can refuse a new account. `--query 'Details.ReviewDetails'` then shows `"Status": "DENIED"` and a `CaseId`. Appeal by replying on that case in the console (Support Center, Your support cases, the case, Reply), with more detail on who gets mail, how the list is kept, and how bounces and complaints are handled. It can't be done from the command line: a second `sesv2 put-account-details` is refused with `ConflictException` once a review is denied, and the Support API needs a paid support plan. The site can still go live in the sandbox (H9), but every user's address has to be verified first (`docs/hosting.md` § Access control).
+
 **H10. Deploy the API.** In GitHub, check the `production` environment still has you as its required reviewer and its deployment rules (`main`, and tags `api@*` and `pipeline@*`: the checks after H3). Then set the Actions secret `AWS_DEPLOY_ROLE_ARN` to the bootstrap's `ewr-compliance-deploy` role (the ARN in H3's summary; the command prompts for it), and the variables `AWS_REGION` = `af-south-1` and `API_FUNCTION_NAME` = the second command's output. Then publish a release and approve its deploy:
 
 ```

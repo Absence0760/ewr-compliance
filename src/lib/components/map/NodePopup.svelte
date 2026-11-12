@@ -12,6 +12,7 @@
 
 <script lang="ts">
 	import { app } from '#lib/state/app.svelte.ts';
+	import { session } from '#lib/state/session.svelte.ts';
 	import type { EwrNode, EwrSite } from '#lib/ewr/types.ts';
 	import type { Gauge } from '#lib/components/map/catchments.ts';
 	import { fileInUse, fileOption, infoRows } from '#lib/components/map/mapData.ts';
@@ -32,6 +33,9 @@
 <div class="pop">
 	{#if node}
 		<h3>{node.label}</h3>
+		{#if app.isUploaded(node.id)}
+			<div class="row added">Added on the site</div>
+		{/if}
 		{#if node.sites.length}
 			<div class="row">EWR site: {node.sites.map((s) => s.label).join(', ')}</div>
 		{/if}
@@ -59,6 +63,9 @@
 			<button type="button" onclick={() => app.openFile(node.id, chosen)}>Open file</button>
 		{:else}
 			<div class="row">No files supplied.</div>
+		{/if}
+		{#if session.me?.admin}
+			<button type="button" class="delete" onclick={() => app.askDelete(node.id)}>Delete node…</button>
 		{/if}
 	{:else if site}
 		<h3>{site.label}</h3>
@@ -98,6 +105,15 @@
 		gap: 2px;
 		font-size: 12px;
 		color: #52514e;
+	}
+	.added {
+		font-size: 12px;
+		font-style: italic;
+	}
+	.delete {
+		display: block;
+		margin-top: 8px;
+		color: var(--critical);
 	}
 	select {
 		width: 100%;

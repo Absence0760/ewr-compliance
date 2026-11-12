@@ -5,8 +5,20 @@ import { resolve } from '$app/paths';
 // XHR is sent on every call, as on the site's file fetches (siteFetch.ts). The API answers a request
 // without a live session with 401 JSON itself, never 403 (server/src/http.ts). SignedOut is what a 401 throws.
 import { SignedOut, XHR } from '#lib/users/siteFetch.ts';
+import type { NodeTexts } from '#lib/ewr/nodeStore.ts';
+import type { EwrNode } from '#lib/ewr/types.ts';
 
 export { SignedOut };
+
+/** A refusal from the API, with its status, for a page that says more for some (the import's 503). */
+export class ApiError extends Error {
+	readonly status: number;
+	constructor(status: number, message: string) {
+		super(message);
+		this.name = 'ApiError';
+		this.status = status;
+	}
+}
 
 export interface Me {
 	id: string;
@@ -50,7 +62,7 @@ async function call<T>(path: string, method = 'GET', body?: unknown): Promise<T>
 		throw new SignedOut();
 	}
 	const data = await readJson(res);
-	if (!res.ok) throw new Error(errorOf(data) ?? `The request failed: HTTP ${res.status}.`);
+	if (!res.ok) throw new ApiError(res.status, errorOf(data) ?? `The request failed: HTTP ${res.status}.`);
 	return data as T;
 }
 
@@ -101,3 +113,31 @@ export const listUsers = () => call<UserRow[]>('users');
 export const addUser = (email: string, admin: boolean) => call<UserRow>('users', 'POST', { email, admin });
 export const setAdmin = (id: string, admin: boolean) => call<UserRow>(`users/${encodeURIComponent(id)}`, 'PATCH', { admin });
 export const removeUser = (id: string) => call<{ removed: true }>(`users/${encodeURIComponent(id)}`, 'DELETE');
+
+/** What the node store says after a write: the WMA's counts (server/src/nodes.ts NodeChange). */
+export interface NodeChange {
+	wma: string;
+	id: string;
+	nodes: number;
+	deleted: number;
+	updatedAt: string;
+}
+
+/** Writes one node of the node store, with its files' texts (admins; docs/architecture.md § Node store). */
+export const saveNode = (wma: string, node: EwrNode, texts: NodeTexts) => call<NodeChange>('nodes', 'POST', { wma, node, texts });
+
+/** Deletes one node of a WMA (admins): an uploaded node comes out of the store, and a built-in one is hidden until restored. */
+export const deleteNode = (wma: string, id: string) => call<NodeChange & { tombstone: boolean }>('nodes/delete', 'POST', { wma, id });
+/** Restores a built-in node a WMA hides (admins). */
+export const restoreNode = (wma: string, id: string) => call<NodeChange>('nodes/restore', 'POST', { wma, id });
+
+/** What a refused node-store write says on screen (admins), by the API's status, as the import panel says it. */
+export function nodeRefusal(e: unknown): string {
+	if (!(e instanceof ApiError)) return `Not done: ${(e as Error).message}`;
+	const said = `The server said: ${e.message}`;
+	if (e.status === 503) return `The site cannot store nodes yet: the server is not ready (HTTP 503). ${said}`;
+	if (e.status === 404) return `Not done (HTTP 404): the site has no node store, the node is not there any more, or your account is no longer an admin. ${said}`;
+	if (e.status === 409) return `Not done (HTTP 409): another change got there first, or the WMA is full. ${said}`;
+	if (e.status === 413) return `Too large to store (HTTP 413). ${said}`;
+	return `Not done (HTTP ${e.status}). ${said}`;
+}

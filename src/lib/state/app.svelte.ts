@@ -8,6 +8,12 @@ import type {
 } from '#lib/ewr/types.ts';
 import { readStored, STORAGE, writeStored } from './storage.ts';
 import { siteFetch } from '#lib/users/siteFetch.ts';
+import { deleteNode, restoreNode, saveNode } from '#lib/users/api.ts';
+import { nodeKey, nodeStorePath, parseNodeStoreIndex, parseWmaOverlay, type NodeTexts, type WmaOverlay } from '#lib/ewr/nodeStore.ts';
+import { mergeOverlays, readNodeTexts, type ReadTexts } from '#lib/ewr/nodeOverlay.ts';
+import { WMAS, wmaBySlug, wmaOfBasin } from '#lib/components/map/wma.ts';
+
+const WMA_SLUGS = WMAS.map((w) => w.slug);
 
 const slug = (b: string) => b.toLowerCase().replace(/-/g, '');
 
@@ -32,7 +38,19 @@ class AppState {
 	sites = $state.raw<EwrSite[]>([]);
 	issues = $state.raw<Issue[]>([]);
 	meta = $state.raw<IndexData['meta'] | null>(null);
-	byId = new Map<string, EwrNode>();
+	byId = $state.raw(new Map<string, EwrNode>());
+	/** The node store's file for each WMA that has one, as last read (docs/architecture.md § Node store). */
+	overlays = $state.raw<Record<string, WmaOverlay>>({});
+	/** The WMA of each node added on the site, by id: its overlay's, whatever its basin. */
+	uploadedWma = $state.raw(new Map<string, string>());
+	/** Built-in nodes an admin deleted, hidden until restored. */
+	hidden = $state.raw<{ wma: string; node: EwrNode }[]>([]);
+	/** Said once when the node store could not be read, in whole or for a WMA. Empty with no store (a 404). */
+	nodeStoreNote = $state('');
+	/** The node an admin asked to delete, whose confirmation is open, or null. */
+	deleting = $state<string | null>(null);
+	/** What the last change an admin made to the store did, for the map's admin tools to say. */
+	nodeStoreDone = $state('');
 	links = $state.raw<GaugeLink[]>([]);
 	/** What the RQO node workbook records at each node, by id. */
 	nodeInfo = $state.raw<NodeInfoData>({});
@@ -79,6 +97,11 @@ class AppState {
 	viewer = $state<{ nodeId: string; file: string } | null>(null);
 
 	private stores: Record<string, Promise<Record<string, string>>> = {};
+	/** The built-in nodes, from data/index.json, that the node store is merged over. */
+	private builtIn: EwrNode[] = [];
+	/** Each uploaded node's texts, read when it is first opened, until its WMA's file is read again. */
+	private uploadedTexts: Record<string, Promise<ReadTexts>> = {};
+	private nodeStoreSeq = 0;
 	private seq = 0;
 
 	selected = $derived(this.selectedId ? (this.byId.get(this.selectedId) ?? null) : null);
@@ -135,6 +158,16 @@ class AppState {
 		return this.nodeInfo[nodeId] ?? {};
 	}
 
+	/** The WMA a node is in: its overlay's for a node added on the site, otherwise its basin's. */
+	wmaOf(n: EwrNode): string | undefined {
+		return this.uploadedWma.get(n.id) ?? wmaOfBasin(n.basin)?.slug;
+	}
+
+	/** Whether the node was added on the site, rather than built in. */
+	isUploaded(id: string): boolean {
+		return this.uploadedWma.has(id);
+	}
+
 	linkOf(nodeId: string): GaugeLink | null {
 		return this.links.find((l) => l.node === nodeId) ?? null;
 	}
@@ -153,8 +186,8 @@ class AppState {
 			this.gaugeRecords = new Map(Object.entries(g.records).map(([station, text]) => [station, parseMon(text, g.incomplete[station])]));
 			this.links = g.links;
 			this.flowStations = new Set(g.flows);
-			this.byId = new Map(d.nodes.map((n) => [n.id, n]));
-			this.nodes = d.nodes;
+			this.builtIn = d.nodes;
+			this.applyOverlays();
 			this.sites = d.sites;
 			this.issues = d.issues;
 			this.meta = d.meta;
@@ -163,6 +196,140 @@ class AppState {
 			this.loadError = (e as Error).message;
 		}
 		void this.loadDws();
+		if (this.loaded) void this.loadNodeStore();
+	}
+
+	/** The built-in nodes with the node store's overlays merged over them. A node that went away is no longer selected. */
+	private applyOverlays() {
+		const overlays = WMA_SLUGS.flatMap((w) => (this.overlays[w] ? [this.overlays[w]] : []));
+		const m = mergeOverlays(this.builtIn, overlays, (n) => wmaOfBasin(n.basin)?.slug);
+		const before = this.selected;
+		this.byId = new Map(m.nodes.map((n) => [n.id, n]));
+		this.nodes = m.nodes;
+		this.uploadedWma = m.uploaded;
+		this.hidden = m.hidden;
+		if (before && !this.byId.has(before.id)) {
+			this.selectedId = null;
+			if (this.viewer?.nodeId === before.id) this.viewer = null;
+			void this.refresh();
+		} else if (before && this.byId.get(before.id) !== before) {
+			void this.refresh();
+		}
+	}
+
+	/**
+	 * The node store, read as the DWS store's index is: at start, revalidated, and the app works without it.
+	 * A 404 (no store, as on `pnpm dev`, the e2e servers, or a site before it has one) is no overlays, said
+	 * nowhere. Any other failure keeps the built-in nodes and says so once. Each WMA's file listed is read and
+	 * checked whole; one that fails is left out, and said, never half-read. Read again after an admin's change:
+	 * a WMA whose file is unchanged (its `updatedAt`) is kept, unless it is `changed`, the one just written.
+	 */
+	async loadNodeStore(changed?: string): Promise<void> {
+		const seq = ++this.nodeStoreSeq;
+		const current = () => seq === this.nodeStoreSeq;
+		let wmas: Record<string, { updatedAt: string }>;
+		try {
+			const res = await siteFetch(asset(nodeStorePath.index as never), { cache: 'no-cache' });
+			if (res.status === 404) {
+				if (!current()) return;
+				this.overlays = {};
+				this.nodeStoreNote = '';
+				this.forgetTexts(WMA_SLUGS);
+				this.applyOverlays();
+				return;
+			}
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			wmas = parseNodeStoreIndex(await res.json(), WMA_SLUGS).wmas;
+		} catch (e) {
+			if (current()) this.nodeStoreNote = `Nodes added on the site could not be read (${(e as Error).message}). The built-in nodes are shown.`;
+			return;
+		}
+		const held = this.overlays;
+		const read = await Promise.all(
+			Object.entries(wmas).map(async ([wma, entry]): Promise<[string, WmaOverlay | Error, boolean]> => {
+				if (held[wma] && held[wma].updatedAt === entry.updatedAt && wma !== changed) return [wma, held[wma], false];
+				try {
+					const res = await siteFetch(asset(nodeStorePath.wma(wma) as never), { cache: 'no-cache' });
+					if (!res.ok) throw new Error(`HTTP ${res.status}`);
+					return [wma, parseWmaOverlay(await res.json(), wma, WMA_SLUGS), true];
+				} catch (e) {
+					return [wma, e as Error, true];
+				}
+			})
+		);
+		if (!current()) return;
+		const overlays: Record<string, WmaOverlay> = {};
+		const failed: string[] = [];
+		for (const [wma, got] of read) {
+			if (got instanceof Error) failed.push(`${wmaBySlug(wma)?.name ?? wma} (${got.message})`);
+			else overlays[wma] = got;
+		}
+		this.forgetTexts([...read.filter(([, , fresh]) => fresh).map(([w]) => w), ...Object.keys(held).filter((w) => !(w in wmas))]);
+		this.overlays = overlays;
+		this.nodeStoreNote = failed.length ? `Nodes added on the site could not be read for ${failed.join('; ')}. The built-in nodes are shown there.` : '';
+		this.applyOverlays();
+	}
+
+	/** Drop the texts read for these WMAs' uploaded nodes, whose files may have changed. */
+	private forgetTexts(wmas: string[]) {
+		for (const id of Object.keys(this.uploadedTexts)) if (wmas.some((w) => id.startsWith(`${w}:`))) delete this.uploadedTexts[id];
+	}
+
+	/** An uploaded node's texts, read once, as `ewr-<basin>.json` is; a failed read is tried again next time. */
+	private textsOfUploaded(n: EwrNode, wma: string): Promise<ReadTexts> {
+		const key = nodeKey(n.id, wma);
+		if (key === null) return Promise.reject(new Error(`${n.label} has no files in the node store.`));
+		return (this.uploadedTexts[n.id] ??= siteFetch(asset(nodeStorePath.files(wma, key) as never), { cache: 'no-cache' })
+			.then(async (r) => {
+				if (!r.ok) throw new Error(`HTTP ${r.status}`);
+				return readNodeTexts(await r.json(), n, wma);
+			})
+			.catch((e) => {
+				delete this.uploadedTexts[n.id];
+				throw new Error(`The files of ${n.label} could not be read from the node store: ${(e as Error).message}`);
+			}));
+	}
+
+	/** Every EWR text of a node, by file name: its basin's store, or an uploaded node's own. */
+	private async textsOf(n: EwrNode): Promise<{ texts: Record<string, string>; missing: string[] }> {
+		const wma = this.uploadedWma.get(n.id);
+		if (wma) return this.textsOfUploaded(n, wma);
+		return { texts: await this.store(n.basin, 'ewr'), missing: [] };
+	}
+
+	/** Write one node to the store (admins), then read its WMA again, so what is shown is what everyone sees. */
+	async saveNode(wma: string, node: EwrNode, texts: NodeTexts): Promise<void> {
+		try {
+			await saveNode(wma, node, texts);
+		} finally {
+			await this.loadNodeStore(wma);
+		}
+	}
+
+	/** Ask to delete a node (admins): its confirmation opens. */
+	askDelete(id: string) {
+		this.deleting = id;
+	}
+
+	/** Delete a node (admins): an uploaded one leaves the store, and a built-in one is hidden. Then its WMA is read again. */
+	async deleteNode(id: string): Promise<void> {
+		const n = this.byId.get(id);
+		const wma = n && this.wmaOf(n);
+		if (!n || !wma) throw new Error('That node is on no WMA\'s map, so it cannot be deleted here.');
+		try {
+			await deleteNode(wma, id);
+		} finally {
+			await this.loadNodeStore(wma);
+		}
+	}
+
+	/** Show a deleted built-in node again (admins). */
+	async restoreNode(wma: string, id: string): Promise<void> {
+		try {
+			await restoreNode(wma, id);
+		} finally {
+			await this.loadNodeStore(wma);
+		}
 	}
 
 	/**
@@ -225,6 +392,12 @@ class AppState {
 
 	async fileText(n: EwrNode, f: NodeFile): Promise<string> {
 		if (f.uploaded) return this.uploads[n.id].text;
+		const wma = this.uploadedWma.get(n.id);
+		if (wma) {
+			const { texts } = await this.textsOfUploaded(n, wma);
+			if (!Object.hasOwn(texts, f.name)) throw new Error(`${f.name} is listed for ${n.label}, but the node store has no text for it, so it cannot be read. An admin can save the node again with its files.`);
+			return texts[f.name];
+		}
 		const heavy = f.kind === 'mrv' || f.kind === 'hydro';
 		return (await this.store(n.basin, heavy ? 'series' : 'ewr'))[f.name];
 	}
@@ -250,10 +423,15 @@ class AppState {
 				const tab = parseTab(await this.fileText(n, v.source));
 				lines = { ...ewrLines({ tab }), file: v.source.name, tab };
 			}
-			const texts = lines?.tab ? await this.store(n.basin, 'ewr') : null;
+			// An uploaded node's files can be a write behind its listing: a file with no text is said, never guessed at.
+			const read = lines?.tab || (this.uploadedWma.has(n.id) && n.files.length) ? await this.textsOf(n) : null;
 			if (seq !== this.seq) return;
 			this.lines = lines;
-			this.notices = buildNotices(n, v, this.ecBasis, c, lines, texts);
+			const missing = read?.missing ?? [];
+			this.notices = [
+				...buildNotices(n, v, this.ecBasis, c, lines, lines?.tab && read && !missing.length ? read.texts : null),
+				...(missing.length ? [{ level: 'warn' as const, text: `The node store has no text for ${missing.join(', ')}, so ${missing.length === 1 ? 'it' : 'they'} cannot be read. An admin can save the node again with its files.` }] : [])
+			];
 		} catch (e) {
 			if (seq !== this.seq) return;
 			this.lines = null;
