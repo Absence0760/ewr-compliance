@@ -74,10 +74,10 @@ describe('checks', () => {
 		expect(checkTarget({ wma: 'nowhere', id: 'x' })).toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/^Say which WMA/) });
 	});
 
-	it('checkPut works out hasTab and hasRevised from the files, whatever the request says', () => {
-		const node = { id: 'vaal-orange:syx1', label: 'SYX1', basin: 'Sample Basin', files: [{ name: 'syx1C.tab', kind: 'tab' }], hasRevised: true, hasTab: false };
+	it('checkPut works out hasTab, hasRevised and ecsAvailable from the files, whatever the request says', () => {
+		const node = { id: 'vaal-orange:syx1', label: 'SYX1', basin: 'Sample Basin', files: [{ name: 'syx1C.tab', kind: 'tab', ec: 'C' }], hasRevised: true, hasTab: false, ecsAvailable: ['A'] };
 		const r = checkPut({ wma: 'vaal-orange', node, texts: { 'syx1C.tab': 'x' } }, '2026-11-12T09:00:00.000Z');
-		expect(r).toMatchObject({ ok: true, value: { node: { hasTab: true, hasRevised: false } } });
+		expect(r).toMatchObject({ ok: true, value: { node: { hasTab: true, hasRevised: false, ecsAvailable: ['C'] } } });
 	});
 });
 
