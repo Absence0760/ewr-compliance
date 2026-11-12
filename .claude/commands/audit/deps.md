@@ -11,6 +11,7 @@ Sweep dependencies for known advisories and drift, and check that every dependen
 - **GitHub Actions**, SHA-pinned.
 - **Python** in `tools/` has no requirements file; `README.md` § Rebuild the data lists what it needs, and it never ships.
 - The scheduled `.github/workflows/audit.yml` runs `pnpm audit --prod` weekly in all three packages and files an issue; this command adds the checks it doesn't cover.
+- `.github/workflows/supply-chain-scan.yml` runs osv-scanner over the same lockfiles on every PR (advisory, code scanning tool `osv-scanner`); its reviewed, expiring ignores are in `osv-scanner.toml`. Check that no entry there has outlived its reason.
 
 ## What to check
 

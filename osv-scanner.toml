@@ -1,0 +1,41 @@
+# Reviewed, expiring ignores for osv-scanner. supply-chain-scan.yml passes this
+# file with --config, so it applies to every lockfile the recursive scan finds
+# (the root, server/ and pipeline/), not only the one beside it. Each entry is
+# one advisory ID with no actionable fix, re-reviewed by `ignoreUntil`; an
+# expired entry reports again. Scorecard's Vulnerabilities check reads it too.
+# The scan itself: SECURITY.md § Supply-chain scanning.
+
+[[IgnoredVulns]]
+# CVE-2026-93753: deepmerge <= 4.3.1 mergeObject() prototype poisoning.
+id = "GHSA-gcqx-w48m-w2h4"
+ignoreUntil = 2027-05-11
+reason = """
+No fixed release exists: 4.3.1 (2023-03) is deepmerge's latest and the advisory \
+lists no patched version. The only dependent is @sveltejs/vite-plugin-svelte \
+(dev, build time), which merges its own options with svelte.config.js, inputs \
+the repo authors; nothing from it reaches the static bundle. Drop this once \
+deepmerge publishes a patched release or vite-plugin-svelte drops it.\
+"""
+
+[[IgnoredVulns]]
+# CVE-2023-30533: SheetJS CE prototype pollution when reading a crafted file,
+# fixed in 0.19.3.
+id = "GHSA-4r6h-8v6p-xvw6"
+ignoreUntil = 2027-05-11
+reason = """
+Not affected: the app uses SheetJS CE 0.20.3 from cdn.sheetjs.com, vendored as \
+vendor/xlsx-0.20.3.tgz, which is past the 0.19.3 fix. The advisory lists no \
+fixed npm version only because SheetJS stopped publishing to npm at 0.18.5, so \
+the scanner matches every version. Re-check on the next SheetJS bump.\
+"""
+
+[[IgnoredVulns]]
+# CVE-2024-22363: SheetJS CE ReDoS, fixed in 0.20.2.
+id = "GHSA-5pgg-2g8v-p4x9"
+ignoreUntil = 2027-05-11
+reason = """
+Not affected: the app uses SheetJS CE 0.20.3 from cdn.sheetjs.com, vendored as \
+vendor/xlsx-0.20.3.tgz, which is past the 0.20.2 fix. The advisory lists no \
+fixed npm version only because SheetJS stopped publishing to npm at 0.18.5, so \
+the scanner matches every version. Re-check on the next SheetJS bump.\
+"""
