@@ -26,6 +26,15 @@ describe('settings', () => {
 		expect(() => readSettings({ ...ENV, SITE_DOMAIN: 'https://ewr.example.test' })).toThrow(/SITE_DOMAIN/);
 		expect(() => readSettings({ ...ENV, RUNTIME_SECRET_ARN: 'arn:aws:s3:::bucket' })).toThrow(/RUNTIME_SECRET_ARN/);
 	});
+
+	it('takes NODES_BUCKET only with the node store: absent or blank is off, malformed fails closed', () => {
+		expect(readSettings(ENV).nodesBucket).toBeNull();
+		expect(readSettings({ ...ENV, NODES_BUCKET: ' ' }).nodesBucket).toBeNull();
+		expect(readSettings({ ...ENV, NODES_BUCKET: 'ewr-compliance-nodes-000000000000' }).nodesBucket).toBe('ewr-compliance-nodes-000000000000');
+		for (const bad of ['Upper-Case', 'arn:aws:s3:::x', 'a', 'b/c']) {
+			expect(() => readSettings({ ...ENV, NODES_BUCKET: bad }), bad).toThrow(new ConfigError('NODES_BUCKET is missing or malformed'));
+		}
+	});
 });
 
 describe('the runtime secret', () => {

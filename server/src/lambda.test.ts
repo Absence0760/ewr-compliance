@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { handler, toRequest, toResult } from './lambda.ts';
+import { NotReady } from './app.ts';
+import { handler, recordAudit, toRequest, toResult } from './lambda.ts';
 
 describe('the Function URL event', () => {
 	it('becomes a request: lowercase headers, the cookies joined, a base64 body decoded', () => {
@@ -19,6 +20,13 @@ describe('the Function URL event', () => {
 
 	it('answers with the cookies as Set-Cookie values', () => {
 		expect(toResult({ status: 200, headers: { a: 'b' }, cookies: ['x=1'], body: '{}' })).toEqual({ statusCode: 200, headers: { a: 'b' }, cookies: ['x=1'], body: '{}' });
+	});
+});
+
+describe('the node store’s audit seam', () => {
+	it('refuses every node-store write as not ready until auth-kit records app actions', async () => {
+		const actor = { id: 'u', email: 'admin@example.test', isAdmin: true, addedBy: 'operator', addedAt: '', sessionsRevokedAt: null, undeliverable: null };
+		await expect(recordAudit(null)(actor, 'node.put', 'vaal-orange vaal-orange:syx1')).rejects.toBeInstanceOf(NotReady);
 	});
 });
 

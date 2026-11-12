@@ -18,6 +18,9 @@ mkdirSync(out, { recursive: true });
 await build({
 	entryPoints: [join(root, 'src/lambda.ts')],
 	outfile: join(out, 'index.mjs'),
+	// This package's tsconfig for every file, as vitest.config.ts: the app's own, which src/lib/ewr would
+	// otherwise get, extends SvelteKit's generated one, which a fresh checkout doesn't have.
+	tsconfig: join(root, 'tsconfig.json'),
 	bundle: true,
 	platform: 'node',
 	target: 'node24',

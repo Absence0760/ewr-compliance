@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { NODE_STORE_LIMITS, nodeKey, nodeStoreKey, nodeStorePath, parseNodeStoreIndex, parseNodeTexts, parseWmaOverlay } from './nodeStore.ts';
+import { WMAS as MAP_WMAS } from '#lib/components/map/wma.ts';
+import { NODE_STORE_LIMITS, WMA_SLUGS, nodeKey, nodeStoreKey, nodeStorePath, parseNodeStoreIndex, parseNodeTexts, parseWmaOverlay } from './nodeStore.ts';
 
 const WMAS = ['breede-olifants', 'vaal-orange'];
 const time = '2026-11-12T09:00:00+02:00';
@@ -20,6 +21,12 @@ const node = (key = 'syx1', extra: Record<string, unknown> = {}) => ({
 	...extra
 });
 const overlay = (extra: Record<string, unknown> = {}) => ({ version: 1, wma: 'vaal-orange', updatedAt: time, nodes: [node()], deleted: ['Basin:old1'], ...extra });
+
+describe('WMA_SLUGS', () => {
+	it('is the map’s six WMAs, in order', () => {
+		expect([...WMA_SLUGS]).toEqual(MAP_WMAS.map((w) => w.slug));
+	});
+});
 
 describe('nodeStorePath and nodeStoreKey', () => {
 	it('puts each file under nodes-data/, and its key under serve/', () => {

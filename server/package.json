@@ -3,7 +3,7 @@
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
-	"description": "The sign-in and user API Lambda (infra/auth.tf), on auth-kit. Its own package, so the public app installs without auth-kit.",
+	"description": "The sign-in, user and admin node-store API Lambda (infra/auth.tf), on auth-kit. Its own package, so the public app installs without auth-kit.",
 	"packageManager": "pnpm@10.34.9",
 	"engines": {
 		"node": ">=24"
@@ -17,6 +17,7 @@
 	"dependencies": {
 		"@absence0760/auth-kit": "github:Absence0760/auth-kit#v0.2.0",
 		"@aws-sdk/client-dynamodb": "3.1164.0",
+		"@aws-sdk/client-s3": "3.1162.0",
 		"@aws-sdk/client-secrets-manager": "3.1164.0",
 		"@aws-sdk/client-sesv2": "3.1164.0",
 		"@aws-sdk/lib-dynamodb": "3.1164.0"
