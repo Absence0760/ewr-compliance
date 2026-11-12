@@ -7,6 +7,7 @@
 	import { session } from '#lib/state/session.svelte.ts';
 	import { signOut } from '#lib/users/api.ts';
 	import FileViewer from '#lib/components/viewer/FileViewer.svelte';
+	import DeleteNodeDialog from '#lib/components/nodes/DeleteNodeDialog.svelte';
 	import { wmaBySlug } from '#lib/components/map/wma.ts';
 	import type { EcBasis } from '#lib/ewr/types.ts';
 
@@ -96,3 +97,4 @@
 	{/if}
 </main>
 <FileViewer />
+<DeleteNodeDialog />

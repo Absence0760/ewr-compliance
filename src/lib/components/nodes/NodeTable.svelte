@@ -26,10 +26,19 @@
 		});
 	});
 
+	/** A cell as copied: an EC's chosen value, and no note marked data-nocopy, such as "Added on the site". */
+	function cellText(c: HTMLTableCellElement): string {
+		const chosen = c.querySelector('select')?.value;
+		if (chosen !== undefined) return chosen.trim();
+		const copy = c.cloneNode(true) as HTMLTableCellElement;
+		for (const e of copy.querySelectorAll('[data-nocopy]')) e.remove();
+		return (copy.textContent ?? '').trim();
+	}
+
 	async function copyTable() {
 		if (!table) return;
 		const text = [...table.rows]
-			.map((r) => [...r.cells].map((c) => (c.querySelector('select')?.value ?? c.textContent).trim()).join('\t'))
+			.map((r) => [...r.cells].map(cellText).join('\t'))
 			.join('\n');
 		try {
 			await navigator.clipboard.writeText(text);
@@ -61,6 +70,9 @@
 		<span class="muted" role="status">{list.length} of {app.nodes.length} nodes</span>
 		<button type="button" onclick={copyTable}>{copyLabel}</button>
 	</div>
+	{#if app.nodeStoreNote}
+		<p class="muted storenote" role="status">{app.nodeStoreNote}</p>
+	{/if}
 	<div class="tablewrap">
 		<table bind:this={table}>
 			<thead>
@@ -92,6 +104,10 @@
 	.tablewrap {
 		flex: 1;
 		min-height: 0;
+	}
+	.storenote {
+		margin: 0 0 8px;
+		font-size: 13px;
 	}
 	input[type='search'] {
 		width: 240px;

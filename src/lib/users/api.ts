@@ -125,3 +125,19 @@ export interface NodeChange {
 
 /** Writes one node of the node store, with its files' texts (admins; docs/architecture.md § Node store). */
 export const saveNode = (wma: string, node: EwrNode, texts: NodeTexts) => call<NodeChange>('nodes', 'POST', { wma, node, texts });
+
+/** Deletes one node of a WMA (admins): an uploaded node comes out of the store, and a built-in one is hidden until restored. */
+export const deleteNode = (wma: string, id: string) => call<NodeChange & { tombstone: boolean }>('nodes/delete', 'POST', { wma, id });
+/** Restores a built-in node a WMA hides (admins). */
+export const restoreNode = (wma: string, id: string) => call<NodeChange>('nodes/restore', 'POST', { wma, id });
+
+/** What a refused node-store write says on screen (admins), by the API's status, as the import panel says it. */
+export function nodeRefusal(e: unknown): string {
+	if (!(e instanceof ApiError)) return `Not done: ${(e as Error).message}`;
+	const said = `The server said: ${e.message}`;
+	if (e.status === 503) return `The site cannot store nodes yet: the server is not ready (HTTP 503). ${said}`;
+	if (e.status === 404) return `Not done (HTTP 404): the site has no node store, the node is not there any more, or your account is no longer an admin. ${said}`;
+	if (e.status === 409) return `Not done (HTTP 409): another change got there first, or the WMA is full. ${said}`;
+	if (e.status === 413) return `Too large to store (HTTP 413). ${said}`;
+	return `Not done (HTTP ${e.status}). ${said}`;
+}

@@ -1,13 +1,12 @@
 <script lang="ts">
 	import EwrMap from '#lib/components/map/EwrMap.svelte';
 	import CompliancePanel from '#lib/components/compliance/CompliancePanel.svelte';
-	import { wmaOfBasin } from '#lib/components/map/wma.ts';
 	import { app } from '#lib/state/app.svelte.ts';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
 	const wma = $derived(data.wma);
-	const hasNodes = $derived(app.nodes.some((n) => wmaOfBasin(n.basin)?.slug === wma.slug));
+	const hasNodes = $derived(app.nodes.some((n) => app.wmaOf(n) === wma.slug));
 </script>
 
 <section class="view split">

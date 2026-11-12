@@ -9,6 +9,7 @@ import { attachFile, classify, detachFile, matchUpload, overrideEc, type UploadR
 import { loadWma, outlineOf } from '#lib/components/map/catchments.ts';
 import { BASIN_WMA, inRings, wmaBySlug, type Wma } from '#lib/components/map/wma.ts';
 import { ApiError, saveNode, SignedOut } from '#lib/users/api.ts';
+import { app } from '#lib/state/app.svelte.ts';
 
 export type Message = { level: 'info' | 'warning' | 'error'; text: string };
 
@@ -165,6 +166,7 @@ export class Importer {
 		this.failures = [];
 		this.progress = { done: 0, total: todo.length };
 		const saved = new Set(this.saved);
+		const before = saved.size;
 		const failures: { id: string; text: string }[] = [];
 		try {
 			for (const n of todo) {
@@ -187,6 +189,8 @@ export class Importer {
 			this.saved = saved;
 			this.failures = failures;
 			this.saving = false;
+			// The map and Nodes and ECs show the store as everyone sees it.
+			if (saved.size > before) void app.loadNodeStore(wma);
 		}
 	}
 

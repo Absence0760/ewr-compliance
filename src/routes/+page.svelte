@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import WmaMap from '#lib/components/map/WmaMap.svelte';
-	import { WMAS, wmaOfBasin } from '#lib/components/map/wma.ts';
+	import { WMAS } from '#lib/components/map/wma.ts';
 	import { app } from '#lib/state/app.svelte.ts';
 
 	let hovered = $state('');
@@ -9,7 +9,7 @@
 	const counts = $derived.by(() => {
 		const c = new Map<string, number>();
 		for (const n of app.nodes) {
-			const w = wmaOfBasin(n.basin)?.slug;
+			const w = app.wmaOf(n);
 			if (w) c.set(w, (c.get(w) ?? 0) + 1);
 		}
 		return c;
