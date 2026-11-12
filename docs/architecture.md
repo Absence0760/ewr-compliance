@@ -74,6 +74,20 @@ The station names in the index are client material: the store sits behind the si
 
 `localStorage` (`src/lib/state/storage.ts`) keeps the EC basis and each node's choices. The DWS API addresses an older version kept there, `histApi` and `rtApi`, are dropped the first time this one runs.
 
+## Node store
+
+Planned (#17): EWR nodes an admin loads on the site, kept in their own bucket (`infra/nodes.tf`), served signed under `nodes-data/` and merged over `data/index.json`. `src/lib/ewr/nodeStore.ts` holds the one format, and checks it for all three parts that touch it. The API checks every write with it (`server/` imports it, as `pipeline/` imports `dwsStore.ts`), the import panel writes it, and the app reads it. A file that fails the check is refused whole, never half-read.
+
+| File | Format |
+|---|---|
+| `nodes-data/index.json` | `{ "version": 1, "wmas": { "<wma>": { "updatedAt", "nodes", "deleted" } } }`: the WMAs with a file of their own, when it was last written, and how many nodes it adds and hides. |
+| `nodes-data/wma-<wma>.json` | `{ "version": 1, "wma", "updatedAt", "nodes": EwrNode[], "deleted": string[] }`. An uploaded node's id is `<wma>:<key>`, the key a safe path segment (`NODE_KEY`). A node with a built-in node's id replaces it, and `deleted` hides built-in nodes until they are restored. `hasTab`, `hasRevised` and `ecsAvailable` are worked out from the node's files as `build_data.py` does (a `.tab` or `_Con.txt` run with an EC on the ladder; a Revised file gives the first seven ECs), never taken from the upload. A file's `ecNote` says how its EC was decided. |
+| `nodes-data/files/<wma>/<key>.json` | `{ "<file name>": "<text>" }`: one text for each of the node's files, read when the node is opened, as `ewr-<basin>.json` is. |
+
+The limits (`NODE_STORE_LIMITS`) keep each write far under the API's 6 MB request limit. A WMA goes up node by node: at most 40 files and 4 million characters of text per node, and 1 000 nodes per WMA.
+
+How an upload is matched into this format, both pure and with no DOM. `src/lib/ewr/kml.ts` (`parseKml`) reads the node KML by string parsing: each placemark's name, its folder, its ExtendedData (`SimpleData` and `Data`/`value`) and its point, or a MultiGeometry's first point. A line or polygon is listed as skipped, and a text that isn't KML is refused. `src/lib/ewr/uploadMatch.ts` (`matchUpload`) makes a node of each placemark: its code is the `NODE` field (or `code_2`, `code`, `NODE_CODE`, as the supplied KMLs carry it), else its name, and its id is `<wma>:<code, lowercased>`. River, comment, quaternary and PES (and REC or TEC when the KML has them) come from its fields. It then joins each file whose stem is a node's code, matched case-insensitively, plus an optional EC suffix, `_DT` (a variant) and `-i`, as `scan_named` in the private repo's `build_data.py` does. It decides EC conflicts as `resolve_ec_conflicts` does. A file with the same month values as the run its header's EC names is a copy, so it keeps the header's EC and becomes a variant. Otherwise the file name's EC wins. Each decision goes on the file's `ecNote`. `overrideEc` records an admin's choice in its place. Files are read with Python's universal newlines, as the build reads them. The report lists files that join no node and why, nodes with no file or no EWR file, placemarks that make no node, each EC decision, and anything over the limits. The check against the WMA's boundary is the import panel's.
+
 ## Gauge records
 
 `static/data/gauges.json` holds `links`, the gauge that measures each node with the factor on its record, `records`, each gauge's monthly file as text, in the DWS format or as a table worked up from a daily file, `flows`, the stations with a `flows-<station>.json`, and `incomplete`, the months of each station that its daily record shows are not whole. That file holds the gauge's DWS `.day` file and its 12-minute readings, as text. Like the Desktop outputs, the text is parsed in the browser (`parseMon`, `parseGaugeFlows`). `gauges.json` loads with `index.json`, and the app does not start without it. A flows file loads when its gauge is first opened.
