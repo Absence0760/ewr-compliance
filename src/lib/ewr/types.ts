@@ -17,6 +17,8 @@ export interface NodeFile {
 	basis: string;
 	variant?: boolean;
 	uploaded?: boolean;
+	/** How the EC was decided, for a file an admin uploaded (#17): by its values against the sibling run, or by the admin. Shown with the file. */
+	ecNote?: string;
 }
 
 export interface EwrNode {

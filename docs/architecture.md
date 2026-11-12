@@ -73,6 +73,18 @@ The station names in the index are client material: the store sits behind the si
 
 `localStorage` (`src/lib/state/storage.ts`) keeps the EC basis and each node's choices. The DWS API addresses an older version kept there, `histApi` and `rtApi`, are dropped the first time this one runs.
 
+## Node store
+
+Planned (#17): EWR nodes an admin loads on the site, kept in their own bucket (`infra/nodes.tf`), served signed under `nodes-data/` and merged over `data/index.json`. `src/lib/ewr/nodeStore.ts` holds the one format, and checks it for all three parts that touch it. The API checks every write with it (`server/` imports it, as `pipeline/` imports `dwsStore.ts`), the import panel writes it, and the app reads it. A file that fails the check is refused whole, never half-read.
+
+| File | Format |
+|---|---|
+| `nodes-data/index.json` | `{ "version": 1, "wmas": { "<wma>": { "updatedAt", "nodes", "deleted" } } }`: the WMAs with a file of their own, when it was last written, and how many nodes it adds and hides. |
+| `nodes-data/wma-<wma>.json` | `{ "version": 1, "wma", "updatedAt", "nodes": EwrNode[], "deleted": string[] }`. An uploaded node's id is `<wma>:<key>`, the key a safe path segment (`NODE_KEY`). A node with a built-in node's id replaces it, and `deleted` hides built-in nodes until they are restored. `hasTab` and `hasRevised` are worked out from the node's files, never taken from the upload. A file's `ecNote` says how its EC was decided. |
+| `nodes-data/files/<wma>/<key>.json` | `{ "<file name>": "<text>" }`: one text for each of the node's files, read when the node is opened, as `ewr-<basin>.json` is. |
+
+The limits (`NODE_STORE_LIMITS`) keep each write far under the API's 6 MB request limit. A WMA goes up node by node: at most 40 files and 4 million characters of text per node, and 1 000 nodes per WMA.
+
 ## Gauge records
 
 `static/data/gauges.json` holds `links`, the gauge that measures each node with the factor on its record, `records`, each gauge's monthly file as text, in the DWS format or as a table worked up from a daily file, `flows`, the stations with a `flows-<station>.json`, and `incomplete`, the months of each station that its daily record shows are not whole. That file holds the gauge's DWS `.day` file and its 12-minute readings, as text. Like the Desktop outputs, the text is parsed in the browser (`parseMon`, `parseGaugeFlows`). `gauges.json` loads with `index.json`, and the app does not start without it. A flows file loads when its gauge is first opened.
