@@ -76,14 +76,18 @@ describe('parseWmaOverlay', () => {
 				id: 'vaal-orange:syx1', label: 'SYX1', basin: 'Sample Basin', quat: '', river: 'Sample River', comment: '', lon: 26.5, lat: -28.1, approx: false,
 				pes: '', rec: '', tec: 'C', tecInc: '', tecCum: '', iua: '', ewrClass: '', ru: '', ewrBasis: '', ewrNote: '', gazPct: null, sites: [], ecSource: {},
 				files: [{ name: 'syx1C.tab', kind: 'tab', ec: 'C', basis: '' }, { name: 'syx1.rul(NEWFORM)', kind: 'revised', ec: '', basis: '' }],
-				ecsAvailable: [], hasTab: true, hasRevised: true
+				ecsAvailable: ['A', 'A/B', 'B', 'B/C', 'C', 'C/D', 'D'], hasTab: true, hasRevised: true
 			}
 		]);
 	});
 
-	it('works out hasTab and hasRevised from the files, whatever the upload says', () => {
-		const n = parseWmaOverlay(overlay({ nodes: [node('syx1', { files: [], hasTab: true, hasRevised: true })] }), 'vaal-orange', WMAS).nodes[0];
-		expect([n.hasTab, n.hasRevised]).toEqual([false, false]);
+	it('works out hasTab, hasRevised and ecsAvailable from the files, as build_data.py does, whatever the upload says', () => {
+		const of = (files: unknown[]) => parseWmaOverlay(overlay({ nodes: [node('syx1', { files, hasTab: true, hasRevised: true, ecsAvailable: ['A'] })] }), 'vaal-orange', WMAS).nodes[0];
+		const pick = (n: ReturnType<typeof of>) => [n.hasTab, n.hasRevised, n.ecsAvailable];
+		expect(pick(of([]))).toEqual([false, false, []]);
+		expect(pick(of([{ name: 'a.tab', kind: 'tab', ec: '' }]))).toEqual([false, false, []]);
+		expect(pick(of([{ name: 'aD.tab', kind: 'tab', ec: 'D' }, { name: 'aB_Con.txt', kind: 'con', ec: 'B' }, { name: 'aC.mrv', kind: 'mrv', ec: 'C' }]))).toEqual([true, false, ['B', 'D']]);
+		expect(pick(of([{ name: 'aE.tab', kind: 'tab', ec: 'E' }, { name: 'a.rul(NEWFORM)', kind: 'revised', ec: '' }]))).toEqual([true, true, ['A', 'A/B', 'B', 'B/C', 'C', 'C/D', 'D', 'E']]);
 	});
 
 	it('keeps how a file\'s EC was decided, and drops a repeated deleted id', () => {

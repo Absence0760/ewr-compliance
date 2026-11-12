@@ -80,7 +80,7 @@ Planned (#17): EWR nodes an admin loads on the site, kept in their own bucket (`
 | File | Format |
 |---|---|
 | `nodes-data/index.json` | `{ "version": 1, "wmas": { "<wma>": { "updatedAt", "nodes", "deleted" } } }`: the WMAs with a file of their own, when it was last written, and how many nodes it adds and hides. |
-| `nodes-data/wma-<wma>.json` | `{ "version": 1, "wma", "updatedAt", "nodes": EwrNode[], "deleted": string[] }`. An uploaded node's id is `<wma>:<key>`, the key a safe path segment (`NODE_KEY`). A node with a built-in node's id replaces it, and `deleted` hides built-in nodes until they are restored. `hasTab` and `hasRevised` are worked out from the node's files, never taken from the upload. A file's `ecNote` says how its EC was decided. |
+| `nodes-data/wma-<wma>.json` | `{ "version": 1, "wma", "updatedAt", "nodes": EwrNode[], "deleted": string[] }`. An uploaded node's id is `<wma>:<key>`, the key a safe path segment (`NODE_KEY`). A node with a built-in node's id replaces it, and `deleted` hides built-in nodes until they are restored. `hasTab`, `hasRevised` and `ecsAvailable` are worked out from the node's files as `build_data.py` does (a `.tab` or `_Con.txt` run with an EC on the ladder; a Revised file gives the first seven ECs), never taken from the upload. A file's `ecNote` says how its EC was decided. |
 | `nodes-data/files/<wma>/<key>.json` | `{ "<file name>": "<text>" }`: one text for each of the node's files, read when the node is opened, as `ewr-<basin>.json` is. |
 
 The limits (`NODE_STORE_LIMITS`) keep each write far under the API's 6 MB request limit. A WMA goes up node by node: at most 40 files and 4 million characters of text per node, and 1 000 nodes per WMA.
