@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { NODE_STORE_LIMITS, nodeKey, nodeStoreKey, nodeStorePath, parseNodeStoreIndex, parseNodeTexts, parseWmaOverlay } from './nodeStore.ts';
+import { LADDER } from './parsers.ts';
+import { NODE_STORE_LADDER, NODE_STORE_LIMITS, nodeKey, nodeStoreKey, nodeStorePath, parseNodeStoreIndex, parseNodeTexts, parseWmaOverlay } from './nodeStore.ts';
 
 const WMAS = ['breede-olifants', 'vaal-orange'];
 const time = '2026-11-12T09:00:00+02:00';
@@ -27,6 +28,12 @@ describe('nodeStorePath and nodeStoreKey', () => {
 		expect(nodeStorePath.wma('vaal-orange')).toBe('nodes-data/wma-vaal-orange.json');
 		expect(nodeStorePath.files('vaal-orange', 'syx1')).toBe('nodes-data/files/vaal-orange/syx1.json');
 		expect(nodeStoreKey(nodeStorePath.index)).toBe('serve/nodes-data/index.json');
+	});
+});
+
+describe('NODE_STORE_LADDER', () => {
+	it('is the parsers\' ladder', () => {
+		expect(NODE_STORE_LADDER).toEqual(LADDER);
 	});
 });
 
