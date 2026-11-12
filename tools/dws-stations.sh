@@ -9,8 +9,8 @@
 #
 # The gauges.json is the private repo's static/data/gauges.json (EWR_PRIVATE_DIR, or
 # ../ewr-compliance-private), unless --gauges names another. The bucket comes from `terraform output
-# dws_bucket` in infra/, or EWR_DWS_BUCKET. When the output reads null (dws_enabled off) it says so
-# and does nothing; when terraform itself fails (an expired SSO session, no `terraform init`) it stops
+# dws_bucket` in infra/, or EWR_DWS_BUCKET. When the output is null or absent (dws_enabled off;
+# Terraform drops a null output from its state) it says so and does nothing; when terraform itself fails (an expired SSO session, no `terraform init`) it stops
 # with an error, so a real deploy never skips the list without saying so. AWS access is the
 # operator's SSO profile, ewr-compliance by default (AWS_PROFILE overrides). The pipeline reads the
 # new list on its next run.
@@ -48,12 +48,18 @@ trap 'rm -rf "$work"' EXIT
 if [ -n "${EWR_DWS_BUCKET:-}" ]; then
 	bucket=$EWR_DWS_BUCKET
 else
-	# -json, not -raw: null (the store is off) is then told apart from terraform failing, which is
-	# never taken to mean "no store".
-	if ! out=$(AWS_PROFILE=$PROFILE terraform -chdir="$root/infra" output -json dws_bucket 2>"$work/err"); then
-		echo "Can't read 'terraform -chdir=infra output dws_bucket' with the $PROFILE profile, so the station list was not uploaded:" >&2
+	# Every output, as JSON, not `output dws_bucket`: Terraform keeps no null output in its state, so
+	# with dws_enabled off `output dws_bucket` fails "not found", the same as terraform failing. Only
+	# terraform's own failure is an error; an output that is absent or null means no store.
+	if ! all=$(AWS_PROFILE=$PROFILE terraform -chdir="$root/infra" output -json 2>"$work/err"); then
+		echo "Can't read 'terraform -chdir=infra output' with the $PROFILE profile, so the station list was not uploaded:" >&2
 		sed 's/^/  /' "$work/err" >&2
 		echo "Sign in again (aws sso login --profile $PROFILE), or run 'terraform init' in infra/, then run tools/dws-stations.sh again." >&2
+		exit 1
+	fi
+	if ! out=$(printf '%s' "$all" | node -e 'const o = JSON.parse(require("fs").readFileSync(0, "utf8")); console.log(JSON.stringify(o.dws_bucket?.value ?? null));' 2>"$work/err"); then
+		echo "'terraform -chdir=infra output -json' did not print JSON, so the station list was not uploaded:" >&2
+		sed 's/^/  /' "$work/err" >&2
 		exit 1
 	fi
 	if [ "$out" = null ]; then
