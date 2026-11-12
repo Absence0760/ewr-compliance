@@ -21,17 +21,35 @@ esac
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 export AWS_PROFILE=${AWS_PROFILE:-ewr-compliance}
 
+# Sets the variable $1 to terraform output $2, unless it is already set. A failure to read the
+# output (no `terraform init` on this workstation, an expired SSO session) is shown as terraform's
+# own error, never taken to mean the output is missing: that would send the operator to apply.
+# -json, not -raw, so null (auth_enabled off) is told apart from terraform failing.
 tf_output() {
-	terraform -chdir="$root/infra" output -raw "$1" 2>/dev/null || true
+	[ -n "${!1:-}" ] && return
+	local out err
+	err=$(mktemp "${TMPDIR:-/tmp}/ewr-auth-operator.XXXXXX")
+	if ! out=$(terraform -chdir="$root/infra" output -no-color -json "$2" 2>"$err"); then
+		echo "Can't read 'terraform -chdir=infra output $2' with the $AWS_PROFILE profile:" >&2
+		sed 's/^/  /' "$err" >&2
+		rm -f "$err"
+		echo "Sign in again (aws sso login --profile $AWS_PROFILE), or on a workstation that hasn't yet," >&2
+		echo "make infra/backend.config and run terraform init (infra/README.md, H6), then run this again." >&2
+		exit 1
+	fi
+	rm -f "$err"
+	if [ "$out" = null ]; then
+		echo "'terraform -chdir=infra output $2' is null: the site has no sign-in (auth_enabled is off)." >&2
+		exit 1
+	fi
+	out=${out#\"}
+	printf -v "$1" '%s' "${out%\"}"
 }
-table=${EWR_USERS_TABLE:-$(tf_output users_table)}
-secret=${EWR_RUNTIME_SECRET_ARN:-$(tf_output auth_runtime_secret_arn)}
+tf_output EWR_USERS_TABLE users_table
+tf_output EWR_RUNTIME_SECRET_ARN auth_runtime_secret_arn
+table=$EWR_USERS_TABLE
+secret=$EWR_RUNTIME_SECRET_ARN
 region=${AWS_REGION:-af-south-1}
-if [ -z "$table" ] || [ -z "$secret" ] || [ "$table" = null ] || [ "$secret" = null ]; then
-	echo "No user table or runtime secret. Apply infra/ with auth_enabled = true and run this where" >&2
-	echo "'terraform -chdir=infra output users_table' works, or set EWR_USERS_TABLE and EWR_RUNTIME_SECRET_ARN." >&2
-	exit 1
-fi
 case $table in
 	ewr-compliance-*) ;;
 	*) echo "Refusing table '$table': not this project's." >&2; exit 1 ;;
