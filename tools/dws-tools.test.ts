@@ -50,7 +50,7 @@ describe('dws-stations.sh', () => {
 		expect(r.stderr).toContain('not this project');
 	});
 
-	// A stub `terraform` first on PATH, answering `output -json dws_bucket` as told.
+	// A stub `terraform` first on PATH, answering `output -json` (every output) as told.
 	const withTerraform = (script: string) => {
 		const dir = mkdtempSync(join(tmpdir(), 'ewr-tf-'));
 		writeFileSync(join(dir, 'terraform'), `#!/usr/bin/env bash\n${script}\n`, { mode: 0o755 });
@@ -58,27 +58,41 @@ describe('dws-stations.sh', () => {
 	};
 
 	it('reads the bucket from terraform output', () => {
-		const r = run(['--dry-run', '--gauges', gaugesFile()], withTerraform(`echo '"ewr-compliance-dws-000000000000"'`));
+		const r = run(['--dry-run', '--gauges', gaugesFile()], withTerraform(`echo '{"dws_bucket":{"sensitive":false,"type":"string","value":"ewr-compliance-dws-000000000000"}}'`));
 		expect(r.status).toBe(0);
 		expect(r.stdout).toContain('would upload 2 stations to s3://ewr-compliance-dws-000000000000/config/stations.json');
 	});
 
 	it('does nothing, and succeeds, when the output says the store is off', () => {
-		const r = run(['--gauges', gaugesFile()], withTerraform('echo null'));
+		const r = run(['--gauges', gaugesFile()], withTerraform(`echo '{"dws_bucket":{"sensitive":false,"type":"string","value":null}}'`));
 		expect(r.status).toBe(0);
 		expect(r.stdout).toContain('No DWS store (dws_enabled is off)');
+	});
+
+	// What a real state holds with dws_enabled off: Terraform keeps no null output, so dws_bucket is absent.
+	it('does nothing, and succeeds, when the state has no dws_bucket output', () => {
+		const r = run(['--gauges', gaugesFile()], withTerraform(`echo '{"site_bucket":{"sensitive":false,"type":"string","value":"ewr-compliance-site-000000000000"}}'`));
+		expect(r.status).toBe(0);
+		expect(r.stdout).toContain('No DWS store (dws_enabled is off)');
+	});
+
+	it('fails when terraform prints something other than JSON', () => {
+		const r = run(['--gauges', gaugesFile()], withTerraform('echo "Warning: No outputs found"'));
+		expect(r.status).toBe(1);
+		expect(r.stdout).not.toContain('No DWS store');
+		expect(r.stderr).toContain('did not print JSON');
 	});
 
 	it('fails loudly when terraform itself fails, never taking it for "no store"', () => {
 		const r = run(['--gauges', gaugesFile()], withTerraform('echo "Error: the SSO session has expired" >&2; exit 1'));
 		expect(r.status).toBe(1);
 		expect(r.stdout).not.toContain('No DWS store');
-		expect(r.stderr).toContain("Can't read 'terraform -chdir=infra output dws_bucket'");
+		expect(r.stderr).toContain("Can't read 'terraform -chdir=infra output'");
 		expect(r.stderr).toContain('the SSO session has expired');
 	});
 
 	it('fails when the output is an empty string', () => {
-		const r = run(['--gauges', gaugesFile()], withTerraform(`echo '""'`));
+		const r = run(['--gauges', gaugesFile()], withTerraform(`echo '{"dws_bucket":{"sensitive":false,"type":"string","value":""}}'`));
 		expect(r.status).toBe(1);
 		expect(r.stderr).toContain('is empty');
 	});
