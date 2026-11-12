@@ -20,6 +20,10 @@
 #                same key group and function. origin_path /serve, so
 #                /dws/index.json is the key serve/dws/index.json; the bucket
 #                lets CloudFront read serve/dws/* and nothing else.
+#   /nodes-data/* → the admin node store (nodes.tf) through OAC, only with
+#                var.nodes_enabled (#17), which needs the API. Signed as /dws/*
+#                is, with origin_path /serve: the bucket lets CloudFront read
+#                serve/nodes-data/* and nothing else.
 #
 # Signed cookies: the API (P3) signs a 15-minute custom policy for
 # https://<domain>/* with the private key in the signing-key secret below,
@@ -34,8 +38,8 @@
 # access: the signature check does.
 #
 # A missing object: both bucket policies grant ListBucket, so S3 answers 404,
-# not 403, and a CloudFront 403 always means "not signed", under /dws/ too
-# (dws.tf).
+# not 403, and a CloudFront 403 always means "not signed", under /dws/ and
+# /nodes-data/ too (dws.tf, nodes.tf).
 # ----------------------------------------------------------------------------
 
 locals {
@@ -51,6 +55,10 @@ locals {
 
   # The DWS store (dws.tf) and its /dws/* behaviour.
   dws_served = var.site_enabled && var.dws_enabled
+
+  # The admin node store (nodes.tf) and its /nodes-data/* behaviour: with the
+  # API, its only writer.
+  nodes_served = local.api_enabled && var.nodes_enabled
 }
 
 # --- Bucket ----------------------------------------------------------------------
@@ -329,6 +337,16 @@ resource "aws_cloudfront_distribution" "site" {
     }
   }
 
+  dynamic "origin" {
+    for_each = local.nodes_served ? [1] : []
+    content {
+      domain_name              = aws_s3_bucket.nodes[0].bucket_regional_domain_name
+      origin_id                = "s3-nodes"
+      origin_path              = "/serve"
+      origin_access_control_id = aws_cloudfront_origin_access_control.site[0].id
+    }
+  }
+
   # Every path but the ones below: signed cookies only.
   default_cache_behavior {
     target_origin_id       = "s3-site"
@@ -380,6 +398,34 @@ resource "aws_cloudfront_distribution" "site" {
     content {
       path_pattern           = "/dws/*"
       target_origin_id       = "s3-dws"
+      viewer_protocol_policy = "redirect-to-https"
+      allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+      cached_methods         = ["GET", "HEAD"]
+      compress               = true
+      cache_policy_id        = local.cache_policy_caching_optimized
+      trusted_key_groups     = [aws_cloudfront_key_group.signing[0].id]
+
+      function_association {
+        event_type   = "viewer-request"
+        function_arn = aws_cloudfront_function.site_request[0].arn
+      }
+
+      function_association {
+        event_type   = "viewer-response"
+        function_arn = aws_cloudfront_function.site_response[0].arn
+      }
+    }
+  }
+
+  # /nodes-data/* -> the admin node store (#17), signed as the default
+  # behaviour is. The API writes its files `private, no-cache`, as the pipeline
+  # does the DWS store's, so an admin's change reaches every user within
+  # CachingOptimized's minimum second.
+  dynamic "ordered_cache_behavior" {
+    for_each = local.nodes_served ? [1] : []
+    content {
+      path_pattern           = "/nodes-data/*"
+      target_origin_id       = "s3-nodes"
       viewer_protocol_policy = "redirect-to-https"
       allowed_methods        = ["GET", "HEAD", "OPTIONS"]
       cached_methods         = ["GET", "HEAD"]

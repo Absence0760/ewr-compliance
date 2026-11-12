@@ -208,6 +208,31 @@ data "aws_iam_policy_document" "api" {
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = ["${aws_cloudwatch_log_group.api[0].arn}:*"]
   }
+
+  # The admin node store (nodes.tf), only with nodes_enabled: read and write
+  # its served files, nothing else in the bucket. No DeleteObject: a delete is
+  # written as a tombstone in the WMA's file. ListBucket makes a WMA with no
+  # file yet a 404 to the API rather than a 403. It has no s3:prefix
+  # condition: the check S3 makes for a missing object carries no prefix, so
+  # one would turn every missing file into a 403. Listing reveals nothing more,
+  # since the bucket holds only serve/nodes-data/ (as dws.tf reasons).
+  dynamic "statement" {
+    for_each = local.nodes == 1 ? [1] : []
+    content {
+      sid       = "NodeStore"
+      actions   = ["s3:GetObject", "s3:PutObject"]
+      resources = ["${aws_s3_bucket.nodes[0].arn}/${local.nodes_serve_prefix}*"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = local.nodes == 1 ? [1] : []
+    content {
+      sid       = "NodeStoreList"
+      actions   = ["s3:ListBucket"]
+      resources = [aws_s3_bucket.nodes[0].arn]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "api" {
@@ -268,9 +293,10 @@ resource "aws_lambda_function" "api" {
   }
 
   environment {
-    variables = {
-      # Names and public values only: anyone with GetFunctionConfiguration
-      # reads these. The keys are in the runtime secret.
+    # Names and public values only: anyone with GetFunctionConfiguration reads
+    # these. The keys are in the runtime secret. NODES_BUCKET only with the
+    # admin node store (nodes.tf).
+    variables = merge({
       USERS_TABLE            = aws_dynamodb_table.users[0].name
       SITE_DOMAIN            = var.domain_name
       MAIL_FROM              = local.mail_from_address
@@ -282,7 +308,9 @@ resource "aws_lambda_function" "api" {
       # cold-starts onto the new keys.
       RUNTIME_SECRET_VERSION = aws_secretsmanager_secret_version.auth_runtime[0].version_id
       SIGNING_KEY_SECRET_ARN = aws_secretsmanager_secret.signing_key[0].arn
-    }
+      },
+      local.nodes == 1 ? { NODES_BUCKET = aws_s3_bucket.nodes[0].bucket } : {},
+    )
   }
 
   depends_on = [aws_iam_role_policy.api]
