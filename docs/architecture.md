@@ -1,9 +1,10 @@
 # Architecture
 
 A static SvelteKit 3 app (`adapter-static`, `ssr = false`) with Svelte 5 runes and TypeScript.
-Flow files stay in the browser, and everything else is static JSON in `static/data`. The server
-parts are `server/`, the sign-in and user API that decides who may open the site (§ Users and
-access), and `pipeline/`, which keeps the DWS store the app reads (§ DWS store). Neither ever sees a
+Flow files stay in the browser, and everything else is static JSON in `static/data`, or in the node
+store for nodes an admin uploads (#17, planned). The server parts are `server/`, the sign-in and user
+API that decides who may open the site (§ Users and access) and, for admins only, writes the node
+store, and `pipeline/`, which keeps the DWS store the app reads (§ DWS store). Neither ever sees a
 flow file a user loads.
 
 ## Data tiers

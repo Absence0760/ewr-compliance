@@ -1,5 +1,7 @@
 // tools/first-admin, recover-admin, clear-lock and erase-user: what they refuse before reaching AWS.
 import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -28,5 +30,35 @@ describe('the operator tools', () => {
 			expect(r.status).toBe(1);
 			expect(r.out).toContain("Refusing table 'water-management-users'");
 		}
+	});
+
+	// A stand-in terraform first on PATH, so the test never reaches the real one or AWS.
+	const fakeTerraform = (script: string) => {
+		const dir = mkdtempSync(join(tmpdir(), 'ewr-fake-tf-'));
+		writeFileSync(join(dir, 'terraform'), `#!/usr/bin/env bash\n${script}\n`);
+		chmodSync(join(dir, 'terraform'), 0o755);
+		return `${dir}:${process.env.PATH ?? ''}`;
+	};
+
+	it("show terraform's own error when the outputs can't be read, and never send the operator to apply", () => {
+		const PATH = fakeTerraform('echo \'Error: Backend initialization required, please run "terraform init"\' >&2; exit 1');
+		const r = run('first-admin', [], { PATH });
+		expect(r.status).toBe(1);
+		expect(r.out).toContain("Can't read 'terraform -chdir=infra output users_table' with the ewr-compliance profile");
+		expect(r.out).toContain('Backend initialization required');
+		expect(r.out).toContain('aws sso login --profile ewr-compliance');
+		expect(r.out).not.toMatch(/apply/i);
+	});
+
+	it('say so when the site has no sign-in', () => {
+		const r = run('first-admin', [], { PATH: fakeTerraform('echo null') });
+		expect(r.status).toBe(1);
+		expect(r.out).toContain('auth_enabled is off');
+	});
+
+	it("read terraform's JSON outputs as plain names", () => {
+		const r = run('first-admin', [], { PATH: fakeTerraform('echo \'"water-management-users"\'') });
+		expect(r.status).toBe(1);
+		expect(r.out).toContain("Refusing table 'water-management-users'");
 	});
 });
