@@ -52,7 +52,7 @@ Stop at about five findings.
 - **`resolveView`.** TEC is the default, then REC, then PES; `nearestEc` breaks a tie towards the higher category, the precautionary reading. The notices must say so whenever what is drawn differs from what was asked for.
 - **Basis.** Olifants-Doring nodes carry incremental and cumulative files; a change must not mix them.
 - **Gouritz.** The brief names the nodes that use the `.rul`. Check any change against that list.
-- **EC conflicts** are decided by comparing values in `../ewr-compliance-private/tools/build_data.py` (`resolve_ec_conflicts`), and logged to `../ewr-compliance-private/docs/data-review.csv`. Trusting a file name or a header alone in new code is a finding.
+- **EC conflicts** are decided by comparing values with the sibling run: in `../ewr-compliance-private/tools/build_data.py` (`resolve_ec_conflicts`, logged to `../ewr-compliance-private/docs/data-review.csv`) for the built-in data, and in its port in `src/lib/ewr` for an admin's upload (#17). The two must decide alike: a port that drifts from `resolve_ec_conflicts` is a finding, and so is trusting a file name or a header alone in new code.
 
 ### Records
 - A change that moves any pinned value needs a stated reason. Changing a pinned value to get a test green is Critical.

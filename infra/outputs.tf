@@ -74,6 +74,11 @@ output "dws_api_key_secret_arn" {
   value       = var.dws_enabled ? aws_secretsmanager_secret.dws_api_key[0].arn : null
 }
 
+output "nodes_bucket" {
+  description = "The admin node store's bucket (nodes.tf), which the API writes: where the operator restores a WMA's previous version."
+  value       = local.nodes == 1 ? aws_s3_bucket.nodes[0].bucket : null
+}
+
 output "aws_region" {
   description = "The workload region, which tools/breaker-reset.sh reads."
   value       = var.aws_region

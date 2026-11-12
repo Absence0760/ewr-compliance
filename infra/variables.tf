@@ -516,3 +516,18 @@ variable "dws_log_retention_days" {
     error_message = "One of CloudWatch's retention periods, up to 731 days."
   }
 }
+
+# --- Admin node store (nodes.tf) ---------------------------------------------
+
+variable "nodes_enabled" {
+  description = "Create the admin node store (#17): its bucket, the API's grant on it and, with site_enabled, the signed /nodes-data/* behaviour. Needs site_enabled and auth_enabled: only the API writes to it. Off by default."
+  type        = bool
+  default     = false
+
+  # Without the API nothing can write the store, and its grant and NODES_BUCKET
+  # would have no role or function to go on.
+  validation {
+    condition     = !var.nodes_enabled || (var.site_enabled && var.auth_enabled)
+    error_message = "nodes_enabled needs site_enabled and auth_enabled: the API is the store's only writer, and the site serves it under /nodes-data/."
+  }
+}

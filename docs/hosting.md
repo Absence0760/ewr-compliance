@@ -1,6 +1,6 @@
 # Hosting
 
-The app is a folder of static files, `server/` is the sign-in API in front of it, and `pipeline/` keeps the DWS store it reads. `tools/deploy.sh` deploys the files to the AWS site below; CI deploys the API and the pipeline (`.github/workflows/deploy-lambdas.yml`). Every phase of the private hosting plan is built (P1 to P6) and checked offline; nothing is applied yet. Going live is the operator's steps in order, with the checks at the end: § Deploy readiness.
+The app is a folder of static files, `server/` is the sign-in API in front of it (which also writes the admin node store, #17), and `pipeline/` keeps the DWS store it reads. `tools/deploy.sh` deploys the files to the AWS site below; CI deploys the API and the pipeline (`.github/workflows/deploy-lambdas.yml`). Every phase of the private hosting plan is built (P1 to P6) and checked offline; nothing is applied yet. Going live is the operator's steps in order, with the checks at the end: § Deploy readiness.
 
 ## AWS
 
@@ -25,6 +25,13 @@ DWS answers only South African networks, so the app's "DWS (kept current)" sourc
 - **What it keeps.** Each page as DWS sent it (`raw/`), and per station one daily file, merged: a later pull wins day by day, and a day a later page doesn't list keeps what an earlier pull stored. The daily file is written in EWR's `.day` layout and read back with the app's own parser before it is stored, and the index with the app's own reader. A station's file is marked out of date when its last current pull is more than 3 days old. It pulls DWS's verified daily table and nothing else, by decision (the plan's Q1): DWS's permission to store its flow has, where given for other tools, covered verified daily flow only; the Historical Comparison's monthly volumes stay the gauge records in `gauges.json`; and 12-minute readings are unverified. So the store writes no `monthly-<station>.json` (`monthly: false`) and no readings.
 - **Alarms** (the regional topic). `dws-lag`: the oldest station's last current pull is more than `dws_lag_alarm_days` old, or no run reported for two days. `dws-stopped`: DWS stopped a run (`refused` is a 403: don't run it by hand until the reason is understood). `dws-failed`: the pipeline failed for a reason of its own (the store, a bad event, a backfill station's page). `dws-dlq`: a daily run failed or timed out. `dws-backfill-failed`: an execution ended; its error is the failed window's. The pipeline's errors leave it by name only (`DwsRefused`, `DwsThrottled`, `DwsServerError`, `DwsDown`, `DwsCoolingDown`, `PipelineFailed`, ...), so no station reaches the DLQ or an execution's history.
 - **The DWS API key**, when DWS issues one, goes into the empty `ewr-compliance/dws-api-key` secret from a file (H11). Nothing reads it yet.
+
+## The node store
+
+Planned (#17): admins add a WMA's EWR nodes on the site, without a rebuild or a deploy. The store is a bucket of its own (`infra/nodes.tf`, `nodes_enabled`, off by default). It is served same-origin and signed at `nodes-data/`, like the DWS store, and the app merges it over `data/index.json`. The API's admin-only routes write it. They check each body against its format and size, and record each change in the audit log. The API's role may read and write `serve/nodes-data/*` and nothing else in the bucket, and may not delete: a deleted node is written as a tombstone in its WMA's file. Replaced versions are kept for 365 days, so an admin's wrong upload or delete can be undone.
+
+- **It is the client's data, like `static/data`.** It is uploaded by the client's admins rather than built by the operator, but it is held under the same terms (`NOTICE.md`), behind the same sign-in, and stored in af-south-1. The hosting consent (H12) covers it, and the privacy notice says that admins' uploads are recorded with their address in the audit log.
+- **A flow file is never stored.** Only node locations and Reserve Desktop outputs (`.tab`, `.rul`) are uploaded. Observed flow loaded on the Historical or Real Time Comparison stays in the browser (CLAUDE.md rule 1).
 
 ## The data is the decision
 
