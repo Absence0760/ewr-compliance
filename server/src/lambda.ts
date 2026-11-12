@@ -10,11 +10,21 @@ import { dynamoStore } from '@absence0760/auth-kit/dynamodb';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
-import { NotReady, createApi, type Log } from './app.ts';
+import { NotReady, createApi, type Log, type RecordAudit } from './app.ts';
 import { assertKeyPair, type Signer } from './cloudfront.ts';
 import { ConfigError, parseRuntimeSecret, readSettings } from './config.ts';
 import { error, type ApiRequest, type ApiResponse } from './http.ts';
 import type { SendMail } from './mail.ts';
+import { S3NodeBucket, createNodeStore } from './nodes.ts';
+
+/**
+ * The node store's audit rows, through auth-kit's recordAppAction (v0.4.0): `app.node.put` and so
+ * on, the admin as actor, re-checked as an admin in the same write.
+ */
+export const recordAudit =
+	(auth: Pick<ReturnType<typeof createAuthKit>, 'recordAppAction'>): RecordAudit =>
+	(actor, action, target) =>
+		auth.recordAppAction(actor, action, target);
 
 /** The fields of a Function URL event (payload format 2.0) this reads. */
 export interface UrlEvent {
@@ -106,7 +116,8 @@ function build() {
 			sessionKeys: [{ kid: 's1', secret: keys.sessionKey }],
 			issuer: 'ewr-compliance'
 		});
-		return createApi({ auth, domain: settings.domain, originSecret: keys.originSecret, signer: loadSigner, sendMail, log });
+		const nodes = settings.nodesBucket ? { store: createNodeStore(new S3NodeBucket(settings.nodesBucket), () => Date.now()), recordAudit: recordAudit(auth) } : undefined;
+		return createApi({ auth, domain: settings.domain, originSecret: keys.originSecret, signer: loadSigner, sendMail, log, ...(nodes ? { nodes } : {}) });
 	});
 }
 

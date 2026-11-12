@@ -31,6 +31,13 @@ export const NODE_STORE_LIMITS = {
 	textChars: 500
 } as const;
 
+/**
+ * The six WMAs' slugs, in their gazetted order: the same as `WMAS` in
+ * src/lib/components/map/wma.ts (nodeStore.test.ts checks), kept here as well so the API, which
+ * imports this file, needn't bundle the map's module.
+ */
+export const WMA_SLUGS = ['limpopo-olifants', 'inkomati-usuthu', 'pongola-mtamvuna', 'vaal-orange', 'mzimvubu-tsitsikamma', 'breede-olifants'] as const;
+
 /** An uploaded node's id is `<wma>:<key>`, and its key names its files' object, so it is kept to a safe path segment. */
 export const NODE_KEY = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 const WMA_SLUG = /^[a-z][a-z-]{1,39}$/;

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { handler, toRequest, toResult } from './lambda.ts';
+import { handler, recordAudit, toRequest, toResult } from './lambda.ts';
 
 describe('the Function URL event', () => {
 	it('becomes a request: lowercase headers, the cookies joined, a base64 body decoded', () => {
@@ -19,6 +19,15 @@ describe('the Function URL event', () => {
 
 	it('answers with the cookies as Set-Cookie values', () => {
 		expect(toResult({ status: 200, headers: { a: 'b' }, cookies: ['x=1'], body: '{}' })).toEqual({ statusCode: 200, headers: { a: 'b' }, cookies: ['x=1'], body: '{}' });
+	});
+});
+
+describe('the node store’s audit seam', () => {
+	it('records each node-store change as auth-kit app action, the admin as actor', async () => {
+		const actor = { id: 'u', email: 'admin@example.test', isAdmin: true, addedBy: 'operator', addedAt: '', sessionsRevokedAt: null, undeliverable: null };
+		const recordAppAction = vi.fn(async () => ({ ok: true as const, value: {} }));
+		await expect(recordAudit({ recordAppAction } as never)(actor, 'node.put', 'vaal-orange vaal-orange:syx1')).resolves.toEqual({ ok: true, value: {} });
+		expect(recordAppAction).toHaveBeenCalledWith(actor, 'node.put', 'vaal-orange vaal-orange:syx1');
 	});
 });
 

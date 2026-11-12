@@ -13,6 +13,12 @@
 //   PATCH  /api/users/:id               make or unmake an admin (admins)
 //   DELETE /api/users/:id               remove someone (admins)
 //   GET    /api/audit?limit=n           the audit rows, newest first (admins)
+//   POST   /api/nodes                   write one node of the node store: { wma, node, texts } (admins)
+//   POST   /api/nodes/delete            delete one: { wma, id }; a built-in node is hidden (admins)
+//   POST   /api/nodes/restore           restore a hidden built-in node: { wma, id } (admins)
+//   The /api/nodes routes are there only with the node store (NODES_BUCKET, nodes.ts); each body is
+//   checked against src/lib/ewr/nodeStore.ts, and each change is an audit row (app.node.<op>) written
+//   before it is, so no change goes unrecorded (nodes.ts says when).
 //
 // Rules every route keeps:
 //   - CloudFront stamps X-Origin-Secret on every /api/* request; without it the answer is a bare
@@ -47,6 +53,7 @@ import {
 import { FILE_ACCESS_SECONDS, clearSignedCookies, signedCookies, type Signer } from './cloudfront.ts';
 import { error, json, unauthorized, type ApiRequest, type ApiResponse } from './http.ts';
 import { codeEmail, type SendMail } from './mail.ts';
+import { MAX_NODE_BODY_BYTES, auditTarget, checkPut, checkTarget, type NodeStore } from './nodes.ts';
 
 /** The session cookie: `__Host-ewr_session` (auth-kit adds the prefix). */
 export const SESSION_COOKIE = 'ewr_session';
@@ -68,7 +75,18 @@ export interface ApiDeps {
 	sleep?: Sleep;
 	/** The floor on /api/auth/code and /api/auth/verify. */
 	minLatencyMs?: number;
+	/** The admin node store, with NODES_BUCKET (lambda.ts). Without it /api/nodes is not found. */
+	nodes?: { store: NodeStore; recordAudit: RecordAudit };
 }
+
+/** A node-store change, as its audit action is named: `app.node.<op>` in auth-kit's log. */
+export type NodeAction = 'node.put' | 'node.delete' | 'node.restore';
+
+/**
+ * Writes the audit row for an admin's node-store change, re-checking in the same write that the
+ * actor is still an admin: auth-kit's recordAppAction (lambda.ts). Its 403 goes out as 404.
+ */
+export type RecordAudit = (actor: UserRecord, action: NodeAction, target: string) => Promise<Result<unknown>>;
 
 export interface PublicUser {
 	id: string;
@@ -143,11 +161,12 @@ export function createApi(d: ApiDeps) {
 		return until > now ? signedCookies(d.domain, until, signer, now) : null;
 	}
 
-	function body(req: ApiRequest): Record<string, unknown> {
+	/** The body as a JSON object. Its size is checked before it is parsed. */
+	function body(req: ApiRequest, limit = MAX_BODY_BYTES): Record<string, unknown> {
 		const type = (req.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase();
 		if (type !== 'application/json') throw new BadRequest(415, 'Send JSON (Content-Type: application/json).');
 		const text = req.body ?? '';
-		if (Buffer.byteLength(text) > MAX_BODY_BYTES) throw new BadRequest(413, 'The request is too large.');
+		if (Buffer.byteLength(text) > limit) throw new BadRequest(413, 'The request is too large.');
 		if (text.trim() === '') return {};
 		let parsed: unknown;
 		try {
@@ -278,6 +297,35 @@ export function createApi(d: ApiDeps) {
 		return reply(await d.auth.listAudit(actor, limit), (rows: AuditEntry[]) => rows.map(({ id, at, actor, action, target, admin }) => ({ id, at, actor, action, target, ...(admin !== undefined ? { admin } : {}) })));
 	}
 
+	// --- Node store ------------------------------------------------------------------------
+
+	async function nodes(req: ApiRequest, actor: UserRecord, op: 'put' | 'delete' | 'restore'): Promise<ApiResponse> {
+		const n = d.nodes!;
+		if (req.method !== 'POST') return notAllowed('POST');
+		// As auth-kit's "only an admin": not found, before the body is read.
+		if (!actor.isAdmin) return NOT_FOUND();
+		const b = body(req, MAX_NODE_BODY_BYTES);
+		const checked = op === 'put' ? checkPut(b, new Date(clock.now()).toISOString()) : checkTarget(b);
+		if (!checked.ok) return error(checked.status, checked.error);
+		const { wma } = checked.value;
+		const id = 'node' in checked.value ? checked.value.node.id : checked.value.id;
+		// The audit row, written by the store once the change applies and before anything is put (nodes.ts):
+		// an admin demoted since the session was read is refused here, and nothing is written.
+		const record = async () => {
+			const a = await n.recordAudit(actor, `node.${op}`, auditTarget(wma, id));
+			return a.ok ? a : { ...a, status: a.status === 403 ? 404 : a.status };
+		};
+		const r =
+			'node' in checked.value
+				? await n.store.putNode(wma, checked.value.node, checked.value.texts, record)
+				: op === 'delete'
+					? await n.store.deleteNode(wma, id, record)
+					: await n.store.restoreNode(wma, id, record);
+		// The user's id and the WMA only: a node id is the audit row's, not the log's.
+		d.log(r.ok ? `nodes.${op}` : 'nodes.refused', { user: actor.id, wma, ...(r.ok ? {} : { op, status: r.status }) });
+		return r.ok ? json(200, r.value) : error(r.status, r.error);
+	}
+
 	const notAllowed = (allow: string) => error(405, 'Method not allowed.', { headers: { Allow: allow } });
 
 	// --- Router ----------------------------------------------------------------------------
@@ -310,12 +358,15 @@ export function createApi(d: ApiDeps) {
 			return handler(req);
 		}
 
-		const known = (area === 'me' && name === undefined) || (area === 'audit' && name === undefined) || (area === 'users' && id === undefined);
+		const nodeOp = name === undefined ? 'put' : name === 'delete' || name === 'restore' ? name : null;
+		const isNodes = area === 'nodes' && d.nodes !== undefined && id === undefined && nodeOp !== null;
+		const known = (area === 'me' && name === undefined) || (area === 'audit' && name === undefined) || (area === 'users' && id === undefined) || isNodes;
 		if (!known) return NOT_FOUND();
 		const s = await current(req);
 		if (!s) return unauthorized();
 		if (area === 'me') return req.method === 'GET' ? json(200, me(s.user)) : notAllowed('GET');
 		if (area === 'audit') return req.method === 'GET' ? audit(req, s.user) : notAllowed('GET');
+		if (isNodes) return nodes(req, s.user, nodeOp!);
 		return users(req, s.user, name);
 	}
 

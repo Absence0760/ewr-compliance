@@ -5,7 +5,7 @@
 # resolution, commit included, is allowed here. Bump this line with every auth-kit tag: a moved tag
 # can't run new build code without a reviewed change here.
 onlyBuiltDependencies:
-  - "@absence0760/auth-kit@git+ssh://git@github.com/Absence0760/auth-kit.git#1a739cd8b4ae8614892d70d22b9d0f0c8c945481"
+  - "@absence0760/auth-kit@git+ssh://git@github.com/Absence0760/auth-kit.git#9735cd06a5b4235724d8cd12cb701276d83bb581"
   - esbuild
 
 # A release must be 7 days old before an install here resolves it (minutes), the same cooldown as

@@ -3,11 +3,13 @@
 // adds: status codes, cookies, the origin and CSRF checks, timing padding and the logs.
 import { generateKeyPairSync, createVerify } from 'node:crypto';
 import { createAuthKit, memoryStore, randomSecret, cryptoRandom, type MemoryStore } from '@absence0760/auth-kit';
+import { recordAudit as lambdaRecordAudit } from './lambda.ts';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createApi, NotReady, SESSION_COOKIE, type ApiDeps } from './app.ts';
+import { createApi, NotReady, SESSION_COOKIE, type ApiDeps, type NodeAction, type RecordAudit } from './app.ts';
 import type { Signer } from './cloudfront.ts';
 import type { ApiRequest, ApiResponse } from './http.ts';
 import type { CodeEmail } from './mail.ts';
+import { ATTEMPTS, MAX_NODE_BODY_BYTES, MemoryNodeBucket, createNodeStore } from './nodes.ts';
 
 const DOMAIN = 'ewr.example.test';
 const ORIGIN = `https://${DOMAIN}`;
@@ -417,5 +419,273 @@ describe('requests', () => {
 		expect(r.status).toBe(500);
 		expect(r.body).not.toContain('admin@');
 		expect(logs.at(-1)).toEqual({ event: 'api.error', fields: { error: 'ProvisionedThroughputExceededException' } });
+	});
+});
+
+describe('the node store', () => {
+	const WMA = 'vaal-orange';
+	const OVERLAY = `nodes-data/wma-${WMA}.json`;
+	const INDEX = 'nodes-data/index.json';
+	/** A synthetic uploaded node, as the import panel writes it. */
+	const node = (key = 'syx1', extra: Record<string, unknown> = {}) => ({
+		id: `${WMA}:${key}`,
+		label: key.toUpperCase(),
+		basin: 'Sample Basin',
+		river: 'Sample River',
+		lon: 26.5,
+		lat: -28.1,
+		files: [
+			{ name: `${key}C.tab`, kind: 'tab', ec: 'C', basis: '' },
+			{ name: `${key}.rul`, kind: 'revised', ec: '', basis: '' }
+		],
+		...extra
+	});
+	const texts = (key = 'syx1') => ({ [`${key}C.tab`]: 'synthetic tab text', [`${key}.rul`]: 'synthetic rul text' });
+
+	let bucket: MemoryNodeBucket;
+	let audits: { actor: string; action: NodeAction; target: string }[];
+	let admin: string;
+
+	/** The real seam (lambda.ts) over auth-kit's recordAppAction, noting each row it wrote. */
+	const recordAudit: RecordAudit = async (actor, action, target) => {
+		const r = await lambdaRecordAudit(auth)(actor, action, target);
+		if (r.ok) audits.push({ actor: actor.email, action, target });
+		return r;
+	};
+
+	function withNodes(overrides: Partial<ApiDeps> = {}) {
+		setup({ nodes: { store: createNodeStore(bucket, () => now), recordAudit }, ...overrides });
+	}
+
+	beforeEach(async () => {
+		bucket = new MemoryNodeBucket();
+		audits = [];
+		withNodes();
+		admin = await signIn('admin@example.test');
+	});
+
+	const put = (body: unknown, cookie = admin) => call('/api/nodes', { body, cookie });
+	const del = (body: unknown, cookie = admin) => call('/api/nodes/delete', { body, cookie });
+	const restore = (body: unknown, cookie = admin) => call('/api/nodes/restore', { body, cookie });
+	const nothingWritten = () => {
+		expect(bucket.writes).toEqual([]);
+		expect(audits).toEqual([]);
+	};
+
+	it('writes a new node: its texts, the WMA file and the index, with one audit row', async () => {
+		const r = await put({ wma: WMA, node: node(), texts: texts() });
+		const at = new Date(now).toISOString();
+		expect(r.status).toBe(200);
+		expect(r.json).toEqual({ wma: WMA, id: `${WMA}:syx1`, nodes: 1, deleted: 0, updatedAt: at });
+		expect(bucket.writes).toEqual([`nodes-data/files/${WMA}/syx1.json`, OVERLAY, INDEX]);
+		expect(bucket.json(`nodes-data/files/${WMA}/syx1.json`)).toEqual(texts());
+		expect(bucket.json(OVERLAY)).toMatchObject({ version: 1, wma: WMA, updatedAt: at, nodes: [{ id: `${WMA}:syx1`, label: 'SYX1', hasTab: true, hasRevised: true }], deleted: [] });
+		expect(bucket.json(INDEX)).toEqual({ version: 1, wmas: { [WMA]: { updatedAt: at, nodes: 1, deleted: 0 } } });
+		expect(audits).toEqual([{ actor: 'admin@example.test', action: 'node.put', target: `${WMA} ${WMA}:syx1` }]);
+		// In auth-kit's own audit log, as the Users page lists it.
+		expect((await auth.deps.store.listAudit(5)).filter((a) => a.action.startsWith('app.'))).toMatchObject([{ actor: 'admin@example.test', action: 'app.node.put', target: `${WMA} ${WMA}:syx1` }]);
+		// The log names the user by id and the WMA, never the node or an address.
+		expect(logs.at(-1)).toEqual({ event: 'nodes.put', fields: { user: expect.any(String), wma: WMA } });
+		expect(JSON.stringify(logs)).not.toContain('syx1');
+	});
+
+	it('replaces a node with the same id, adds another beside it, and keeps the counts', async () => {
+		await put({ wma: WMA, node: node(), texts: texts() });
+		now += 1000;
+		const r = await put({ wma: WMA, node: node('syx1', { label: 'Renamed' }), texts: texts() });
+		expect(r.json).toMatchObject({ nodes: 1 });
+		await put({ wma: WMA, node: node('syx2'), texts: texts('syx2') });
+		expect((bucket.json(OVERLAY) as { nodes: { id: string; label: string }[] }).nodes.map((n) => [n.id, n.label])).toEqual([
+			[`${WMA}:syx1`, 'Renamed'],
+			[`${WMA}:syx2`, 'SYX2']
+		]);
+		expect(bucket.json(INDEX)).toMatchObject({ wmas: { [WMA]: { nodes: 2, deleted: 0 } } });
+		expect(audits.map((a) => a.action)).toEqual(['node.put', 'node.put', 'node.put']);
+	});
+
+	it('a written node comes off the deleted list', async () => {
+		bucket.objects.set(OVERLAY, { body: JSON.stringify({ version: 1, wma: WMA, updatedAt: '2026-11-01T00:00:00.000Z', nodes: [], deleted: [`${WMA}:syx1`, 'Sample:SY9'] }), etag: '"seed"' });
+		await put({ wma: WMA, node: node(), texts: texts() });
+		expect(bucket.json(OVERLAY)).toMatchObject({ deleted: ['Sample:SY9'] });
+		expect(bucket.json(INDEX)).toMatchObject({ wmas: { [WMA]: { nodes: 1, deleted: 1 } } });
+	});
+
+	it('deletes an uploaded node from the WMA file, leaving its texts unreferenced (nothing is ever deleted from the bucket)', async () => {
+		await put({ wma: WMA, node: node(), texts: texts() });
+		const r = await del({ wma: WMA, id: `${WMA}:syx1` });
+		expect(r.status).toBe(200);
+		expect(r.json).toMatchObject({ id: `${WMA}:syx1`, nodes: 0, deleted: 0, tombstone: false });
+		expect(bucket.json(OVERLAY)).toMatchObject({ nodes: [], deleted: [] });
+		expect(bucket.objects.has(`nodes-data/files/${WMA}/syx1.json`)).toBe(true);
+		expect(audits.at(-1)).toEqual({ actor: 'admin@example.test', action: 'node.delete', target: `${WMA} ${WMA}:syx1` });
+	});
+
+	it('deletes a built-in node as a tombstone, once however often it is asked, and restores it', async () => {
+		const r = await del({ wma: WMA, id: 'Sample:SY1' });
+		expect(r.status).toBe(200);
+		expect(r.json).toMatchObject({ id: 'Sample:SY1', nodes: 0, deleted: 1, tombstone: true });
+		await del({ wma: WMA, id: 'Sample:SY1' });
+		expect(bucket.json(OVERLAY)).toMatchObject({ nodes: [], deleted: ['Sample:SY1'] });
+		expect(bucket.json(INDEX)).toMatchObject({ wmas: { [WMA]: { nodes: 0, deleted: 1 } } });
+
+		const back = await restore({ wma: WMA, id: 'Sample:SY1' });
+		expect(back.status).toBe(200);
+		expect(back.json).toMatchObject({ id: 'Sample:SY1', deleted: 0 });
+		expect(bucket.json(OVERLAY)).toMatchObject({ deleted: [] });
+		expect(bucket.json(INDEX)).toMatchObject({ wmas: { [WMA]: { nodes: 0, deleted: 0 } } });
+		expect(audits.map((a) => [a.action, a.target])).toEqual([
+			['node.delete', `${WMA} Sample:SY1`],
+			['node.delete', `${WMA} Sample:SY1`],
+			['node.restore', `${WMA} Sample:SY1`]
+		]);
+	});
+
+	it('refuses, recording and writing nothing: an upload id not in the file (404), and a restore of a node not deleted (404)', async () => {
+		expect((await del({ wma: WMA, id: `${WMA}:nope` })).status).toBe(404);
+		expect((await restore({ wma: WMA, id: 'Sample:SY1' })).status).toBe(404);
+		nothingWritten();
+	});
+
+	it('answers 401 when signed out, on every route, writing nothing', async () => {
+		for (const r of [await put({ wma: WMA, node: node(), texts: texts() }, ''), await del({ wma: WMA, id: 'Sample:SY1' }, ''), await restore({ wma: WMA, id: 'Sample:SY1' }, '')]) {
+			expect(r.status).toBe(401);
+			expect(r.json.signin).toBe('/signin/');
+		}
+		nothingWritten();
+	});
+
+	it('is admins only: a member gets 404, never 403, on every route, and nothing is recorded or written', async () => {
+		await call('/api/users', { body: { email: 'member@example.test', admin: false }, cookie: admin });
+		const member = await signIn('member@example.test');
+		for (const r of [await put({ wma: WMA, node: node(), texts: texts() }, member), await del({ wma: WMA, id: 'Sample:SY1' }, member), await restore({ wma: WMA, id: 'Sample:SY1' }, member)]) {
+			expect(r.status).toBe(404);
+		}
+		nothingWritten();
+	});
+
+	it('an admin demoted since their session was read is refused by the audit row (409), and nothing is written', async () => {
+		const second = (await call('/api/users', { body: { email: 'second@example.test', admin: true }, cookie: admin })).json;
+		const cookie = await signIn('second@example.test');
+		// Demoted between verifySession and the audit row: the store's re-check refuses it.
+		const verify = auth.verifySession.bind(auth);
+		setup({
+			nodes: { store: createNodeStore(bucket, () => now), recordAudit },
+			auth: {
+				...auth,
+				verifySession: async (t: unknown) => {
+					const s = await verify(t);
+					await auth.setAdmin((await auth.deps.store.getUserByEmail('admin@example.test'))!, { id: second.id }, false);
+					return s;
+				}
+			}
+		});
+		expect((await put({ wma: WMA, node: node(), texts: texts() }, cookie)).status).toBe(409);
+		nothingWritten();
+	});
+
+	it('answers 503 and writes nothing while auth-kit cannot record the change (lambda.ts until the bump)', async () => {
+		setup({ nodes: { store: createNodeStore(bucket, () => now), recordAudit: async () => Promise.reject(new NotReady('no app audit')) } });
+		const cookie = await signIn('admin@example.test');
+		expect((await put({ wma: WMA, node: node(), texts: texts() }, cookie)).status).toBe(503);
+		expect(bucket.writes).toEqual([]);
+	});
+
+	it('refuses a change from another site, or with no Origin, with 400, writing nothing', async () => {
+		for (const headers of [{ origin: 'https://evil.example' }, { origin: undefined }, { 'sec-fetch-site': 'cross-site' }]) {
+			for (const path of ['/api/nodes', '/api/nodes/delete', '/api/nodes/restore']) {
+				const r = await call(path, { body: { wma: WMA, id: 'Sample:SY1', node: node(), texts: texts() }, cookie: admin, headers });
+				expect(r.status, `${path} ${JSON.stringify(headers)}`).toBe(400);
+				expect(r.json.error).toBe('A change must be made from this site.');
+			}
+		}
+		nothingWritten();
+	});
+
+	it('refuses a WMA that is not one of the six, on every route', async () => {
+		for (const wma of ['nowhere', 'Vaal-Orange', undefined, 3]) {
+			expect((await put({ wma, node: node(), texts: texts() })).json.error, String(wma)).toMatch(/^Say which WMA/);
+			expect((await del({ wma, id: 'Sample:SY1' })).status).toBe(400);
+			expect((await restore({ wma, id: 'Sample:SY1' })).status).toBe(400);
+		}
+		nothingWritten();
+	});
+
+	it('refuses a node the format refuses, naming what is wrong', async () => {
+		const bad: [unknown, RegExp][] = [
+			[node('syx1', { id: 'breede-olifants:syx1' }), /id must be vaal-orange:<key>/],
+			[node('syx1', { id: `${WMA}:Bad Key` }), /id must be/],
+			[node('syx1', { label: '' }), /label must be text/],
+			[node('syx1', { lon: 500 }), /lon must be a number/],
+			[node('syx1', { files: [{ name: '../x.tab', kind: 'tab' }] }), /name must be a file name/],
+			[node('syx1', { files: [{ name: 'x.tab', kind: 'exe' }] }), /kind must be one of/],
+			['not a node', /is not an object/],
+			[undefined, /is not an object/]
+		];
+		for (const [n, message] of bad) {
+			const r = await put({ wma: WMA, node: n, texts: texts() });
+			expect(r.status, String(message)).toBe(400);
+			expect(r.json.error).toMatch(message);
+		}
+		nothingWritten();
+	});
+
+	it('refuses texts that do not match the node’s files', async () => {
+		const { [`syx1.rul`]: _dropped, ...missing } = texts();
+		for (const [t, message] of [
+			[missing, /syx1\.rul has no text/],
+			[{ ...texts(), 'other.tab': 'x' }, /other\.tab is not one of the node's files/],
+			[{ ...texts(), 'syx1C.tab': 5 }, /is not text/],
+			[[], /is not a JSON object/],
+			[undefined, /is not a JSON object/]
+		] as [unknown, RegExp][]) {
+			const r = await put({ wma: WMA, node: node(), texts: t });
+			expect(r.status).toBe(400);
+			expect(r.json.error).toMatch(message);
+		}
+		nothingWritten();
+	});
+
+	it(`answers 413 past ${MAX_NODE_BODY_BYTES} bytes, before the body is parsed, and takes JSON only`, async () => {
+		// Not even JSON: the size is checked first.
+		expect((await call('/api/nodes', { body: '{' + 'x'.repeat(MAX_NODE_BODY_BYTES), cookie: admin })).status).toBe(413);
+		const big = await put({ wma: WMA, node: node(), texts: { 'syx1C.tab': 'é'.repeat(MAX_NODE_BODY_BYTES / 2), 'syx1.rul': 'x' } });
+		expect(big.status).toBe(413);
+		expect(big.json.error).toBe('The request is too large.');
+		expect((await call('/api/nodes', { body: 'wma=x', cookie: admin, headers: { 'content-type': 'application/x-www-form-urlencoded' } })).status).toBe(415);
+		// A node's request well past the sign-in routes' 8 KiB is taken.
+		expect((await put({ wma: WMA, node: node(), texts: { 'syx1C.tab': 'x'.repeat(100_000), 'syx1.rul': 'x' } })).status).toBe(200);
+	});
+
+	it(`retries a WMA write another admin beat, then answers 409 after ${ATTEMPTS} tries; the audit row is written once`, async () => {
+		let theirs = 0;
+		bucket.beforePut = (path) => {
+			if (path !== OVERLAY) return;
+			theirs++;
+			bucket.objects.set(path, { body: JSON.stringify({ version: 1, wma: WMA, updatedAt: '2026-11-01T00:00:00.000Z', nodes: [], deleted: [`Sample:T${theirs}`] }), etag: `"theirs-${theirs}"` });
+		};
+		const r = await del({ wma: WMA, id: 'Sample:SY1' });
+		expect(r.status).toBe(409);
+		expect(r.json.error).toMatch(/Another admin changed this WMA/);
+		expect(theirs).toBe(ATTEMPTS);
+		expect(bucket.json(OVERLAY)).toMatchObject({ deleted: [`Sample:T${ATTEMPTS}`] });
+		expect(audits).toHaveLength(1);
+		expect(logs.at(-1)).toEqual({ event: 'nodes.refused', fields: { user: expect.any(String), wma: WMA, op: 'delete', status: 409 } });
+
+		// One lost race only: the retry builds on their change.
+		theirs = ATTEMPTS - 1;
+		const ok = await del({ wma: WMA, id: 'Sample:SY2' });
+		expect(ok.status).toBe(200);
+		expect(bucket.json(OVERLAY)).toMatchObject({ deleted: [`Sample:T${ATTEMPTS}`, 'Sample:SY2'] });
+	});
+
+	it('answers 404 for the node routes without the store, for other node paths, and 405 for other methods', async () => {
+		expect((await call('/api/nodes/other', { body: {}, cookie: admin })).status).toBe(404);
+		expect((await call('/api/nodes/delete/x', { body: {}, cookie: admin })).status).toBe(404);
+		expect((await call('/api/nodes', { cookie: admin })).status).toBe(405);
+		expect((await call('/api/nodes/delete', { method: 'PUT', body: {}, cookie: admin })).status).toBe(405);
+		setup();
+		const cookie = await signIn('admin@example.test');
+		expect((await call('/api/nodes', { body: { wma: WMA, node: node(), texts: texts() }, cookie })).status).toBe(404);
+		expect((await call('/api/nodes/delete', { body: { wma: WMA, id: 'Sample:SY1' }, cookie })).status).toBe(404);
 	});
 });

@@ -10,6 +10,8 @@
 //   CLOUDFRONT_PUBLIC_KEY    its PEM, to check the private key against at cold start
 //   RUNTIME_SECRET_ARN       JSON: AUTH_CODE_KEY, AUTH_SESSION_KEY, ORIGIN_SECRET (Terraform writes it)
 //   SIGNING_KEY_SECRET_ARN   the CloudFront private key, PEM (the operator puts it in, H7)
+//   NODES_BUCKET             the admin node store's bucket (infra/nodes.tf), only with nodes_enabled;
+//                            without it the /api/nodes routes are not there
 //
 // Fails closed: a missing or malformed value refuses every request with 503, naming the setting,
 // never a value.
@@ -24,6 +26,8 @@ export interface Settings {
 	publicKey: string;
 	runtimeSecretArn: string;
 	signingKeySecretArn: string;
+	/** Null when the node store is off. */
+	nodesBucket: string | null;
 }
 
 export interface RuntimeSecrets {
@@ -54,7 +58,8 @@ export function readSettings(env: Env): Settings {
 		keyPairId: need('CLOUDFRONT_KEY_PAIR_ID', (v) => /^[A-Z0-9]{8,32}$/.test(v)),
 		publicKey: need('CLOUDFRONT_PUBLIC_KEY', (v) => v.includes('-----BEGIN PUBLIC KEY-----')),
 		runtimeSecretArn: need('RUNTIME_SECRET_ARN', (v) => SECRET_ARN.test(v)),
-		signingKeySecretArn: need('SIGNING_KEY_SECRET_ARN', (v) => SECRET_ARN.test(v))
+		signingKeySecretArn: need('SIGNING_KEY_SECRET_ARN', (v) => SECRET_ARN.test(v)),
+		nodesBucket: env.NODES_BUCKET?.trim() ? need('NODES_BUCKET', (v) => /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(v)) : null
 	};
 }
 
