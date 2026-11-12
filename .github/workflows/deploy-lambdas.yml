@@ -151,6 +151,10 @@ jobs:
         with:
           node-version: 24
           # No `cache: pnpm`: the store would hold the private auth-kit (see the top of this file).
+          # setup-node v5+ also caches on its own when package.json's `packageManager` names npm.
+          # Ours names pnpm, so nothing is cached today; this keeps it so if that ever changes
+          # (zizmor cache-poisoning, tools/workflows.test.ts).
+          package-manager-cache: false
 
       - name: Install
         working-directory: ${{ env.PKG }}

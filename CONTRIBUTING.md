@@ -7,7 +7,7 @@ How a change reaches `main`, and how `main` reaches production. The rules for Cl
 `main` is protected on GitHub. Nobody pushes to it, admins included:
 
 - Every change is a pull request from a branch.
-- **`CI gate` must be green.** It is the one required check: the `ci-gate` job in `.github/workflows/ci.yml`, which passes only when every job before it did. CodeQL, Scorecard and the labeler report on the PR but don't block it.
+- **`CI gate` must be green.** It is the one required check: the `ci-gate` job in `.github/workflows/ci.yml`, which passes only when every job before it did. CodeQL, Scorecard, the supply-chain scan (`supply-chain-scan.yml`: zizmor and osv-scanner) and the labeler report on the PR but don't block it.
 - No approval is required: this is a one-person repo, and nobody can approve their own PR. `CI gate` is the gate.
 - Every review conversation has to be resolved before the PR can merge.
 - History stays linear: **squash or rebase**, never a merge commit. The branch is deleted when the PR merges.

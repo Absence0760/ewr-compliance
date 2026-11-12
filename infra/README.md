@@ -11,19 +11,20 @@ This repo is public. The account ID stays in `backend.config` (gitignored), and 
 | File | What it makes |
 |---|---|
 | `main.tf` | Providers: `var.aws_region` (af-south-1) and a `us_east_1` alias for CloudFront's certificate, WAF and metrics, and for budgets. `default_tags` on both. The S3 backend, its bucket from `backend.config` |
-| `variables.tf` | Every input. `aws_region` is refused unless it is af-south-1 or `data_outside_south_africa = true`. Feature flags (`site_enabled`, `auth_enabled`, `dws_enabled`, `dws_schedule_enabled`, `deploy_lambda_functions`, `cost_anomaly_threshold_usd`, `cloudfront_flat_rate_plan`) are off by default |
+| `variables.tf` | Every input. `aws_region` is refused unless it is af-south-1 or `data_outside_south_africa = true`. Feature flags (`site_enabled`, `auth_enabled`, `dws_enabled`, `dws_schedule_enabled`, `nodes_enabled`, `deploy_lambda_functions`, `cost_anomaly_threshold_usd`, `cloudfront_flat_rate_plan`) are off by default |
 | `oidc.tf` | Looks up the bootstrap's `ewr-compliance-deploy` role, refuses a trust wider than this repo's `production` environment, and attaches a policy only once there are Lambdas to update (the API once `auth_enabled`, the DWS pipeline once `dws_enabled`, each by itself), for their code only. The role never gets S3 or CloudFront: the site and data go up from the workstation only |
 | `alarms.tf` | Alert topics in af-south-1 and us-east-1, mailing `budget_alert_email`; monthly and daily budgets; Cost Anomaly Detection (off until turned on); the CloudFront 5xx and request-flood alarms |
 | `breaker.tf` | The spend breaker (once the API or the pipeline exists): its SNS topic, which only the `ewr-compliance-breaker-api-*` and `-dws-*` alarms may publish to; the breaker Lambda (`functions/breaker/index.mjs`), whose role may only `lambda:PutFunctionConcurrency` on the API and the pipeline; three trip alarms a function (sustained copies, an hour's Duration, sustained runs), `breaker-errors` and `breaker-throttled`. Reset with `pnpm infra:breaker-reset`: `docs/hosting.md` § Cost controls |
-| `site.tf` | With `site_enabled`: the private bucket (versioned, old versions kept 30 days), OAC, the us-east-1 certificate validated in the delegated zone, the key group from `cloudfront_public_keys`, the empty signing-key secret, the distribution (PriceClass_All; default behaviour signed; `/signin/*` unsigned; `/api/*` to the API once `auth_enabled`; `/dws/*` to the DWS store, signed, once `dws_enabled`) and its DNS records |
+| `site.tf` | With `site_enabled`: the private bucket (versioned, old versions kept 30 days), OAC, the us-east-1 certificate validated in the delegated zone, the key group from `cloudfront_public_keys`, the empty signing-key secret, the distribution (PriceClass_All; default behaviour signed; `/signin/*` unsigned; `/api/*` to the API once `auth_enabled`; `/dws/*` to the DWS store, signed, once `dws_enabled`; `/nodes-data/*` to the admin node store, signed, once `nodes_enabled`) and its DNS records |
 | `edge_functions.tf` | The viewer-request function: unsigned or expired requests get a 302 to `/signin/` (or 401 JSON with `X-Requested-With`), folder paths get `index.html`. The viewer-response function `site_response`, on every behaviour: the site's security headers (those the retired `static/_headers` file set) plus HSTS, and the API's under `/api/`. It replaced the response-headers policies, which a flat-rate plan below Business doesn't allow |
 | `flat_rate_plan.tf` | Only with `cloudfront_flat_rate_plan = "PRO"` (default `"none"`): the CloudFront flat-rate subscription for the distribution, its web ACL and the zone, `approval_mode = "MANUAL"`, unbilled until approved in the console. Never imported. `docs/hosting.md` § Cost controls |
 | `waf.tf` | Per-IP rate limits, `/api/auth/*` and every path, and the blocked-requests alarm |
 | `auth.tf` | With `auth_enabled` (P3): the user table (`auth-kit`'s single table: PITR, TTL on `ttl`, deletion protection), the API Lambda (stub code, which CI replaces) and its Function URL, its runtime secret (the code and session keys and the origin secret, `random_password`s written write-only), its role (`auth-kit`'s actions on the table, SES as `no-reply@` only, its two secrets, its log group), SES (configuration set, DKIM, MAIL FROM, DMARC), and the API-error, bounce, complaint, `auth.locked`, `auth.slow`, direct-call (no origin secret) and run-count alarms (mail only; the spend breaker's trips, `breaker.tf`, stop it). `api_reserved_concurrency` is required once `lambda_account_concurrency_limit` is raised |
 | `dws.tf` | With `dws_enabled` (P4): the DWS store's bucket (versioned, old versions kept 30 days; CloudFront may read `serve/dws/*` only), the pipeline Lambda (stub code, which CI replaces; no async retries; a DLQ), its role (its bucket prefixes, the lease key, the DWS API key secret, its log group, its metric namespace; no delete), the empty DWS API key secret, the daily EventBridge rule (DISABLED until `dws_schedule_enabled`), and the lag (with the schedule), stopped, failed and DLQ alarms |
 | `dws_backfill.tf` | With `dws_enabled`: the Step Functions backfill over date windows (`tools/dws-backfill-plan.mjs`), one at a time with a pause, never retrying a refusal, and its failed-execution alarm |
-| `outputs.tf` | `site_bucket` and `distribution_id`, which `tools/deploy.sh` reads; `users_table` and `auth_runtime_secret_arn`, which the operator tools read; `dws_bucket`, which `tools/dws-stations.sh` reads, and `dws_backfill_state_machine_arn`; and the rest the operator needs |
-| `tests/*.tftest.hcl` | Guardrails, IAM, headers, the sign-in, the DWS store and the cost controls (`cost.tftest.hcl`: the breaker, the flat-rate plan), plan-only on mocked providers. The edge functions run as code in `tools/edge-functions.test.ts`, the breaker in `tools/breaker.test.ts` and its reset in `tools/breaker-reset.test.ts` (vitest) |
+| `nodes.tf` | With `nodes_enabled` (#17, needs `auth_enabled`): the admin node store's bucket (versioned, old versions kept 365 days so an admin's wrong upload or delete can be restored; CloudFront may read `serve/nodes-data/*` only). The API's role may get and put `serve/nodes-data/*` (no delete) and has `NODES_BUCKET` |
+| `outputs.tf` | `site_bucket` and `distribution_id`, which `tools/deploy.sh` reads; `users_table` and `auth_runtime_secret_arn`, which the operator tools read; `dws_bucket`, which `tools/dws-stations.sh` reads, and `dws_backfill_state_machine_arn`; `nodes_bucket`; and the rest the operator needs |
+| `tests/*.tftest.hcl` | Guardrails, IAM, headers, the sign-in, the DWS store, the admin node store and the cost controls (`cost.tftest.hcl`: the breaker, the flat-rate plan), plan-only on mocked providers. The edge functions run as code in `tools/edge-functions.test.ts`, the breaker in `tools/breaker.test.ts` and its reset in `tools/breaker-reset.test.ts` (vitest) |
 
 Terraform's version is pinned in `.terraform-version` (tfenv reads it here; CI too).
 
@@ -312,17 +313,46 @@ gh release create api@0.1.0 --target main --generate-notes --repo Absence0760/ew
 
 Then `curl -s https://<domain>/api/me` should print the 401 JSON (`"signin":"/signin/"`), not the stub's 503.
 
-**H9. The first admin.** Once the API is deployed and SES is out of the sandbox: install `server/` (needs H0's access over SSH on the workstation), then run the tool, which asks for your address and confirms it:
+**H9. The first admin.** Until this runs the list is empty and nobody can get past the sign-in page. The tool works once, and is refused as soon as any admin exists; every admin after it is added on the Users page. It can run from any workstation that has the pieces below, not only the one that did H6. Each command works on its own in a new terminal.
 
-```
-cd ~/github/ewr-compliance/server && pnpm install --frozen-lockfile
-```
+1. **SES is out of the sandbox.** Until it is, the code mail reaches only verified addresses. This should print `true`; if it prints `false`, wait for AWS's answer to H8's request (or its email asking for more detail). To go ahead in the sandbox, verify your own address first (SES console, af-south-1, Identities, Create identity, Email address, then the link in the mail it sends). That one address, and any other verified the same way, can then sign in; nobody else can until production access is granted:
 
-```
-cd ~/github/ewr-compliance && tools/first-admin
-```
+   ```
+   aws sso login --profile ewr-compliance
+   ```
 
-Sign in at `https://<domain>/` with that address, open Users, and add a second admin, so one locked out can't leave the site without one. `tools/recover-admin` is the break-glass, `tools/clear-lock` clears a sign-in lockout without changing anyone's role, and `tools/erase-user` is the erasure: `docs/hosting.md` § Access control.
+   ```
+   aws sesv2 get-account --region af-south-1 --profile ewr-compliance --query 'ProductionAccessEnabled'
+   ```
+
+2. **The API answers.** This should print the 401 JSON (`"signin":"/signin/"`). A 503 means H10 hasn't deployed it:
+
+   ```
+   curl -s https://<domain>/api/me
+   ```
+
+3. **The workstation can read the outputs.** On a workstation that didn't do H6, first make `infra/backend.config` (the first command in H6) and run `terraform init` (the second). Then this should print a name starting `ewr-compliance-`:
+
+   ```
+   cd ~/github/ewr-compliance && AWS_PROFILE=ewr-compliance terraform -chdir=infra output -raw users_table
+   ```
+
+4. **`server/` is installed.** It needs Node 24 (`node --version`) and H0's read access to `auth-kit` over SSH on this workstation: `ssh -T git@github.com` should greet you by your GitHub name. A `Permission denied (publickey)` from the install means this workstation's SSH key isn't on GitHub:
+
+   ```
+   cd ~/github/ewr-compliance/server && pnpm install --frozen-lockfile
+   ```
+
+5. **Run the tool.** It asks for your address at the prompt (never as an argument, so it stays out of shell history), shows it back and asks you to type `yes`. **Check the address letter by letter before you type `yes`:** once any admin has existed the tool is refused for good, `tools/recover-admin` only restores an address already on the list, and a mistyped address can't receive the code to sign in and add the right one. If it says it can't read the terraform outputs, do step 3 again:
+
+   ```
+   cd ~/github/ewr-compliance && tools/first-admin
+   ```
+
+6. **Sign in** at `https://<domain>/` with that address and the code it mails you, from `no-reply@<domain>`. A new sender often lands in junk mail, so look there before asking for another: an address gets one code a minute and 10 a day, and 5 wrong codes in a row lock it for a while (`tools/clear-lock` lifts either). The code works for 10 minutes. Once in, the app bar shows Users and Sign out.
+7. **Add a second admin** on the Users page (tick Admin when adding them), so one locked out can't leave the site without one. They sign in the same way. There is no upper limit on admins, and the site refuses to remove the last one.
+
+`tools/recover-admin` is the break-glass, `tools/clear-lock` clears a sign-in lockout without changing anyone's role, and `tools/erase-user` is the erasure: `docs/hosting.md` § Access control.
 
 **H11. The DWS store (P4).** One at a time, each when the last is done. What each part does, and what its alarms mean: `docs/hosting.md` § The DWS store.
 
