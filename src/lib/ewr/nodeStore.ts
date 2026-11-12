@@ -9,8 +9,11 @@
 //
 // A node's files are kept apart from the WMA's file so the map loads the nodes alone, and a node's
 // text only when it is opened, as ewr-<basin>.json is for the built-in nodes.
-import { LADDER } from './parsers.ts';
 import type { EwrNode, FileKind, NodeFile } from './types.ts';
+
+/** The EC ladder, as parsers.ts LADDER (a test keeps them equal): kept here so server/ imports this file and types.ts only. */
+export const NODE_STORE_LADDER: readonly string[] = ['A', 'A/B', 'B', 'B/C', 'C', 'C/D', 'D', 'D/E', 'E'];
+const LADDER = NODE_STORE_LADDER;
 
 /** The one format version this app reads. A store written in another is refused, not guessed at. */
 export const NODE_STORE_VERSION = 1;
