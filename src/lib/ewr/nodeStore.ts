@@ -9,6 +9,7 @@
 //
 // A node's files are kept apart from the WMA's file so the map loads the nodes alone, and a node's
 // text only when it is opened, as ewr-<basin>.json is for the built-in nodes.
+import { LADDER } from './parsers.ts';
 import type { EwrNode, FileKind, NodeFile } from './types.ts';
 
 /** The one format version this app reads. A store written in another is refused, not guessed at. */
@@ -176,9 +177,12 @@ function parseNode(json: unknown, wma: string, where: string): EwrNode {
 	const files = parseFiles(json.files, at);
 	const sites = parseSites(json.sites, at);
 	const ecSource = parseStringRecord(json.ecSource, at, 'ecSource');
-	const ecsAvailable = parseStrings(json.ecsAvailable, at, 'ecsAvailable');
+	// Worked out from the files as build_data.py does, never taken from the upload, so a node can't
+	// claim a method or an EC it has no file for: a .tab or _Con.txt run with an EC on the ladder, and
+	// a Revised file's first seven ECs.
+	const tabEcs = new Set(files.filter((f) => (f.kind === 'tab' || f.kind === 'con') && LADDER.includes(f.ec)).map((f) => f.ec));
 	const revised = files.some((f) => f.kind === 'revised');
-	const tab = files.some((f) => f.kind === 'tab');
+	const ecsAvailable = LADDER.filter((ec) => tabEcs.has(ec) || (revised && LADDER.indexOf(ec) < 7));
 	return {
 		id,
 		label: text('label', true),
@@ -204,8 +208,7 @@ function parseNode(json: unknown, wma: string, where: string): EwrNode {
 		ecSource,
 		files,
 		ecsAvailable,
-		// Worked out from the files, never taken from the upload, so a node can't claim a method it has no file for.
-		hasTab: tab,
+		hasTab: tabEcs.size > 0,
 		hasRevised: revised
 	};
 }
@@ -250,8 +253,3 @@ function parseStringRecord(json: unknown, at: string, what: string): Record<stri
 	return { ...(json as Record<string, string>) };
 }
 
-function parseStrings(json: unknown, at: string, what: string): string[] {
-	if (json === undefined) return [];
-	if (!Array.isArray(json) || json.length > 20 || json.some((v) => typeof v !== 'string' || v.length > 10)) throw new Error(`${at}: ${what} must be a list of ECs.`);
-	return [...(json as string[])];
-}
