@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { NotReady } from './app.ts';
 import { handler, recordAudit, toRequest, toResult } from './lambda.ts';
 
 describe('the Function URL event', () => {
