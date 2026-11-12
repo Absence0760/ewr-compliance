@@ -18,16 +18,13 @@ import type { SendMail } from './mail.ts';
 import { S3NodeBucket, createNodeStore } from './nodes.ts';
 
 /**
- * The node store's audit rows, through auth-kit's recordAppAction (`app.node.put` and so on, the
- * actor re-checked as an admin in the same write). Until auth-kit has it, every node-store write
- * answers 503 and nothing is written, so no change can go unrecorded.
- *
- * TODO(auth-kit, Absence0760/auth-kit#6): once it is tagged and server/ is bumped to it, replace
- * the body with `auth.recordAppAction(actor, action, target)`, and drop the NotReady.
+ * The node store's audit rows, through auth-kit's recordAppAction (v0.4.0): `app.node.put` and so
+ * on, the admin as actor, re-checked as an admin in the same write.
  */
-export const recordAudit = (_auth: unknown): RecordAudit => async () => {
-	throw new NotReady('auth-kit has no recordAppAction yet: the node store is not writable');
-};
+export const recordAudit =
+	(auth: Pick<ReturnType<typeof createAuthKit>, 'recordAppAction'>): RecordAudit =>
+	(actor, action, target) =>
+		auth.recordAppAction(actor, action, target);
 
 /** The fields of a Function URL event (payload format 2.0) this reads. */
 export interface UrlEvent {

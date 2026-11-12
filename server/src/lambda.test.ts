@@ -24,9 +24,11 @@ describe('the Function URL event', () => {
 });
 
 describe('the node store’s audit seam', () => {
-	it('refuses every node-store write as not ready until auth-kit records app actions', async () => {
+	it('records each node-store change as auth-kit app action, the admin as actor', async () => {
 		const actor = { id: 'u', email: 'admin@example.test', isAdmin: true, addedBy: 'operator', addedAt: '', sessionsRevokedAt: null, undeliverable: null };
-		await expect(recordAudit(null)(actor, 'node.put', 'vaal-orange vaal-orange:syx1')).rejects.toBeInstanceOf(NotReady);
+		const recordAppAction = vi.fn(async () => ({ ok: true as const, value: {} }));
+		await expect(recordAudit({ recordAppAction } as never)(actor, 'node.put', 'vaal-orange vaal-orange:syx1')).resolves.toEqual({ ok: true, value: {} });
+		expect(recordAppAction).toHaveBeenCalledWith(actor, 'node.put', 'vaal-orange vaal-orange:syx1');
 	});
 });
 

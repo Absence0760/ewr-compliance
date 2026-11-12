@@ -3,6 +3,7 @@
 // adds: status codes, cookies, the origin and CSRF checks, timing padding and the logs.
 import { generateKeyPairSync, createVerify } from 'node:crypto';
 import { createAuthKit, memoryStore, randomSecret, cryptoRandom, type MemoryStore } from '@absence0760/auth-kit';
+import { recordAudit as lambdaRecordAudit } from './lambda.ts';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApi, NotReady, SESSION_COOKIE, type ApiDeps, type NodeAction, type RecordAudit } from './app.ts';
 import type { Signer } from './cloudfront.ts';
@@ -445,13 +446,11 @@ describe('the node store', () => {
 	let audits: { actor: string; action: NodeAction; target: string }[];
 	let admin: string;
 
-	/** auth-kit's recordAppAction as the routes see it: admins only, re-checked against the store. */
+	/** The real seam (lambda.ts) over auth-kit's recordAppAction, noting each row it wrote. */
 	const recordAudit: RecordAudit = async (actor, action, target) => {
-		const now = await auth.deps.store.getUser(actor.id);
-		if (!actor.isAdmin) return { ok: false, status: 403, error: 'Only an admin can manage users.' };
-		if (!now?.isAdmin) return { ok: false, status: 409, error: 'Your admin rights changed while you were working. Reload and try again.' };
-		audits.push({ actor: actor.email, action, target });
-		return { ok: true, value: null };
+		const r = await lambdaRecordAudit(auth)(actor, action, target);
+		if (r.ok) audits.push({ actor: actor.email, action, target });
+		return r;
 	};
 
 	function withNodes(overrides: Partial<ApiDeps> = {}) {
@@ -483,6 +482,8 @@ describe('the node store', () => {
 		expect(bucket.json(OVERLAY)).toMatchObject({ version: 1, wma: WMA, updatedAt: at, nodes: [{ id: `${WMA}:syx1`, label: 'SYX1', hasTab: true, hasRevised: true }], deleted: [] });
 		expect(bucket.json(INDEX)).toEqual({ version: 1, wmas: { [WMA]: { updatedAt: at, nodes: 1, deleted: 0 } } });
 		expect(audits).toEqual([{ actor: 'admin@example.test', action: 'node.put', target: `${WMA} ${WMA}:syx1` }]);
+		// In auth-kit's own audit log, as the Users page lists it.
+		expect((await auth.deps.store.listAudit(5)).filter((a) => a.action.startsWith('app.'))).toMatchObject([{ actor: 'admin@example.test', action: 'app.node.put', target: `${WMA} ${WMA}:syx1` }]);
 		// The log names the user by id and the WMA, never the node or an address.
 		expect(logs.at(-1)).toEqual({ event: 'nodes.put', fields: { user: expect.any(String), wma: WMA } });
 		expect(JSON.stringify(logs)).not.toContain('syx1');
