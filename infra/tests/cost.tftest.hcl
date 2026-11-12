@@ -550,9 +550,10 @@ run "invocation_trips_bounded" {
 run "every_behaviour_flat_rate_compatible" {
   command = plan
   variables {
-    site_enabled = true
-    auth_enabled = true
-    dws_enabled  = true
+    site_enabled  = true
+    auth_enabled  = true
+    dws_enabled   = true
+    nodes_enabled = true
   }
 
   assert {
@@ -560,7 +561,7 @@ run "every_behaviour_flat_rate_compatible" {
       b.response_headers_policy_id == null &&
       one([for f in b.function_association : f.function_arn if f.event_type == "viewer-response"]) == "arn:aws:cloudfront::000000000000:function/ewr-compliance-site-response"
     ])
-    error_message = "Every behaviour (default, /signin/*, /dws/*, /api/*) sets its headers with site_response and carries no response-headers policy."
+    error_message = "Every behaviour (default, /signin/*, /dws/*, /nodes-data/*, /api/*) sets its headers with site_response and carries no response-headers policy."
   }
   assert {
     condition = alltrue([for b in concat(aws_cloudfront_distribution.site[0].default_cache_behavior, aws_cloudfront_distribution.site[0].ordered_cache_behavior) :
