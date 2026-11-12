@@ -11,12 +11,17 @@
 	import type { EcBasis } from '#lib/ewr/types.ts';
 
 	let { children } = $props();
-	/** Users is offered to admins only, on a host with a user list. */
+	/** Users and Import are offered to admins only, on a host with a user list. */
 	const nav = $derived([
 		{ href: resolve('/'), label: 'Map and compliance' },
 		{ href: resolve('nodes/'), label: 'Nodes and ECs' },
 		{ href: resolve('notes/'), label: 'Method and data notes' },
-		...(session.me?.admin ? [{ href: resolve('users/'), label: 'Users' }] : [])
+		...(session.me?.admin
+			? [
+					{ href: resolve('users/'), label: 'Users' },
+					{ href: resolve('import/'), label: 'Import' }
+				]
+			: [])
 	]);
 	const home = resolve('/');
 	/** A WMA's map is part of the map, under its first link. */

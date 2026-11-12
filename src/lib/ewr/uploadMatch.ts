@@ -22,7 +22,7 @@ export interface UploadInput {
 	kmlSkipped?: KmlSkip[];
 }
 
-export type UnmatchedReason = 'no-node' | 'ambiguous' | 'unknown-type' | 'skipped' | 'duplicate';
+export type UnmatchedReason = 'no-node' | 'ambiguous' | 'unknown-type' | 'skipped' | 'duplicate' | 'detached';
 
 /** How a file's EC was decided when its name and its header disagree: as resolve_ec_conflicts does, or by an admin. */
 export interface EcDecision {
@@ -48,6 +48,8 @@ export interface MatchedFile {
 	dt: boolean;
 	/** The same values as the run its header names (ec-copy). */
 	copy: boolean;
+	/** Attached to the node by an admin (attachFile), not by its name. */
+	attached?: boolean;
 }
 
 export interface UploadReport {
@@ -72,6 +74,8 @@ export interface UploadResult {
 	nodes: EwrNode[];
 	texts: Record<string, NodeTexts>;
 	report: UploadReport;
+	/** The text of each unmatched file an admin can attach to a node by hand (attachFile): a Desktop output by its name that no node's code matched, or more than one did. */
+	loose: Record<string, string>;
 }
 
 // ---- build_data.py's file reading, ported ----------------------------------------------
@@ -325,6 +329,7 @@ export function matchUpload({ wma, basin, placemarks, files, kmlSkipped = [] }: 
 
 	// Files to nodes, in name order as build_data.py lists a folder.
 	const found: Found[] = [];
+	const loose: Record<string, string> = {};
 	const seen = new Set<string>();
 	const sorted = files
 		.map((f) => ({ name: f.name.slice(Math.max(f.name.lastIndexOf('/'), f.name.lastIndexOf('\\')) + 1), text: f.text }))
@@ -349,10 +354,12 @@ export function matchUpload({ wma, basin, placemarks, files, kmlSkipped = [] }: 
 		const ids = [...new Set(readings.map((r) => r.nodeId))];
 		if (ids.length === 0) {
 			report.unmatched.push({ file: name, reason: 'no-node', detail: 'File name does not match a node code in the KML.' });
+			if (classify(name)) loose[name] = universalNewlines(text);
 			continue;
 		}
 		if (ids.length > 1) {
 			report.unmatched.push({ file: name, reason: 'ambiguous', detail: `File name could be node ${ids.join(' or ')}.` });
+			if (classify(name)) loose[name] = universalNewlines(text);
 			continue;
 		}
 		const kind = classify(name);
@@ -379,13 +386,18 @@ export function matchUpload({ wma, basin, placemarks, files, kmlSkipped = [] }: 
 		(texts[n.id] ??= {})[f.name] = f.text;
 		report.files.push({ nodeId: n.id, file: f.name, kind: f.kind, nameEc: f.stemEc, headerEc: headerEc.get(f) ?? '', dt: f.variant, copy: f.duplicate === true });
 	}
-	for (const n of nodes) {
-		finish(n, report.roleNotes[n.id]);
-		if (!n.files.length) report.nodesWithoutFiles.push(n.id);
-		else if (!n.ecsAvailable.length) report.nodesWithoutEwr.push(n.id);
-	}
+	for (const n of nodes) finish(n, report.roleNotes[n.id]);
+	Object.assign(report, without(nodes));
 	report.overLimits = limits(nodes, texts);
-	return { nodes, texts, report };
+	return { nodes, texts, report, loose };
+}
+
+/** Nodes no file joined, and nodes with files but no EWR, in node order. */
+function without(nodes: EwrNode[]): Pick<UploadReport, 'nodesWithoutFiles' | 'nodesWithoutEwr'> {
+	return {
+		nodesWithoutFiles: nodes.filter((n) => !n.files.length).map((n) => n.id),
+		nodesWithoutEwr: nodes.filter((n) => n.files.length && !n.ecsAvailable.length).map((n) => n.id)
+	};
 }
 
 function limits(nodes: EwrNode[], texts: Record<string, NodeTexts>): UploadReport['overLimits'] {
@@ -431,7 +443,7 @@ export function overrideEc(result: UploadResult, nodeId: string, fileName: strin
 			...n,
 			files: n.files.map((f) => {
 				if (f.name !== fileName) return f;
-				const g: NodeFile = { name: f.name, kind: f.kind, ec: want, basis: f.basis, ecNote: detail };
+				const g: NodeFile = { name: f.name, kind: f.kind, ec: want, basis: f.basis, ecNote: meta?.attached ? `${ATTACHED} ${detail}` : detail };
 				if (variant) g.variant = true;
 				return g;
 			})
@@ -443,8 +455,135 @@ export function overrideEc(result: UploadResult, nodeId: string, fileName: strin
 		...result.report.ecDecisions.filter((d) => !(d.nodeId === nodeId && d.file === fileName)),
 		{ nodeId, file: fileName, kind: 'admin' as const, nameEc, headerEc, ec: want, detail }
 	];
-	const after = nodes.find((n) => n.id === nodeId) as EwrNode;
-	const nodesWithoutEwr = result.report.nodesWithoutEwr.filter((id) => id !== nodeId);
-	if (after.files.length && !after.ecsAvailable.length) nodesWithoutEwr.push(nodeId);
-	return { nodes, texts: result.texts, report: { ...result.report, ecDecisions, nodesWithoutEwr } };
+	return { ...result, nodes, report: { ...result.report, ecDecisions, ...without(nodes) } };
+}
+
+/** What a file attached by hand carries on its ecNote, before any note on how its EC was decided. */
+export const ATTACHED = 'Attached by an admin.';
+
+const byName = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * The files an admin can attach (attachFile), in name order: unmatched Desktop outputs whose name gave
+ * no node, or more than one.
+ */
+export const attachable = (result: UploadResult): string[] => Object.keys(result.loose).sort(byName);
+
+/**
+ * An admin's attaching of an unmatched file to a node, the way the operator asked for a node no file's
+ * name matches. The file is classified by its name and its EC read from its header, as matchUpload
+ * does. Its name gives an EC (and `_DT`) only where it reads as the node's code plus a suffix. The
+ * node's EC conflicts are then decided again over all its files, as resolve_ec_conflicts would with the
+ * file in the folder under the node's name, keeping any EC an admin set. Its ecNote says it was attached
+ * by an admin. Returns a new result; throws when the node or the file is not one, or the file can't be attached.
+ */
+export function attachFile(result: UploadResult, nodeId: string, fileName: string): UploadResult {
+	const node = result.nodes.find((n) => n.id === nodeId);
+	if (!node) throw new Error(`${nodeId} is not a node of this upload.`);
+	if (!Object.hasOwn(result.loose, fileName)) throw new Error(`${fileName} is not an unmatched file that can be attached.`);
+	const kind = classify(fileName);
+	if (!kind) throw new Error(`${fileName} is not a Desktop output.`);
+	if (node.files.some((f) => f.name === fileName)) throw new Error(`${nodeId} already has a file called ${fileName}.`);
+	const text = result.loose[fileName];
+	// The name read against this node's code alone: what it says of the EC only counts if it names this node.
+	const key = nodeId.slice(nodeId.indexOf(':') + 1);
+	const reading = stemReadings(fileName.split('.')[0], new Map([[node.label.toLowerCase(), nodeId], [key, nodeId]]))[0];
+	const stem = fileName.split('.')[0].replace(/-i$/, '');
+	const meta: MatchedFile = {
+		nodeId,
+		file: fileName,
+		kind,
+		nameEc: reading?.stemEc ?? '',
+		headerEc: kind === 'tab' || kind === 'rul' || kind === 'mrv' ? fileEc(text) : '',
+		dt: reading?.dt ?? stem.endsWith('_DT'),
+		copy: false,
+		attached: true
+	};
+	const loose = { ...result.loose };
+	delete loose[fileName];
+	const unmatched = result.report.unmatched.filter((u) => u.file !== fileName);
+	return rework(result, nodeId, [...result.report.files.filter((f) => f.nodeId === nodeId), meta], { ...result.texts[nodeId], [fileName]: text }, unmatched, loose);
+}
+
+/**
+ * The reverse of attachFile, for any file of a node, matched by its name or attached: it goes back to
+ * the unmatched files, where it can be attached to another node, and the node's EC conflicts are
+ * decided again over the files it keeps. Returns a new result; throws when the node or the file is not one.
+ */
+export function detachFile(result: UploadResult, nodeId: string, fileName: string): UploadResult {
+	const node = result.nodes.find((n) => n.id === nodeId);
+	if (!node) throw new Error(`${nodeId} is not a node of this upload.`);
+	if (!node.files.some((f) => f.name === fileName)) throw new Error(`${fileName} is not a file of ${nodeId}.`);
+	const text = result.texts[nodeId][fileName];
+	const texts = { ...result.texts[nodeId] };
+	delete texts[fileName];
+	const unmatched = [
+		...result.report.unmatched,
+		{ file: fileName, reason: 'detached' as const, detail: `Taken off node ${nodeId} by an admin.` }
+	].sort((a, b) => byName(a.file, b.file));
+	const metas = result.report.files.filter((f) => f.nodeId === nodeId && f.file !== fileName);
+	return rework(result, nodeId, metas, texts, unmatched, { ...result.loose, [fileName]: text });
+}
+
+/**
+ * A node with its files changed: its EC conflicts decided again over the files it now has, as
+ * matchUpload decides them, except where an admin set the EC, and the node, its report and the limits
+ * worked out again.
+ */
+function rework(
+	result: UploadResult,
+	nodeId: string,
+	metas: MatchedFile[],
+	nodeTexts: NodeTexts,
+	unmatched: UploadReport['unmatched'],
+	loose: Record<string, string>
+): UploadResult {
+	const names = new Set(metas.map((m) => m.file));
+	const set = new Set(result.report.ecDecisions.filter((d) => d.nodeId === nodeId && d.kind === 'admin' && names.has(d.file)).map((d) => d.file));
+	const node = result.nodes.find((n) => n.id === nodeId) as EwrNode;
+	const before = new Map(node.files.map((f) => [f.name, f]));
+	const sorted = [...metas].sort((a, b) => byName(a.file, b.file));
+	const found: Found[] = sorted.map((m) => ({ name: m.file, kind: m.kind, nodeId, text: nodeTexts[m.file], stemEc: m.nameEc, ec: m.headerEc, variant: m.dt }));
+	const decisions: EcDecision[] = [];
+	resolveEcConflicts(found, decisions);
+
+	const files: NodeFile[] = [];
+	const report: MatchedFile[] = [];
+	found.forEach((f, i) => {
+		const m = sorted[i];
+		const kept = set.has(f.name) ? before.get(f.name) : undefined;
+		if (kept) {
+			files.push(kept);
+			report.push(m);
+			return;
+		}
+		const file: NodeFile = { name: f.name, kind: f.kind, ec: f.ec, basis: before.get(f.name)?.basis ?? '' };
+		if (f.variant || f.duplicate) file.variant = true;
+		const note = m.attached ? [ATTACHED, f.note].filter(Boolean).join(' ') : f.note;
+		if (note) file.ecNote = note;
+		files.push(file);
+		report.push({ ...m, copy: f.duplicate === true });
+	});
+	const next: EwrNode = { ...node, files };
+	finish(next, result.report.roleNotes[nodeId] ?? '');
+	const nodes = result.nodes.map((n) => (n.id === nodeId ? next : n));
+	const texts = { ...result.texts, [nodeId]: nodeTexts };
+	if (!files.length) delete texts[nodeId];
+	const ecDecisions = [
+		...result.report.ecDecisions.filter((d) => d.nodeId !== nodeId || (d.kind === 'admin' && names.has(d.file))),
+		...decisions.filter((d) => !set.has(d.file))
+	];
+	return {
+		nodes,
+		texts,
+		loose,
+		report: {
+			...result.report,
+			files: [...result.report.files.filter((f) => f.nodeId !== nodeId), ...report],
+			unmatched,
+			ecDecisions,
+			...without(nodes),
+			overLimits: limits(nodes, texts)
+		}
+	};
 }

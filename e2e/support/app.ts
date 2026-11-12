@@ -18,11 +18,11 @@ export const DWS = /^https:\/\/services[38]\.arcgis\.com\//;
 export const DWS_STORE = /\/dws\/(index|flows-[^/]+|monthly-[^/]+)\.json$/;
 
 /**
- * The sign-in and user API (server/, behind /api/* on the hosted site), which the test servers do not
+ * The sign-in, user and node store API (server/, behind /api/* on the hosted site), which the test servers do not
  * have. By default it answers 404, as a copy with no user list does, and the watch lets that by.
- * users.spec.ts and signin.spec.ts answer for it.
+ * users.spec.ts, signin.spec.ts and node-import.spec.ts answer for it.
  */
-export const USER_API = /\/api\/(me|users|audit|auth)(\/|$)/;
+export const USER_API = /\/api\/(me|users|audit|auth|nodes)(\/|$)/;
 
 /** The map of the WMA the sample's basins are in, which most specs work on. */
 export const MAP = 'wma/breede-olifants/';

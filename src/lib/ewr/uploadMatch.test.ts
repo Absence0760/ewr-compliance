@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Placemark } from './kml.ts';
 import { parseNodeTexts, parseWmaOverlay } from './nodeStore.ts';
 import { parseTab } from './parsers.ts';
-import { classify, codeKey, fileEc, matchUpload, normEc, overrideEc, tabValues, type UploadResult } from './uploadMatch.ts';
+import { attachable, attachFile, classify, codeKey, detachFile, fileEc, matchUpload, normEc, overrideEc, tabValues, type UploadResult } from './uploadMatch.ts';
 
 // Every node, file and value here is synthetic: invented codes (syx1, syy2), rivers and runs.
 const WMA = 'vaal-orange';
@@ -304,5 +304,134 @@ describe('matchUpload: EC conflicts, as resolve_ec_conflicts decides them', () =
 		expect(() => overrideEc(r, 'vaal-orange:syx1', 'syx1D.tab', 'F')).toThrow('F is not an Ecological Category.');
 		expect(() => overrideEc(r, 'vaal-orange:nope', 'syx1D.tab', 'C')).toThrow('vaal-orange:nope is not a node of this upload.');
 		expect(() => overrideEc(r, 'vaal-orange:syx1', 'nope.tab', 'C')).toThrow('nope.tab is not a file of vaal-orange:syx1.');
+	});
+});
+
+describe('attachFile and detachFile: an admin attaches by hand what no name matched', () => {
+	// syx1 and syx1c make syx1C.tab ambiguous; syy2 has no file; syz9C.tab and syy2_Con.txt-style names match nothing.
+	const base = () =>
+		match(
+			[pm('syx1'), pm('syx1c'), pm('syy2')],
+			[
+				['syx1C.tab', tab('C', 1)],
+				['syx1D.tab', tab('C', 1)],
+				['syz9C.tab', tab('B', 2)],
+				['syz9.rul(NEWFORM)', 'Synthetic Revised run'],
+				['notes on syz9.doc', 'Not a Desktop output'],
+				['syy2 notes.txt', 'A note']
+			]
+		);
+
+	it('keeps the text of each unmatched Desktop output, and only those, to attach', () => {
+		const r = base();
+		expect(attachable(r)).toEqual(['syx1C.tab', 'syz9.rul(NEWFORM)', 'syz9C.tab']);
+		expect(r.loose['syz9C.tab']).toBe(tab('B', 2));
+		expect(r.report.unmatched.map((u) => [u.file, u.reason])).toEqual([
+			['notes on syz9.doc', 'no-node'],
+			['syx1C.tab', 'ambiguous'],
+			['syy2 notes.txt', 'skipped'],
+			['syz9.rul(NEWFORM)', 'no-node'],
+			['syz9C.tab', 'no-node']
+		]);
+		// With nothing in the folder under its name, syx1D.tab's header (C) has no twin, so its name decides.
+		expect(file(r, 'syx1', 'syx1D.tab')).toMatchObject({ ec: 'D', ecNote: 'Header says C but values are a distinct run; treated as D (file name)' });
+	});
+
+	it('gives a node with no data the file, its EC from the header, and says an admin attached it', () => {
+		const r = base();
+		const a = attachFile(r, 'vaal-orange:syy2', 'syz9C.tab');
+		expect(node(a, 'syy2').files).toEqual([{ name: 'syz9C.tab', kind: 'tab', ec: 'B', basis: '', ecNote: 'Attached by an admin.' }]);
+		expect([node(a, 'syy2').ecsAvailable, node(a, 'syy2').hasTab]).toEqual([['B'], true]);
+		expect(a.texts['vaal-orange:syy2']).toEqual({ 'syz9C.tab': tab('B', 2) });
+		expect(a.report.nodesWithoutFiles).toEqual(['vaal-orange:syx1c']);
+		expect(a.report.unmatched.map((u) => u.file)).not.toContain('syz9C.tab');
+		expect(attachable(a)).toEqual(['syx1C.tab', 'syz9.rul(NEWFORM)']);
+		expect(a.report.files.at(-1)).toEqual({ nodeId: 'vaal-orange:syy2', file: 'syz9C.tab', kind: 'tab', nameEc: '', headerEc: 'B', dt: false, copy: false, attached: true });
+		// The result it was given is left as it was.
+		expect(node(r, 'syy2').files).toEqual([]);
+		expect(attachable(r)).toContain('syz9C.tab');
+		roundTrip(a);
+
+		const b = attachFile(a, 'vaal-orange:syy2', 'syz9.rul(NEWFORM)');
+		expect(node(b, 'syy2').ecsAvailable).toEqual(['A', 'A/B', 'B', 'B/C', 'C', 'C/D', 'D']);
+		expect(file(b, 'syy2', 'syz9.rul(NEWFORM)')).toEqual({ name: 'syz9.rul(NEWFORM)', kind: 'revised', ec: '', basis: '', ecNote: 'Attached by an admin.' });
+		// Kept in name order, as the build lists a folder.
+		expect(node(b, 'syy2').files.map((f) => f.name)).toEqual(['syz9.rul(NEWFORM)', 'syz9C.tab']);
+		roundTrip(b);
+	});
+
+	it('reads an EC from the name only where the name is the node code plus a suffix', () => {
+		const r = base();
+		const a = attachFile(r, 'vaal-orange:syx1c', 'syx1C.tab');
+		expect(a.report.files.find((f) => f.file === 'syx1C.tab')).toMatchObject({ nameEc: '', headerEc: 'C' });
+		expect(file(a, 'syx1c', 'syx1C.tab')).toEqual({ name: 'syx1C.tab', kind: 'tab', ec: 'C', basis: '', ecNote: 'Attached by an admin.' });
+		const b = attachFile(r, 'vaal-orange:syx1', 'syx1C.tab');
+		expect(b.report.files.find((f) => f.file === 'syx1C.tab')).toMatchObject({ nameEc: 'C', headerEc: 'C' });
+	});
+
+	it("decides the node's EC conflicts again, as the build would with the file under the node's name", () => {
+		const a = attachFile(base(), 'vaal-orange:syx1', 'syx1C.tab');
+		// syx1D.tab now has a C run to compare with, of the same values: a copy, so C and a variant.
+		expect(file(a, 'syx1', 'syx1D.tab')).toEqual({ name: 'syx1D.tab', kind: 'tab', ec: 'C', basis: '', variant: true, ecNote: 'Identical to the C run, so no D run exists; treated as C' });
+		expect(node(a, 'syx1').ecsAvailable).toEqual(['C']);
+		expect(a.report.ecDecisions.map((d) => [d.file, d.kind, d.ec])).toEqual([['syx1D.tab', 'ec-copy', 'C']]);
+		expect(a.report.files.find((f) => f.file === 'syx1D.tab')?.copy).toBe(true);
+		roundTrip(a);
+
+		// Taken off again, the node is as matchUpload left it.
+		const d = detachFile(a, 'vaal-orange:syx1', 'syx1C.tab');
+		expect(node(d, 'syx1')).toEqual(node(base(), 'syx1'));
+		expect(d.report.ecDecisions).toEqual(base().report.ecDecisions);
+		roundTrip(d);
+	});
+
+	it("keeps an EC an admin set through the node's conflicts being decided again", () => {
+		const o = overrideEc(base(), 'vaal-orange:syx1', 'syx1D.tab', 'D');
+		const a = attachFile(o, 'vaal-orange:syx1', 'syx1C.tab');
+		expect(file(a, 'syx1', 'syx1D.tab')).toEqual({ name: 'syx1D.tab', kind: 'tab', ec: 'D', basis: '', ecNote: 'Set by an admin: treated as D, where the file name says D and the header says C' });
+		expect(a.report.ecDecisions.map((d) => [d.file, d.kind, d.ec])).toEqual([['syx1D.tab', 'admin', 'D']]);
+		expect(node(a, 'syx1').ecsAvailable).toEqual(['C', 'D']);
+	});
+
+	it('keeps saying a file was attached when an admin then sets its EC', () => {
+		const a = overrideEc(attachFile(base(), 'vaal-orange:syy2', 'syz9C.tab'), 'vaal-orange:syy2', 'syz9C.tab', 'C');
+		expect(file(a, 'syy2', 'syz9C.tab').ecNote).toBe('Attached by an admin. Set by an admin: treated as C, where the header says B');
+		roundTrip(a);
+	});
+
+	it('detaches any file back to the unmatched files, from where it can go to another node', () => {
+		const r = base();
+		const d = detachFile(r, 'vaal-orange:syx1', 'syx1D.tab');
+		expect(node(d, 'syx1').files).toEqual([]);
+		expect(d.texts['vaal-orange:syx1']).toBeUndefined();
+		expect(d.report.nodesWithoutFiles).toEqual(['vaal-orange:syx1', 'vaal-orange:syx1c', 'vaal-orange:syy2']);
+		expect(d.report.unmatched.find((u) => u.file === 'syx1D.tab')).toEqual({ file: 'syx1D.tab', reason: 'detached', detail: 'Taken off node vaal-orange:syx1 by an admin.' });
+		expect(d.report.ecDecisions).toEqual([]);
+		expect(d.report.files.map((f) => f.file)).not.toContain('syx1D.tab');
+		roundTrip(d);
+
+		const a = attachFile(d, 'vaal-orange:syy2', 'syx1D.tab');
+		expect(file(a, 'syy2', 'syx1D.tab')).toEqual({ name: 'syx1D.tab', kind: 'tab', ec: 'C', basis: '', ecNote: 'Attached by an admin.' });
+		expect(a.report.unmatched.map((u) => u.file)).not.toContain('syx1D.tab');
+		roundTrip(a);
+	});
+
+	it('works out the limits again', () => {
+		const many = Array.from({ length: 40 }, (_, i) => [`syx1C${String(i).padStart(2, '0')}.nat`, 'Synthetic natural flows'] as [string, string]);
+		// A stem of `syx1C00` is no node's code, so these all go unmatched: attach them by hand.
+		let r = match([pm('syx1')], [...many, ['syx1.nat', 'Synthetic natural flows']]);
+		for (const [name] of many) r = attachFile(r, 'vaal-orange:syx1', name);
+		expect(r.report.overLimits).toEqual([{ nodeId: 'vaal-orange:syx1', detail: '41 files; a node holds at most 40.' }]);
+		r = detachFile(r, 'vaal-orange:syx1', 'syx1.nat');
+		expect(r.report.overLimits).toEqual([]);
+	});
+
+	it('refuses what is not there, or cannot be attached', () => {
+		const r = base();
+		expect(() => attachFile(r, 'vaal-orange:nope', 'syz9C.tab')).toThrow('vaal-orange:nope is not a node of this upload.');
+		expect(() => attachFile(r, 'vaal-orange:syy2', 'notes on syz9.doc')).toThrow('notes on syz9.doc is not an unmatched file that can be attached.');
+		expect(() => attachFile(r, 'vaal-orange:syy2', 'syx1D.tab')).toThrow('syx1D.tab is not an unmatched file that can be attached.');
+		expect(() => detachFile(r, 'vaal-orange:syy2', 'syx1D.tab')).toThrow('syx1D.tab is not a file of vaal-orange:syy2.');
+		expect(() => detachFile(r, 'vaal-orange:nope', 'syx1D.tab')).toThrow('vaal-orange:nope is not a node of this upload.');
 	});
 });

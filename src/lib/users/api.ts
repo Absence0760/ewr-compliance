@@ -5,8 +5,20 @@ import { resolve } from '$app/paths';
 // XHR is sent on every call, as on the site's file fetches (siteFetch.ts). The API answers a request
 // without a live session with 401 JSON itself, never 403 (server/src/http.ts). SignedOut is what a 401 throws.
 import { SignedOut, XHR } from '#lib/users/siteFetch.ts';
+import type { NodeTexts } from '#lib/ewr/nodeStore.ts';
+import type { EwrNode } from '#lib/ewr/types.ts';
 
 export { SignedOut };
+
+/** A refusal from the API, with its status, for a page that says more for some (the import's 503). */
+export class ApiError extends Error {
+	readonly status: number;
+	constructor(status: number, message: string) {
+		super(message);
+		this.name = 'ApiError';
+		this.status = status;
+	}
+}
 
 export interface Me {
 	id: string;
@@ -50,7 +62,7 @@ async function call<T>(path: string, method = 'GET', body?: unknown): Promise<T>
 		throw new SignedOut();
 	}
 	const data = await readJson(res);
-	if (!res.ok) throw new Error(errorOf(data) ?? `The request failed: HTTP ${res.status}.`);
+	if (!res.ok) throw new ApiError(res.status, errorOf(data) ?? `The request failed: HTTP ${res.status}.`);
 	return data as T;
 }
 
@@ -101,3 +113,15 @@ export const listUsers = () => call<UserRow[]>('users');
 export const addUser = (email: string, admin: boolean) => call<UserRow>('users', 'POST', { email, admin });
 export const setAdmin = (id: string, admin: boolean) => call<UserRow>(`users/${encodeURIComponent(id)}`, 'PATCH', { admin });
 export const removeUser = (id: string) => call<{ removed: true }>(`users/${encodeURIComponent(id)}`, 'DELETE');
+
+/** What the node store says after a write: the WMA's counts (server/src/nodes.ts NodeChange). */
+export interface NodeChange {
+	wma: string;
+	id: string;
+	nodes: number;
+	deleted: number;
+	updatedAt: string;
+}
+
+/** Writes one node of the node store, with its files' texts (admins; docs/architecture.md § Node store). */
+export const saveNode = (wma: string, node: EwrNode, texts: NodeTexts) => call<NodeChange>('nodes', 'POST', { wma, node, texts });
