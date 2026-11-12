@@ -4,7 +4,6 @@
 	import { resolve } from '$app/paths';
 	import { app } from '#lib/state/app.svelte.ts';
 	import type { EwrNode } from '#lib/ewr/types.ts';
-	import { wmaOfBasin } from '#lib/components/map/wma.ts';
 
 	let { node: n }: { node: EwrNode } = $props();
 
@@ -20,8 +19,8 @@
 		if (getSelection()?.toString()) return;
 		app.select(n.id, { focus: true });
 		// The node's own WMA, or the WMA chooser for a basin no WMA claims.
-		const wma = wmaOfBasin(n.basin);
-		void goto(wma ? resolve(`wma/${wma.slug}/` as '/') : resolve('/'));
+		const wma = app.wmaOf(n);
+		void goto(wma ? resolve(`wma/${wma}/` as '/') : resolve('/'));
 	}
 </script>
 
@@ -29,7 +28,10 @@
 <!-- The row click is a mouse convenience; the Node button is the keyboard path to the same action. -->
 <tr class:sel={app.selectedId === n.id} onclick={open}>
 	<td>{n.basin}</td>
-	<td><button type="button" class="nodelink" aria-label="Show {n.label} on the map">{n.label}</button></td>
+	<td>
+		<button type="button" class="nodelink" aria-label="Show {n.label} on the map">{n.label}</button>
+		{#if app.isUploaded(n.id)}<span class="added" data-nocopy>Added on the site</span>{/if}
+	</td>
 	<td>{n.sites.map((s) => s.label).join(', ')}</td>
 	<td>{n.quat}</td>
 	<td>{n.river}</td>
@@ -72,6 +74,12 @@
 		font-weight: 600;
 		text-align: left;
 		text-decoration: underline;
+		white-space: nowrap;
+	}
+	.added {
+		margin-left: 6px;
+		font-size: 12px;
+		color: var(--ink-2);
 		white-space: nowrap;
 	}
 	.ec {

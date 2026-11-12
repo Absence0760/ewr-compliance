@@ -18,6 +18,13 @@ export const DWS = /^https:\/\/services[38]\.arcgis\.com\//;
 export const DWS_STORE = /\/dws\/(index|flows-[^/]+|monthly-[^/]+)\.json$/;
 
 /**
+ * The node store, served by the host under nodes-data/ (docs/architecture.md § Node store), which the test
+ * servers do not have. By default it answers 404, as `pnpm preview` does: no nodes added on the site, said
+ * nowhere. `serveNodeStore` stands in for a host with one.
+ */
+export const NODE_STORE = /\/nodes-data\/(index|wma-[a-z-]+|files\/[a-z-]+\/[^/]+)\.json$/;
+
+/**
  * The sign-in, user and node store API (server/, behind /api/* on the hosted site), which the test servers do not
  * have. By default it answers 404, as a copy with no user list does, and the watch lets that by.
  * users.spec.ts, signin.spec.ts and node-import.spec.ts answer for it.
@@ -84,9 +91,10 @@ export const test = base.extend<{ gaugeAt: [number, number]; refused: RegExp | n
 			);
 			await page.route(USER_API, (route) => route.fulfill({ status: 404, body: 'Not found' }));
 			await page.route(DWS_STORE, (route) => route.fulfill({ status: 404, body: 'Not found' }));
+			await page.route(NODE_STORE, (route) => route.fulfill({ status: 404, body: 'Not found' }));
 			const wasRefused = (url: string, status = 401) => (status === 401 || status === 403) && !!refused?.test(url);
 			page.on('console', (m) => {
-				if (DWS_STORE.test(m.location().url) || USER_API.test(m.location().url)) return;
+				if (DWS_STORE.test(m.location().url) || NODE_STORE.test(m.location().url) || USER_API.test(m.location().url)) return;
 				if (wasRefused(m.location().url) && /status of 40[13]/.test(m.text())) return;
 				if ((m.type() === 'error' || m.type() === 'warning') && !KNOWN_NOISE.some((re) => re.test(m.text()))) {
 					trouble.push(`console.${m.type()}: ${m.text()}`);
@@ -97,7 +105,7 @@ export const test = base.extend<{ gaugeAt: [number, number]; refused: RegExp | n
 				if (/^https?:/.test(r.url()) && !r.url().startsWith(baseURL!) && !DWS.test(r.url())) trouble.push(`left the site: ${r.url()}`);
 			});
 			page.on('response', (r) => {
-				if (r.status() >= 400 && !DWS_STORE.test(r.url()) && !USER_API.test(r.url()) && !wasRefused(r.url(), r.status())) trouble.push(`HTTP ${r.status()}: ${r.url()}`);
+				if (r.status() >= 400 && !DWS_STORE.test(r.url()) && !NODE_STORE.test(r.url()) && !USER_API.test(r.url()) && !wasRefused(r.url(), r.status())) trouble.push(`HTTP ${r.status()}: ${r.url()}`);
 			});
 			await use();
 			expect(trouble).toEqual([]);
@@ -116,6 +124,25 @@ export async function serveStore(page: Page, files: Record<string, unknown>): Pr
 		const name = new URL(route.request().url()).pathname.replace(/^.*\/dws\//, '');
 		asked.push(name);
 		return name in files ? route.fulfill({ json: files[name] }) : route.fulfill({ status: 404, body: 'Not found' });
+	});
+	return asked;
+}
+
+/**
+ * Serve a node store: each file by its path under nodes-data/, such as `index.json`, `wma-vaal-orange.json` or
+ * `files/vaal-orange/syx1.json`. A function is asked each time, so a spec can change the store after an admin's
+ * write; a path it doesn't answer (undefined), or not given, is a 404, and a number is that status. Returns
+ * the paths asked for, in order.
+ */
+export async function serveNodeStore(page: Page, files: Record<string, unknown> | ((path: string) => unknown)): Promise<string[]> {
+	const asked: string[] = [];
+	await page.route(NODE_STORE, (route) => {
+		const path = new URL(route.request().url()).pathname.replace(/^.*\/nodes-data\//, '');
+		asked.push(path);
+		const body = typeof files === 'function' ? files(path) : files[path];
+		if (body === undefined) return route.fulfill({ status: 404, body: 'Not found' });
+		if (typeof body === 'number') return route.fulfill({ status: body, body: 'Refused' });
+		return route.fulfill({ json: body, headers: { 'cache-control': 'private, no-cache' } });
 	});
 	return asked;
 }

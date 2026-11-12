@@ -22,6 +22,9 @@
 	import type { EwrNode, EwrSite } from '#lib/ewr/types.ts';
 	import { loadBasins, loadGauges, loadQuaternaries, loadWma, namedQuaternaries, outlineOf, type Gauge } from '#lib/components/map/catchments.ts';
 	import { WMAS, wmaOfBasin, type Wma } from '#lib/components/map/wma.ts';
+	import { session } from '#lib/state/session.svelte.ts';
+	import { nodeRefusal } from '#lib/users/api.ts';
+	import AddNodeDialog from '#lib/components/map/AddNodeDialog.svelte';
 	import MapLegend from '#lib/components/map/MapLegend.svelte';
 	import NodePopup, { type River } from '#lib/components/map/NodePopup.svelte';
 	import {
@@ -74,6 +77,16 @@
 	/** Live layers asked for and not yet answered, loaded or lost. */
 	let pendingLive = $state(0);
 	let gauges = $state.raw<FeatureCollection | null>(null);
+	/** The node the open popup shows, so it closes if the node goes. */
+	let popupNode: string | null = null;
+
+	/** Admins only: placing a new node by a click, its form, and restoring a deleted one. */
+	let placing = $state(false);
+	let adding = $state<{ at: { lon: number; lat: number } | null } | null>(null);
+	let restoring = $state('');
+	let restoreError = $state('');
+	const admin = $derived(!!session.me?.admin);
+	const hidden = $derived(app.hidden.filter((h) => h.wma === wma.slug));
 
 	// A file beside the app, or any host allowing cross-origin range requests.
 	// The app's root as a full URL: a setting that is a path is beside the app, wherever the page is.
@@ -82,10 +95,13 @@
 	const glyphs = tileUrl(import.meta.env.VITE_TILES_GLYPHS_URL, root);
 	const style = baseStyle(tilesUrl, glyphs);
 
-	/** The nodes and sites of this WMA. Every map is of one WMA, and the app's data may cover several. */
-	const inWma = (basin: string) => wmaOfBasin(basin)?.slug === wma.slug;
-	const nodes = $derived(app.nodes.filter((n) => inWma(n.basin)));
-	const sites = $derived(app.sites.filter((s) => inWma(s.basin)));
+	/**
+	 * The nodes and sites of this WMA. Every map is of one WMA, and the app's data may cover several. A node
+	 * added on the site is its overlay's WMA's, whatever its basin (app.wmaOf).
+	 */
+	const inWma = (n: EwrNode) => app.wmaOf(n) === wma.slug;
+	const nodes = $derived(app.nodes.filter(inWma));
+	const sites = $derived(app.sites.filter((s) => wmaOfBasin(s.basin)?.slug === wma.slug));
 	const entries = $derived(searchEntries(nodes, sites));
 	const liveNote = $derived(
 		lostLive.length ? `${[LOST_WMA, LOST_QUATERNARIES, LOST_BASINS, LOST_GAUGES].filter((l) => lostLive.includes(l)).join(' ')} Everything else still works.` : ''
@@ -231,6 +247,12 @@
 	const lngLatOf = (f: MapGeoJSONFeature) => (f.geometry as unknown as { coordinates: [number, number] }).coordinates;
 
 	function onClick(e: { point: { x: number; y: number }; lngLat: LngLatLike }) {
+		if (placing) {
+			const { lng, lat } = e.lngLat as { lng: number; lat: number };
+			placing = false;
+			adding = { at: { lon: lng, lat } };
+			return;
+		}
 		const f = pointsNear(e.point)[0];
 		if (!f) {
 			const river = riverAt(e.point);
@@ -260,7 +282,7 @@
 	function onHover(e: { point: { x: number; y: number }; lngLat: LngLatLike }) {
 		const m = map!;
 		const near = pointsNear(e.point);
-		m.getCanvas().style.cursor = near.length || riverAt(e.point) ? 'pointer' : '';
+		m.getCanvas().style.cursor = placing ? 'crosshair' : near.length || riverAt(e.point) ? 'pointer' : '';
 		const text = near[0]?.properties.label ?? riverOrQuaternaryAt(e.point);
 		if (text) tip?.setLngLat(e.lngLat).setText(text).addTo(m);
 		else tip?.remove();
@@ -290,9 +312,13 @@
 		const opened = new ml.Popup({ maxWidth: '320px', offset: 10, focusAfterOpen }).setLngLat(at).setDOMContent(el).addTo(map!);
 		opened.once('close', () => {
 			void unmount(body);
-			if (popup === opened) popup = null;
+			if (popup === opened) {
+				popup = null;
+				popupNode = null;
+			}
 		});
 		popup = opened;
+		popupNode = content.node?.id ?? null;
 	}
 
 	function flyAndOpen(content: { node?: EwrNode; site?: EwrSite }, at: [number, number]) {
@@ -364,7 +390,21 @@
 		handledFocus = f.n;
 		const node = app.byId.get(f.id);
 		// A node of another WMA is found on that WMA's map.
-		if (node && inWma(node.basin) && node.lon !== null && node.lat !== null) untrack(() => flyAndOpen({ node }, [node.lon!, node.lat!]));
+		if (node && inWma(node) && node.lon !== null && node.lat !== null) untrack(() => flyAndOpen({ node }, [node.lon!, node.lat!]));
+	});
+
+	// The node store is read after the map starts, and changes when an admin adds, deletes or restores a node.
+	$effect(() => {
+		const ns = nodes;
+		const ss = sites;
+		if (!ready) return;
+		untrack(() => {
+			const m = map!;
+			(m.getSource('nodes') as GeoJSONSource).setData(nodeFeatures(ns) as never);
+			(m.getSource('sites') as GeoJSONSource).setData(siteFeatures(ss, ns) as never);
+			basins = basinBounds(ns);
+			if (popupNode && !app.byId.has(popupNode)) popup?.remove();
+		});
 	});
 
 	$effect(() => {
@@ -391,10 +431,40 @@
 		}
 	}
 
+	function startPlacing() {
+		app.nodeStoreDone = '';
+		placing = !placing;
+	}
+
+	function onKey(e: KeyboardEvent) {
+		if (e.key === 'Escape' && placing) placing = false;
+	}
+
+	$effect(() => {
+		if (ready) map!.getCanvas().style.cursor = placing ? 'crosshair' : '';
+	});
+
+	async function restore(id: string) {
+		restoring = id;
+		restoreError = '';
+		app.nodeStoreDone = '';
+		const label = hidden.find((h) => h.node.id === id)?.node.label ?? id;
+		try {
+			await app.restoreNode(wma.slug, id);
+			app.nodeStoreDone = `Restored ${label}.`;
+		} catch (e) {
+			restoreError = nodeRefusal(e);
+		} finally {
+			restoring = '';
+		}
+	}
+
 	function changeWma(slug: string) {
 		void goto(slug ? resolve(`wma/${slug}/` as '/') : resolve('/'));
 	}
 </script>
+
+<svelte:window onkeydown={onKey} />
 
 <section class="wrap" aria-label="Map of EWR nodes and sites" bind:this={wrap}>
 	<!-- Busy until the map is drawn and every live layer has answered, loaded or lost, or it could not start. -->
@@ -430,7 +500,49 @@
 		{#if searchMiss}
 			<span class="miss" role="status">No node or site called {searchMiss}</span>
 		{/if}
+		{#if admin}
+			<button type="button" class="tool" aria-pressed={placing} onclick={startPlacing} disabled={!ready}>Add node</button>
+			{#if hidden.length}
+				<details class="tool deleted">
+					<summary>Deleted nodes ({hidden.length})</summary>
+					<div class="drop">
+						<p class="muted">Hidden from everyone until restored.</p>
+						<ul>
+							{#each hidden as h (h.node.id)}
+								<li>
+									<span><b>{h.node.label}</b> <span class="muted">{h.node.basin}{h.node.river ? `, ${h.node.river}` : ''}</span></span>
+									<button type="button" disabled={!!restoring} onclick={() => restore(h.node.id)} aria-label="Restore {h.node.label}">
+										{restoring === h.node.id ? 'Restoring…' : 'Restore'}
+									</button>
+								</li>
+							{/each}
+						</ul>
+						{#if restoreError}<div class="notice error" role="alert">{restoreError}</div>{/if}
+					</div>
+				</details>
+			{/if}
+		{/if}
+		{#if placing}
+			<p class="line placing" role="status">
+				Click the map where the new node is.
+				<button type="button" onclick={() => ((placing = false), (adding = { at: null }))}>Type coordinates instead</button>
+				<button type="button" onclick={() => (placing = false)}>Cancel</button>
+			</p>
+		{:else if admin && app.nodeStoreDone}
+			<p class="line" role="status">{app.nodeStoreDone}</p>
+		{/if}
+		{#if app.nodeStoreNote}
+			<p class="line quiet" role="status">{app.nodeStoreNote}</p>
+		{/if}
 	</div>
+	{#if adding && admin}
+		<AddNodeDialog
+			{wma}
+			at={adding.at}
+			onclose={() => (adding = null)}
+			onsaved={(id) => app.select(id, { focus: true })}
+		/>
+	{/if}
 	{#if !nodes.length && !sites.length}
 		<p class="empty" role="status">No EWR data for {wma.name} yet. Its catchments, rivers and flow gauges are shown.</p>
 	{/if}
@@ -469,7 +581,8 @@
 		top: 10px;
 		left: 48px;
 		right: 10px;
-		z-index: 3;
+		/* Over the legend, so the Deleted nodes list opens on top of it on a phone. */
+		z-index: 4;
 		display: flex;
 		gap: 6px;
 		flex-wrap: wrap;
@@ -480,9 +593,75 @@
 	.bar input {
 		pointer-events: auto;
 	}
+	.bar .tool,
+	.bar .line {
+		pointer-events: auto;
+	}
+	.bar button.tool[aria-pressed='true'] {
+		background: var(--accent);
+		border-color: var(--accent);
+		color: #fff;
+	}
+	.bar .line {
+		flex-basis: 100%;
+		margin: 0;
+		padding: 4px 8px;
+		background: rgba(252, 252, 251, 0.95);
+		border-left: 3px solid var(--accent);
+		border-radius: 0 4px 4px 0;
+		font-size: 13px;
+	}
+	.bar .line button {
+		margin-left: 6px;
+		padding: 1px 8px;
+		font-size: 12px;
+	}
+	.bar .line.quiet {
+		border-left-color: var(--line);
+		color: var(--ink-2);
+	}
+	.deleted summary {
+		padding: 4px 8px;
+		border: 1px solid #b9b8b0;
+		border-radius: 5px;
+		background: var(--surface-2);
+		cursor: pointer;
+	}
+	.deleted .drop {
+		position: absolute;
+		/* Under the whole bar, from its left edge, so it is never cut off by the map's edge. */
+		top: calc(100% + 4px);
+		left: 0;
+		z-index: 4;
+		width: min(340px, 100%);
+		max-height: 50vh;
+		overflow: auto;
+		padding: 8px 10px;
+		background: var(--surface);
+		border: 1px solid var(--line);
+		border-radius: 6px;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+	}
+	.deleted p {
+		margin: 0 0 6px;
+		font-size: 12px;
+	}
+	.deleted ul {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.deleted li {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 8px;
+		padding: 4px 0;
+		border-top: 1px solid var(--line);
+	}
 	.bar input {
 		flex: 1;
-		min-width: 120px;
+		min-width: 160px;
 		max-width: 240px;
 	}
 	.empty {
