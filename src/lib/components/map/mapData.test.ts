@@ -2,7 +2,7 @@ import type { FeatureCollection } from 'geojson';
 import { describe, expect, it } from 'vitest';
 import type { EwrNode, EwrSite, NodeFile, NodeView } from '#lib/ewr/types.ts';
 import {
-	boundsOf, fileInUse, fileOption, findEntry, gaugeLabels, infoRows, labelPoints, nodeFeatures, nodeLabel, searchEntries, siteFeatures
+	boundsOf, fileInUse, fileOption, findEntry, fitPadding, gaugeLabels, infoRows, labelPoints, nodeFeatures, nodeLabel, searchEntries, siteFeatures
 } from './mapData.ts';
 
 const node = (over: Partial<EwrNode>): EwrNode => ({
@@ -203,5 +203,35 @@ describe('infoRows', () => {
 	it('leaves out what the workbook does not record, and has no rows for a node it says nothing about', () => {
 		expect(infoRows({ wqStation: 'W 1' })).toEqual([{ label: 'WQ monitoring station', value: 'W 1' }]);
 		expect(infoRows({})).toEqual([]);
+	});
+});
+
+describe('fitPadding', () => {
+	const even = { top: 30, right: 30, bottom: 30, left: 30 };
+	// Bounds near the equator, where a degree of latitude and of longitude are about the same on screen.
+	const square: [[number, number], [number, number]] = [[0, -1], [2, 1]];
+	const wide: [[number, number], [number, number]] = [[0, -0.5], [4, 0.5]];
+	const tall: [[number, number], [number, number]] = [[0, -1.5], [1.5, 1.5]];
+
+	it('keeps an even margin with no legend', () => {
+		expect(fitPadding(square, { width: 800, height: 600 }, null)).toEqual(even);
+	});
+
+	it('keeps an even margin when the bounds already clear the legend', () => {
+		// A square in a wide map is centred, its left edge at 130 px, right of a legend ending at 120.
+		expect(fitPadding(square, { width: 800, height: 600 }, { right: 120, top: 300 })).toEqual(even);
+	});
+
+	it('puts tall bounds beside the legend', () => {
+		// Evenly fitted they would reach 90 px from the left and 670 px down, under a legend 200 wide from 480 down.
+		expect(fitPadding(tall, { width: 500, height: 700 }, { right: 200, top: 480 })).toEqual({ ...even, left: 230 });
+	});
+
+	it('puts wide bounds above the legend', () => {
+		expect(fitPadding(wide, { width: 800, height: 600 }, { right: 250, top: 380 })).toEqual({ ...even, bottom: 250 });
+	});
+
+	it('fits as usual when the map is too small to go beside or above', () => {
+		expect(fitPadding(square, { width: 300, height: 260 }, { right: 250, top: 40 })).toEqual(even);
 	});
 });

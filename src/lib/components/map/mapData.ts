@@ -180,6 +180,51 @@ export function boundsOf(coordinates: unknown[]): Bounds {
 	return box;
 }
 
+/** A map fit's margin on each side, in pixels, as MapLibre's fitBounds takes it. */
+export interface FitPadding {
+	top: number;
+	right: number;
+	bottom: number;
+	left: number;
+}
+
+/** The margin every fit keeps. */
+export const FIT_MARGIN = 30;
+/** Below this, in pixels across or down, a fit beside the legend is not worth it and it is fitted as usual. */
+const MIN_FIT = 160;
+
+/** Web Mercator's y for a latitude, in the same units as longitude degrees, so the two can be compared. */
+const mercatorY = (lat: number) => (Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) * 180) / Math.PI;
+
+/**
+ * The margins a fit to bounds uses so the bounds stay clear of the legend in the map's bottom-left corner.
+ * legend is where the legend ends, in pixels from the map's top-left: its right edge and its top. When an
+ * even margin already keeps the bounds clear of it, that is used. Otherwise the bounds go beside the legend
+ * or above it, whichever draws them larger, unless the map is too small for either.
+ */
+export function fitPadding(
+	bounds: Bounds,
+	view: { width: number; height: number },
+	legend: { right: number; top: number } | null
+): FitPadding {
+	const m = FIT_MARGIN;
+	const even = { top: m, right: m, bottom: m, left: m };
+	if (!legend) return even;
+	const [[w, s], [e, n]] = bounds;
+	const bw = Math.max(e - w, 1e-9);
+	const bh = Math.max(mercatorY(n) - mercatorY(s), 1e-9);
+	const scale = (p: FitPadding) => Math.min((view.width - p.left - p.right) / bw, (view.height - p.top - p.bottom) / bh);
+	// An even fit centres the bounds: do they reach past the legend's right edge and below its top?
+	const k = scale(even);
+	if (view.width / 2 - (bw * k) / 2 >= legend.right || view.height / 2 + (bh * k) / 2 <= legend.top) return even;
+	const beside = { ...even, left: legend.right + m };
+	const above = { ...even, bottom: view.height - legend.top + m };
+	const fits = (p: FitPadding) => view.width - p.left - p.right >= MIN_FIT && view.height - p.top - p.bottom >= MIN_FIT;
+	const options = [beside, above].filter(fits);
+	if (!options.length) return even;
+	return options.reduce((best, p) => (scale(p) > scale(best) ? p : best));
+}
+
 /** The file the node's view is using, which the popup's pull-down starts on. */
 /** Basin extents from the node points, so zooming works whether or not the live layers load. */
 export function basinBounds(nodes: EwrNode[]): { name: string; bounds: Bounds }[] {

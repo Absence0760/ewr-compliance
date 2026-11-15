@@ -1,4 +1,4 @@
-import { MAP, DWS, expect, findNode, mapRegion, mapSettled, panel, select, test } from '../support/app.ts';
+import { MAP, DWS, expect, findNode, mapRegion, mapSettled, panel, select, showLegend, test } from '../support/app.ts';
 import type { Page, Route } from '@playwright/test';
 
 const canvas = (page: Page) => page.locator('canvas.maplibregl-canvas');
@@ -26,6 +26,7 @@ test.describe('map', () => {
 		await expect(page).toHaveTitle('Breede-Olifants · Map and compliance · EWR Compliance Measurement');
 		await expect(canvas(page)).toBeVisible();
 		const map = mapRegion(page);
+		await showLegend(map);
 		await expect(map.getByText('EWR node', { exact: true })).toBeVisible();
 		await expect(map.getByText('EWR site', { exact: true })).toBeVisible();
 		await expect(map.getByText('Basin boundary')).toBeVisible();
@@ -108,8 +109,34 @@ test.describe('map', () => {
 		await expect(map.locator('.maplibregl-popup').getByRole('link')).toHaveCount(0);
 
 		await map.getByRole('button', { name: 'Close popup' }).click();
+		await showLegend(map);
 		await map.getByRole('checkbox', { name: 'Flow gauges', exact: true }).uncheck();
 		await expect(label).toHaveCount(0);
+	});
+
+	test('the legend starts closed on a short map, and the choice to open it is kept', async ({ page }) => {
+		await page.goto(MAP);
+		const map = mapRegion(page);
+		const toggle = map.getByRole('button', { name: 'Legend' });
+		await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+		await expect(map.getByRole('checkbox', { name: 'Rivers' })).toBeHidden();
+		await toggle.click();
+		await expect(map.getByRole('checkbox', { name: 'Rivers' })).toBeVisible();
+		await page.reload();
+		await expect(mapRegion(page).getByRole('button', { name: 'Legend' })).toHaveAttribute('aria-expanded', 'true');
+	});
+
+	test('the legend starts open on a tall map, and the choice to close it is kept', async ({ page }) => {
+		await page.setViewportSize({ width: 1280, height: 1100 });
+		await page.goto(MAP);
+		const map = mapRegion(page);
+		const toggle = map.getByRole('button', { name: 'Legend' });
+		await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+		await expect(map.getByText('EWR node', { exact: true })).toBeVisible();
+		await toggle.click();
+		await expect(map.getByText('EWR node', { exact: true })).toBeHidden();
+		await page.reload();
+		await expect(mapRegion(page).getByRole('button', { name: 'Legend' })).toHaveAttribute('aria-expanded', 'false');
 	});
 
 	test('zooms to a basin from the pull-down', async ({ page }) => {

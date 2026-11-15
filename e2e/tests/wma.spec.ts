@@ -1,4 +1,4 @@
-import { MAP, expect, findNode, mapRegion, mapSettled, nationalMap, panel, select, test } from '../support/app.ts';
+import { MAP, expect, findNode, mapRegion, mapSettled, nationalMap, panel, select, showLegend, test } from '../support/app.ts';
 
 // The opening screen: a banner, South Africa's WMAs on a map, and the same WMAs as links.
 const chooser = (page: import('@playwright/test').Page) => page.getByRole('navigation', { name: 'Water Management Areas' });
@@ -60,6 +60,7 @@ test.describe('choosing a Water Management Area', () => {
 		await expect(page).toHaveURL(/\/wma\/vaal-orange\/$/);
 		const map = mapRegion(page);
 		await expect(map.getByRole('status')).toHaveText('No EWR data for Vaal-Orange yet. Its catchments, rivers and flow gauges are shown.');
+		await showLegend(map);
 		await expect(map.getByText('EWR node', { exact: true })).toHaveCount(0);
 		await expect(map.getByRole('checkbox', { name: 'Nodes with no EC file' })).toHaveCount(0);
 		await expect(select(map, 'Zoom to a basin')).toHaveCount(0);

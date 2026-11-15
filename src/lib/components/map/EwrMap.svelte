@@ -28,7 +28,7 @@
 	import MapLegend from '#lib/components/map/MapLegend.svelte';
 	import NodePopup, { type River } from '#lib/components/map/NodePopup.svelte';
 	import {
-		basinBounds, boundsOf, findEntry, gaugeLabels, labelPoints, nodeFeatures, searchEntries, siteFeatures, type Bounds, type MapLabel
+		basinBounds, boundsOf, findEntry, fitPadding, gaugeLabels, labelPoints, nodeFeatures, searchEntries, siteFeatures, type Bounds, type MapLabel
 	} from '#lib/components/map/mapData.ts';
 	import {
 		BASEMAP_SOURCE, BASINS, CREDIT, DIAMOND, FIRST_LABEL, GAUGE_CLOSED_ICON, GAUGE_ICON, GAUGES, GAUGES_CLOSED, MINOR_RIVERS, NO_FILE,
@@ -41,7 +41,10 @@
 	const LABEL_ZOOM = 9;
 	const FOCUS_ZOOM = 10;
 	const PICK_RADIUS = 9;
-	const FIT = { padding: 30, duration: 500 };
+	/** Where the viewer's choice to open or close the legend is kept, as 'open' or 'closed'. */
+	const LEGEND_KEY = 'ewr-map-legend';
+	/** A map at least this tall, in pixels, opens with its legend open, unless the viewer chose otherwise. */
+	const LEGEND_OPEN_HEIGHT = 800;
 	/** The map's notice for each live layer it lost, in the order they are read out. */
 	const LOST_WMA = 'The WMA boundary could not be loaded from the DWS service.';
 	const LOST_QUATERNARIES = 'Quaternary catchments could not be loaded from the DWS service.';
@@ -72,6 +75,8 @@
 	let showGauges = $state(true);
 	let showClosedGauges = $state(false);
 	let showBasemap = $state(true);
+	let legendOpen = $state(true);
+	let legend = $state<HTMLElement>();
 	let basemapFailed = $state(false);
 	let lostLive = $state.raw<string[]>([]);
 	/** Live layers asked for and not yet answered, loaded or lost. */
@@ -109,6 +114,7 @@
 	const labels = $derived([...labelPoints(nodes, sites, showNoFile), ...gaugeLabels(gauges, showGauges, showClosedGauges)]);
 
 	onMount(() => {
+		legendOpen = storedLegend() ?? wrap!.clientHeight >= LEGEND_OPEN_HEIGHT;
 		let gone = false;
 		void start(() => gone);
 		return () => {
@@ -139,7 +145,7 @@
 				container,
 				style,
 				bounds: allBounds,
-				fitBoundsOptions: { padding: 30 },
+				fitBoundsOptions: { padding: padding(allBounds) },
 				dragRotate: false,
 				pitchWithRotate: false,
 				attributionControl: { compact: false, customAttribution: CREDIT }
@@ -416,7 +422,32 @@
 
 	function zoomToBasin() {
 		const bounds = basins.find((b) => b.name === basin)?.bounds ?? allBounds;
-		if (bounds) map?.fitBounds(bounds, FIT);
+		if (bounds) map?.fitBounds(bounds, { padding: padding(bounds), duration: 500 });
+	}
+
+	/** The margins that keep a fit to bounds clear of the legend, open or closed, as it is now. */
+	function padding(bounds: Bounds) {
+		const view = wrap!.getBoundingClientRect();
+		const box = legend?.getBoundingClientRect();
+		const key = box?.width ? { right: box.right - view.left, top: box.top - view.top } : null;
+		return fitPadding(bounds, view, key);
+	}
+
+	function storedLegend(): boolean | null {
+		try {
+			const v = localStorage.getItem(LEGEND_KEY);
+			return v === 'open' ? true : v === 'closed' ? false : null;
+		} catch {
+			return null; // storage unavailable: the map's height decides
+		}
+	}
+
+	function keepLegend(open: boolean) {
+		try {
+			localStorage.setItem(LEGEND_KEY, open ? 'open' : 'closed');
+		} catch {
+			/* storage unavailable: the choice lasts this visit */
+		}
 	}
 
 	function runSearch() {
@@ -556,6 +587,9 @@
 		hasNodes={nodes.length > 0 || sites.length > 0}
 		hasBasemap={!!tilesUrl}
 		{basemapFailed}
+		bind:open={legendOpen}
+		bind:el={legend}
+		ontoggle={keepLegend}
 	/>
 	{#if failure || liveNote}
 		<p class="failure" role="alert">{failure || liveNote}</p>
