@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 const LOCKFILES = ['pnpm-lock.yaml', 'server/pnpm-lock.yaml', 'pipeline/pnpm-lock.yaml'];
 
 /** Git dependencies allowed without an integrity hash, each pinned to a commit. */
-const GIT_ALLOWED = ['git@github.com:Absence0760/auth-kit.git'];
+const GIT_ALLOWED = ['git@github.com:jaredhoward-dev/auth-kit.git'];
 
 const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -57,7 +57,7 @@ describe('lockfile integrity', () => {
 	});
 
 	it('allows a git dependency only by name and full commit', () => {
-		const ok = '{commit: 048e5165a62bac6bf7c86ec6d65394d76a6831c8, repo: git@github.com:Absence0760/auth-kit.git, type: git}';
+		const ok = '{commit: 048e5165a62bac6bf7c86ec6d65394d76a6831c8, repo: git@github.com:jaredhoward-dev/auth-kit.git, type: git}';
 		expect(unpinned(ok)).toBeNull();
 		expect(unpinned(ok.replace('auth-kit', 'other'))).toMatch(/not on the allowlist/);
 		expect(unpinned(ok.replace('048e5165a62bac6bf7c86ec6d65394d76a6831c8', 'v0.1.2'))).toMatch(/not pinned to a full commit/);

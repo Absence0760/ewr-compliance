@@ -142,7 +142,7 @@ jobs:
           retention-days: 7
 
   # server/: the sign-in API, its own pnpm package on the private auth-kit. Installing it needs the
-  # AUTH_KIT_READ_TOKEN secret (Absence0760/auth-kit#2). Until that secret exists, and on fork PRs,
+  # AUTH_KIT_READ_TOKEN secret (jaredhoward-dev/auth-kit#2). Until that secret exists, and on fork PRs,
   # which never get secrets, this job says so in a warning and the job summary and passes: the
   # follow-up is H0 in the private plan (issue 12). deploy-lambdas.yml, which ships the code, fails
   # outright without it.
@@ -158,7 +158,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # pnpm fetches auth-kit from git@github.com:Absence0760/auth-kit (the lockfile's form); this
+      # pnpm fetches auth-kit from git@github.com:jaredhoward-dev/auth-kit (the lockfile's form); this
       # rewrites that one repo, and only it, to HTTPS with the read-only token.
       - name: Read access to auth-kit
         id: token
@@ -166,14 +166,14 @@ jobs:
           TOKEN: ${{ secrets.AUTH_KIT_READ_TOKEN }}
         run: |
           if [ -z "$TOKEN" ]; then
-            msg="server/ was not checked: the AUTH_KIT_READ_TOKEN secret is not available (not set yet, or a fork PR), so the private auth-kit can't be installed. Set it up as Absence0760/auth-kit#2 says (H0 in the private plan, issue 12)."
+            msg="server/ was not checked: the AUTH_KIT_READ_TOKEN secret is not available (not set yet, or a fork PR), so the private auth-kit can't be installed. Set it up as jaredhoward-dev/auth-kit#2 says (H0 in the private plan, issue 12)."
             echo "::warning::$msg"
             echo "$msg" >> "$GITHUB_STEP_SUMMARY"
             echo "available=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          for from in "git@github.com:Absence0760/auth-kit" "ssh://git@github.com/Absence0760/auth-kit" "https://github.com/Absence0760/auth-kit"; do
-            git config --global --add url."https://x-access-token:${TOKEN}@github.com/Absence0760/auth-kit".insteadOf "$from"
+          for from in "git@github.com:jaredhoward-dev/auth-kit" "ssh://git@github.com/jaredhoward-dev/auth-kit" "https://github.com/jaredhoward-dev/auth-kit"; do
+            git config --global --add url."https://x-access-token:${TOKEN}@github.com/jaredhoward-dev/auth-kit".insteadOf "$from"
           done
           echo "available=true" >> "$GITHUB_OUTPUT"
 
@@ -201,7 +201,7 @@ jobs:
         env:
           TOKEN: ${{ secrets.AUTH_KIT_READ_TOKEN }}
         run: |
-          trap 'git config --global --remove-section "url.https://x-access-token:${TOKEN}@github.com/Absence0760/auth-kit" 2>/dev/null || true' EXIT
+          trap 'git config --global --remove-section "url.https://x-access-token:${TOKEN}@github.com/jaredhoward-dev/auth-kit" 2>/dev/null || true' EXIT
           pnpm install --frozen-lockfile
 
       - name: Typecheck

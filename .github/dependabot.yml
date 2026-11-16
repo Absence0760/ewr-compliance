@@ -6,7 +6,7 @@ version: 2
 # Installs by hand keep the same floor: minimumReleaseAge in each pnpm-workspace.yaml.
 #
 # server/ is its own npm (pnpm) project, on the private auth-kit, which Dependabot reaches through
-# the `auth-kit` git registry below: the AUTH_KIT_READ_TOKEN *Dependabot* secret (Absence0760/auth-kit#2).
+# the `auth-kit` git registry below: the AUTH_KIT_READ_TOKEN *Dependabot* secret (jaredhoward-dev/auth-kit#2).
 # auth-kit is exempt from the cooldown, so its security fixes arrive at once. Its tag bumps also need
 # the onlyBuiltDependencies line in server/pnpm-workspace.yaml updated by hand, with the new commit.
 #
