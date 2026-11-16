@@ -103,7 +103,7 @@ subject=$(git -C "$root" log -1 --format=%s "$sha")
 # the private repo against its upstream.
 ci=unknown
 if command -v gh >/dev/null; then
-	if runs=$(gh api "repos/Absence0760/$PROJECT/commits/$sha/check-runs?check_name=CI%20gate" \
+	if runs=$(gh api "repos/jaredhoward-dev/$PROJECT/commits/$sha/check-runs?check_name=CI%20gate" \
 		--jq '[.check_runs[] | .conclusion // "pending"] | if length == 0 then "none" elif any(. == "success") then "success" elif any(. == "pending") then "pending" else "failure" end' 2>/dev/null); then
 		ci=$runs
 	fi
