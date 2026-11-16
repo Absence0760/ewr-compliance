@@ -262,3 +262,83 @@ run "alert_topics_accept_only_this_account" {
     error_message = "Every publisher to the us-east-1 topic is pinned to this account."
   }
 }
+
+# --- Org move: old + new owner subjects (Absence0760/project-mgmt#14) ----------
+
+# During the org move (Absence0760/project-mgmt#14) the bootstrap trusts the
+# old and the new owner's subject; naming the new owner lets the plan through.
+run "accepts_old_and_new_owner_during_org_move" {
+  command = plan
+  variables {
+    github_migration_owners = ["new-org"]
+  }
+  override_data {
+    target = data.aws_iam_role.github_deploy
+    values = {
+      name               = "ewr-compliance-deploy"
+      assume_role_policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:sub\":[\"repo:test-owner@21693150/ewr-compliance@456:environment:production\",\"repo:new-org@789/ewr-compliance@456:environment:production\"]}}}]}"
+    }
+  }
+}
+
+# The same trust with github_migration_owners left empty is refused: a second
+# owner is never accepted by default.
+run "refuses_two_owners_without_the_migration_owner" {
+  command = plan
+  override_data {
+    target = data.aws_iam_role.github_deploy
+    values = {
+      name               = "ewr-compliance-deploy"
+      assume_role_policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:sub\":[\"repo:test-owner@21693150/ewr-compliance@456:environment:production\",\"repo:new-org@789/ewr-compliance@456:environment:production\"]}}}]}"
+    }
+  }
+  expect_failures = [data.aws_iam_role.github_deploy]
+}
+
+# Naming the migration owner widens only the owner, never the repo name.
+run "refuses_a_migration_owner_for_another_repo" {
+  command = plan
+  variables {
+    github_migration_owners = ["new-org"]
+  }
+  override_data {
+    target = data.aws_iam_role.github_deploy
+    values = {
+      name               = "ewr-compliance-deploy"
+      assume_role_policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:sub\":[\"repo:test-owner@21693150/ewr-compliance@456:environment:production\",\"repo:new-org@789/other@999:environment:production\"]}}}]}"
+    }
+  }
+  expect_failures = [data.aws_iam_role.github_deploy]
+}
+
+# Each accepted owner gets at most one subject.
+run "refuses_two_subjects_for_one_owner" {
+  command = plan
+  variables {
+    github_migration_owners = ["new-org"]
+  }
+  override_data {
+    target = data.aws_iam_role.github_deploy
+    values = {
+      name               = "ewr-compliance-deploy"
+      assume_role_policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:sub\":[\"repo:test-owner@21693150/ewr-compliance@456:environment:production\",\"repo:test-owner@21693150/ewr-compliance@999:environment:production\"]}}}]}"
+    }
+  }
+  expect_failures = [data.aws_iam_role.github_deploy]
+}
+
+# The new owner's subject is still pinned to the production environment.
+run "refuses_a_migration_owner_subject_for_a_branch" {
+  command = plan
+  variables {
+    github_migration_owners = ["new-org"]
+  }
+  override_data {
+    target = data.aws_iam_role.github_deploy
+    values = {
+      name               = "ewr-compliance-deploy"
+      assume_role_policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:sub\":[\"repo:test-owner@21693150/ewr-compliance@456:environment:production\",\"repo:new-org@789/ewr-compliance@456:ref:refs/heads/main\"]}}}]}"
+    }
+  }
+  expect_failures = [data.aws_iam_role.github_deploy]
+}
