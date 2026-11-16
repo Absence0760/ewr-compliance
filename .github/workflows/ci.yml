@@ -301,16 +301,15 @@ jobs:
   # Secret scan, called so a detection fails the gate. Ungated on purpose: a
   # pasted credential arrives in a markdown file as easily as in code, and a
   # docs-only diff skips every code-gated job.
-  gitleaks:
-    name: Secret scan (gitleaks)
+  secret-scan:
+    name: Secret scan (trufflehog)
     permissions:
       contents: read
-      pull-requests: read
     # `./`, not GitHub's `$/` self-repository form (zizmor self-repository,
     # suppressed): actionlint 1.7.12 rejects `$/` (rhysd/actionlint#711), and
     # a job-level reusable-workflow call is resolved from this commit by
     # GitHub, not read from a runner workspace.
-    uses: ./.github/workflows/gitleaks.yml # zizmor: ignore[self-repository]
+    uses: ./.github/workflows/secret-scan.yml # zizmor: ignore[self-repository]
 
   # The single required status check for branch protection. It fans in on every
   # job above via `needs` + always(), failing if any upstream job did not
@@ -320,7 +319,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [changes, test, e2e, server, pipeline, terraform, claude-tooling, gitleaks]
+    needs: [changes, test, e2e, server, pipeline, terraform, claude-tooling, secret-scan]
     steps:
       - name: Require every upstream job to have passed
         env:

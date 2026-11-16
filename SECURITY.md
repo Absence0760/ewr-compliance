@@ -10,7 +10,7 @@ This repository is public. Client material (real flow or EWR values, node codes,
 
 `pnpm install` points git at `.githooks/` (`tools/git-hooks.mjs`), so every commit, in every checkout and worktree, is checked by `tools/check-client-terms.mjs`: the staged changes, their paths and the commit message. A hit blocks the commit. The guard names the file, the line and the term's number in the list, never the term, and stars any term out of a path it reports, since a log is as public as the repo. Without the list (a fresh clone, CI, a fork) it does nothing. `pnpm check:terms` checks every tracked file, and `node tools/check-client-terms.mjs --history` every ref's history. A hit in history needs a rewrite and a force push: ask the owner.
 
-If the [pre-commit](https://pre-commit.com) framework is installed, the same hooks also run `.pre-commit-config.yaml`: gitleaks on the staged changes, and checks for merge-conflict markers, large files, YAML and JSON. CI runs gitleaks on every push either way.
+If the [pre-commit](https://pre-commit.com) framework is installed, the same hooks also run `.pre-commit-config.yaml`: gitleaks on the staged changes, and checks for merge-conflict markers, large files, YAML and JSON. CI runs a TruffleHog secret scan (`.github/workflows/secret-scan.yml`) on every push and PR either way, and over the whole history weekly.
 
 ## Supply-chain scanning
 

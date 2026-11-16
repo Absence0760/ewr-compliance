@@ -1,8 +1,13 @@
-# The shape of infra-secrets/ewr-compliance/prod.tfvars. The real file lives
-# there, never in this public repo: it names the domain, the zone and the
-# alert mailbox. Every value below is a placeholder.
+# The shape of infra-secrets/ewr-compliance/prod.tfvars.sops, decrypted. The
+# real file lives there, sops-encrypted, never in this public repo: it names
+# the domain, the zone and the alert mailbox. Every value below is a
+# placeholder.
 #
-#   terraform plan -var-file=../../infra-secrets/ewr-compliance/prod.tfvars
+#   sops exec-file --no-fifo --filename prod.tfvars \
+#     ../../infra-secrets/ewr-compliance/prod.tfvars.sops \
+#     'terraform plan -var-file={} -out=prod.tfplan'
+#
+# (as the ewr-compliance profile; infra/README.md H6 has the full commands)
 
 aws_region  = "af-south-1"
 github_repo = "OWNER/ewr-compliance"
