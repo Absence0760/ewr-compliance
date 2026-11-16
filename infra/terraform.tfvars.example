@@ -7,6 +7,11 @@
 aws_region  = "af-south-1"
 github_repo = "OWNER/ewr-compliance"
 
+# Org move only (Absence0760/project-mgmt#14): while the bootstrap deploy role
+# trusts both the old and the new owner's subject, name the owner that isn't
+# github_repo's here so oidc.tf's trust check accepts both. Empty otherwise.
+# github_migration_owners = ["<other-owner>"]
+
 # The delegated child zone the bootstrap made (create_subdomain = true):
 #   aws route53 list-hosted-zones-by-name --dns-name <domain> --profile ewr-compliance --query 'HostedZones[0].Id' --output text | sed 's#/hostedzone/##'
 domain_name     = "ewr.example.org"
