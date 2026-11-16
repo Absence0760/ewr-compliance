@@ -1,7 +1,7 @@
 // tools/breaker-reset.sh (the spend breaker's reset, infra/breaker.tf) against a fake `aws` on PATH
-// that records each call and answers from a scenario: no AWS, no credentials.
+// that records each call and answers from a scenario: no AWS, no credentials, no real sops file.
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -26,6 +26,15 @@ process.stdout.write(answer === undefined ? '' : String(answer) + '\\n');
 
 type Scenario = Record<string, unknown>;
 
+// A fake `sops`: records its profile and arguments, then "decrypts" by printing the file as it is
+// (the tests' .sops files are plaintext), or fails as sops does without credentials when
+// FAKE_SOPS_FAIL is set.
+const FAKE_SOPS = `#!/usr/bin/env bash
+printf '%s %s\\n' "\${AWS_PROFILE:-}" "$*" >> "$FAKE_SOPS_LOG"
+[ -n "\${FAKE_SOPS_FAIL:-}" ] && { echo "Failed to get the data key required to decrypt the SOPS file." >&2; exit 128; }
+cat "\${!#}"
+`;
+
 // A fake `terraform`: `output -raw api_reserved_concurrency` prints FAKE_TF_API, or fails as an
 // uninitialised infra/ does when it is unset.
 const FAKE_TERRAFORM = `#!/usr/bin/env bash
@@ -36,17 +45,29 @@ echo "Error: no outputs found" >&2
 exit 1
 `;
 
-function run(scenario: Scenario, env: Record<string, string> = {}, tfvars?: string) {
+// The tfvars file: `prod.tfvars` (plaintext) by default, named by EWR_TFVARS; `prod.tfvars.sops`
+// likewise; `default` is the .sops file at the script's default path under HOME, with no EWR_TFVARS.
+type TfvarsAt = 'prod.tfvars' | 'prod.tfvars.sops' | 'default';
+const DEFAULT_TFVARS = 'github/infra-secrets/ewr-compliance/prod.tfvars.sops';
+
+function run(scenario: Scenario, env: Record<string, string> = {}, tfvars?: string, at: TfvarsAt = 'prod.tfvars') {
 	const dir = mkdtempSync(join(tmpdir(), 'breaker-reset-'));
 	try {
-		writeFileSync(join(dir, 'aws'), FAKE_AWS);
-		chmodSync(join(dir, 'aws'), 0o755);
-		writeFileSync(join(dir, 'terraform'), FAKE_TERRAFORM);
-		chmodSync(join(dir, 'terraform'), 0o755);
+		for (const [name, body] of [['aws', FAKE_AWS], ['terraform', FAKE_TERRAFORM], ['sops', FAKE_SOPS]]) {
+			writeFileSync(join(dir, name), body);
+			chmodSync(join(dir, name), 0o755);
+		}
 		writeFileSync(join(dir, 'scenario.json'), JSON.stringify(scenario));
 		const log = join(dir, 'calls.log');
 		writeFileSync(log, '');
-		if (tfvars !== undefined) writeFileSync(join(dir, 'prod.tfvars'), tfvars);
+		const sopsLog = join(dir, 'sops.log');
+		writeFileSync(sopsLog, '');
+		const file = join(dir, at === 'default' ? DEFAULT_TFVARS : at);
+		if (tfvars !== undefined) {
+			mkdirSync(join(file, '..'), { recursive: true });
+			writeFileSync(file, tfvars);
+		}
+		const before = readdirSync(dir, { recursive: true }).sort();
 		const r = spawnSync('bash', [SCRIPT], {
 			encoding: 'utf8',
 			env: {
@@ -55,13 +76,16 @@ function run(scenario: Scenario, env: Record<string, string> = {}, tfvars?: stri
 				AWS_PROFILE: 'test-profile',
 				FAKE_AWS_LOG: log,
 				FAKE_AWS_SCENARIO: join(dir, 'scenario.json'),
+				FAKE_SOPS_LOG: sopsLog,
 				BREAKER_RESET_REGION: 'af-south-1',
-				EWR_TFVARS: join(dir, 'prod.tfvars'),
+				...(at === 'default' ? {} : { EWR_TFVARS: file }),
 				...env
 			}
 		});
 		const calls: string[][] = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
-		return { status: r.status, stdout: r.stdout, stderr: r.stderr, calls };
+		const sopsCalls = readFileSync(sopsLog, 'utf8').trim().split('\n').filter(Boolean);
+		const written = readdirSync(dir, { recursive: true }).sort().filter((f) => !before.includes(f));
+		return { status: r.status, stdout: r.stdout, stderr: r.stderr, calls, sopsCalls, file, written };
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -134,6 +158,41 @@ describe('tools/breaker-reset.sh', () => {
 		const dwsOnly = run({ ...TRIPPED, alarms: { 'ewr-compliance-breaker-dws-': DWS_ALARMS } });
 		expect(dwsOnly.status, dwsOnly.stderr).toBe(0);
 		expect(named(dwsOnly.calls, 'lambda', 'delete-function-concurrency').map((c) => arg(c, '--function-name'))).toEqual(['ewr-compliance-dws']);
+	});
+
+	it('decrypts a .sops tfvars (the default path) through sops as the profile, keeping only the number', () => {
+		const tfvars = 'domain_name = "SENTINEL-not-to-be-printed"\napi_reserved_concurrency = 5\n';
+		const r = run(TRIPPED, {}, tfvars, 'default');
+		expect(r.status, r.stderr).toBe(0);
+		expect(r.sopsCalls).toEqual([`test-profile --decrypt --input-type binary --output-type binary ${r.file}`]);
+		expect(named(r.calls, 'lambda', 'put-function-concurrency').map((c) => [arg(c, '--function-name'), arg(c, '--reserved-concurrent-executions')])).toEqual([['ewr-compliance-api', '5']]);
+		expect(r.stdout + r.stderr).not.toContain('SENTINEL');
+		expect(r.written).toEqual([]);
+	});
+
+	it('reads a decrypted .sops tfvars without the line as unreserved', () => {
+		const r = run(TRIPPED, {}, 'site_enabled = true\n', 'prod.tfvars.sops');
+		expect(r.status, r.stderr).toBe(0);
+		expect(r.sopsCalls).toHaveLength(1);
+		expect(named(r.calls, 'lambda', 'delete-function-concurrency').map((c) => arg(c, '--function-name'))).toEqual(['ewr-compliance-api', 'ewr-compliance-dws']);
+	});
+
+	it('refuses, changing nothing, when the .sops tfvars will not decrypt, and says to log in', () => {
+		const r = run(TRIPPED, { FAKE_SOPS_FAIL: '1' }, 'api_reserved_concurrency = 5\n', 'prod.tfvars.sops');
+		expect(r.status).toBe(2);
+		expect(r.stderr).toContain("Can't tell the API's reserved concurrency");
+		expect(r.stderr).toContain("aws sso login --profile test-profile");
+		expect(r.stderr).not.toContain('Failed to get the data key');
+		expect(named(r.calls, 'cloudwatch', 'set-alarm-state')).toHaveLength(0);
+		expect(r.calls.some((c) => c.includes('lambda'))).toBe(false);
+		// The pipeline alone needs no API value, so a failed decrypt doesn't stop it.
+		const dwsOnly = run({ ...TRIPPED, alarms: { 'ewr-compliance-breaker-dws-': DWS_ALARMS } }, { FAKE_SOPS_FAIL: '1' }, 'api_reserved_concurrency = 5\n', 'prod.tfvars.sops');
+		expect(dwsOnly.status, dwsOnly.stderr).toBe(0);
+	});
+
+	it('never calls sops for a plaintext tfvars, or when terraform output has the value', () => {
+		expect(run(TRIPPED, {}, 'api_reserved_concurrency = 5\n').sopsCalls).toEqual([]);
+		expect(run(TRIPPED, { FAKE_TF_API: '7' }, 'api_reserved_concurrency = 5\n', 'prod.tfvars.sops').sopsCalls).toEqual([]);
 	});
 
 	it('takes BREAKER_RESET_API_CONCURRENCY over the tfvars, and refuses a value that isn’t one', () => {
