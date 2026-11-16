@@ -1,6 +1,6 @@
 {
 	"name": "ewr-compliance-server",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"private": true,
 	"type": "module",
 	"description": "The sign-in, user and admin node-store API Lambda (infra/auth.tf), on auth-kit. Its own package, so the public app installs without auth-kit.",
