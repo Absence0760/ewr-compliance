@@ -75,6 +75,10 @@
 	let showBasemap = $state(true);
 	let legendOpen = $state(true);
 	let legend = $state<HTMLElement>();
+	/** Whether the viewer has opened or closed the legend: until then it follows the map's size. */
+	let legendChosen = false;
+	/** The legend's size when last seen open, to judge it against the map while it is closed. */
+	let legendSize = { width: 0, height: 0 };
 	let basemapFailed = $state(false);
 	let lostLive = $state.raw<string[]>([]);
 	/** Live layers asked for and not yet answered, loaded or lost. */
@@ -113,12 +117,19 @@
 
 	onMount(() => {
 		// The legend is drawn open first, so it can be measured against the map; the viewer's own choice wins.
-		const open = legend?.getBoundingClientRect();
-		legendOpen = storedLegend() ?? (!!open && legendStartsOpen(open, wrap!.getBoundingClientRect()));
+		const stored = storedLegend();
+		legendChosen = stored !== null;
+		fitLegend();
+		if (stored !== null) legendOpen = stored;
+		const resized = new ResizeObserver(() => {
+			if (!legendChosen) fitLegend();
+		});
+		resized.observe(wrap!);
 		let gone = false;
 		void start(() => gone);
 		return () => {
 			gone = true;
+			resized.disconnect();
 			ready = false;
 			popup?.remove();
 			map?.remove();
@@ -442,7 +453,14 @@
 		}
 	}
 
+	/** Open the legend if it covers a tenth of the map or less, and close it if more, as the map is now. */
+	function fitLegend() {
+		if (legendOpen && legend) legendSize = legend.getBoundingClientRect();
+		legendOpen = legendStartsOpen(legendSize, wrap!.getBoundingClientRect());
+	}
+
 	function keepLegend(open: boolean) {
+		legendChosen = true;
 		try {
 			localStorage.setItem(LEGEND_KEY, open ? 'open' : 'closed');
 		} catch {

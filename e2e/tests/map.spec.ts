@@ -139,6 +139,23 @@ test.describe('map', () => {
 		await expect(mapRegion(page).getByRole('button', { name: 'Legend' })).toHaveAttribute('aria-expanded', 'false');
 	});
 
+	test('the legend follows the window size until the viewer opens or closes it', async ({ page }) => {
+		await page.setViewportSize({ width: 1600, height: 1200 });
+		await page.goto(MAP);
+		const toggle = mapRegion(page).getByRole('button', { name: 'Legend' });
+		await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+		await page.setViewportSize({ width: 1280, height: 720 });
+		await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+		await page.setViewportSize({ width: 1600, height: 1200 });
+		await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+		// Once chosen, it stays as the viewer left it.
+		await toggle.click();
+		await page.setViewportSize({ width: 1280, height: 720 });
+		await page.setViewportSize({ width: 1700, height: 1300 });
+		await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+	});
+
 	test('zooms to a basin from the pull-down', async ({ page }) => {
 		await page.goto(MAP);
 		const zoom = select(mapRegion(page), 'Zoom to a basin');
