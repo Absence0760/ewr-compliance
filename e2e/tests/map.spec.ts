@@ -114,7 +114,7 @@ test.describe('map', () => {
 		await expect(label).toHaveCount(0);
 	});
 
-	test('the legend starts closed on a short map, and the choice to open it is kept', async ({ page }) => {
+	test('the legend starts closed on a small map, and the choice to open it is kept', async ({ page }) => {
 		await page.goto(MAP);
 		const map = mapRegion(page);
 		const toggle = map.getByRole('button', { name: 'Legend' });
@@ -126,8 +126,8 @@ test.describe('map', () => {
 		await expect(mapRegion(page).getByRole('button', { name: 'Legend' })).toHaveAttribute('aria-expanded', 'true');
 	});
 
-	test('the legend starts open on a tall map, and the choice to close it is kept', async ({ page }) => {
-		await page.setViewportSize({ width: 1280, height: 1100 });
+	test('the legend starts open on a big map, and the choice to close it is kept', async ({ page }) => {
+		await page.setViewportSize({ width: 1600, height: 1200 });
 		await page.goto(MAP);
 		const map = mapRegion(page);
 		const toggle = map.getByRole('button', { name: 'Legend' });

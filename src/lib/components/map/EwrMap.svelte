@@ -28,7 +28,7 @@
 	import MapLegend from '#lib/components/map/MapLegend.svelte';
 	import NodePopup, { type River } from '#lib/components/map/NodePopup.svelte';
 	import {
-		basinBounds, boundsOf, findEntry, fitPadding, gaugeLabels, labelPoints, nodeFeatures, searchEntries, siteFeatures, type Bounds, type MapLabel
+		basinBounds, boundsOf, findEntry, fitPadding, gaugeLabels, legendStartsOpen, labelPoints, nodeFeatures, searchEntries, siteFeatures, type Bounds, type MapLabel
 	} from '#lib/components/map/mapData.ts';
 	import {
 		BASEMAP_SOURCE, BASINS, CREDIT, DIAMOND, FIRST_LABEL, GAUGE_CLOSED_ICON, GAUGE_ICON, GAUGES, GAUGES_CLOSED, MINOR_RIVERS, NO_FILE,
@@ -43,8 +43,6 @@
 	const PICK_RADIUS = 9;
 	/** Where the viewer's choice to open or close the legend is kept, as 'open' or 'closed'. */
 	const LEGEND_KEY = 'ewr-map-legend';
-	/** A map at least this tall, in pixels, opens with its legend open, unless the viewer chose otherwise. */
-	const LEGEND_OPEN_HEIGHT = 800;
 	/** The map's notice for each live layer it lost, in the order they are read out. */
 	const LOST_WMA = 'The WMA boundary could not be loaded from the DWS service.';
 	const LOST_QUATERNARIES = 'Quaternary catchments could not be loaded from the DWS service.';
@@ -114,7 +112,9 @@
 	const labels = $derived([...labelPoints(nodes, sites, showNoFile), ...gaugeLabels(gauges, showGauges, showClosedGauges)]);
 
 	onMount(() => {
-		legendOpen = storedLegend() ?? wrap!.clientHeight >= LEGEND_OPEN_HEIGHT;
+		// The legend is drawn open first, so it can be measured against the map; the viewer's own choice wins.
+		const open = legend?.getBoundingClientRect();
+		legendOpen = storedLegend() ?? (!!open && legendStartsOpen(open, wrap!.getBoundingClientRect()));
 		let gone = false;
 		void start(() => gone);
 		return () => {

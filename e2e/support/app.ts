@@ -150,7 +150,7 @@ export async function serveNodeStore(page: Page, files: Record<string, unknown> 
 export const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
 
 export const mapRegion = (page: Page) => page.getByRole('region', { name: 'Map of EWR nodes and sites' });
-/** Open the map's legend, which starts closed on a map under 800 px tall, as the default 720 px viewport's is. */
+/** Open the map's legend, which starts closed when it would cover more than a tenth of the map, as at the default 1280 × 720 viewport. */
 export async function showLegend(map: Locator) {
 	const toggle = map.getByRole('button', { name: 'Legend' });
 	if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();

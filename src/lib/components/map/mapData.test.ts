@@ -2,7 +2,7 @@ import type { FeatureCollection } from 'geojson';
 import { describe, expect, it } from 'vitest';
 import type { EwrNode, EwrSite, NodeFile, NodeView } from '#lib/ewr/types.ts';
 import {
-	boundsOf, fileInUse, fileOption, findEntry, fitPadding, gaugeLabels, infoRows, labelPoints, nodeFeatures, nodeLabel, searchEntries, siteFeatures
+	boundsOf, fileInUse, fileOption, findEntry, fitPadding, legendStartsOpen, gaugeLabels, infoRows, labelPoints, nodeFeatures, nodeLabel, searchEntries, siteFeatures
 } from './mapData.ts';
 
 const node = (over: Partial<EwrNode>): EwrNode => ({
@@ -233,5 +233,25 @@ describe('fitPadding', () => {
 
 	it('fits as usual when the map is too small to go beside or above', () => {
 		expect(fitPadding(square, { width: 300, height: 260 }, { right: 250, top: 40 })).toEqual(even);
+	});
+});
+
+describe('legendStartsOpen', () => {
+	const legend = { width: 300, height: 290 };
+
+	it('opens on a big map, where the legend covers a tenth of it or less', () => {
+		expect(legendStartsOpen(legend, { width: 1000, height: 1200 })).toBe(true);
+		// Exactly a tenth.
+		expect(legendStartsOpen(legend, { width: 870, height: 1000 })).toBe(true);
+	});
+
+	it('stays closed on a narrow or short map, where it would cover more', () => {
+		// A laptop's map column, where the open legend covered nearly a fifth of it.
+		expect(legendStartsOpen(legend, { width: 620, height: 780 })).toBe(false);
+		expect(legendStartsOpen(legend, { width: 1600, height: 500 })).toBe(false);
+	});
+
+	it('stays closed on a map with no size yet', () => {
+		expect(legendStartsOpen(legend, { width: 0, height: 0 })).toBe(false);
 	});
 });

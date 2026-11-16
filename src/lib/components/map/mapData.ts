@@ -180,6 +180,13 @@ export function boundsOf(coordinates: unknown[]): Bounds {
 	return box;
 }
 
+/** The most of a map's area its open legend may cover and still start open. */
+export const LEGEND_SHARE = 0.1;
+
+/** Whether the legend, measured open, is small enough beside the map to start open. */
+export const legendStartsOpen = (legend: { width: number; height: number }, view: { width: number; height: number }) =>
+	view.width > 0 && view.height > 0 && (legend.width * legend.height) / (view.width * view.height) <= LEGEND_SHARE;
+
 /** A map fit's margin on each side, in pixels, as MapLibre's fitBounds takes it. */
 export interface FitPadding {
 	top: number;
