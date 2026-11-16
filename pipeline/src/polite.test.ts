@@ -140,7 +140,7 @@ describe('PoliteClient', () => {
 describe('userAgent', () => {
 	it('names the project, and the contact only when it is an address', () => {
 		expect(userAgent(undefined)).toBe(USER_AGENT);
-		expect(userAgent('ops@mail.ewr-test.net')).toBe('ewr-compliance-pipeline/1 (+https://github.com/Absence0760/ewr-compliance; ops@mail.ewr-test.net)');
+		expect(userAgent('ops@mail.ewr-test.net')).toBe('ewr-compliance-pipeline/1 (+https://github.com/jaredhoward-dev/ewr-compliance; ops@mail.ewr-test.net)');
 		expect(userAgent('not an address')).toBe(USER_AGENT);
 		expect(userAgent('a@b.c) evil')).toBe(USER_AGENT);
 	});

@@ -300,7 +300,7 @@ H10 comes before H9 because the first admin signs in through the deployed API. H
 Optional, at any time: this repo is public, so CodeQL (`security.yml`) and the OpenSSF Scorecard (`scorecard.yml`) can run. Each runs only when the repository variable `PUBLIC_REPO` is `true`:
 
 ```
-gh variable set PUBLIC_REPO --body true --repo Absence0760/ewr-compliance
+gh variable set PUBLIC_REPO --body true --repo jaredhoward-dev/ewr-compliance
 ```
 
 ### Go-live checks
