@@ -22,7 +22,7 @@
 // The clock, the sleep and fetch are injected, so the tests never touch the network or wait.
 import { DwsRefusedError, DwsThrottledError, DwsUnavailableError } from './errors.ts';
 
-export const USER_AGENT = 'ewr-compliance-pipeline/1 (+https://github.com/Absence0760/ewr-compliance)';
+export const USER_AGENT = 'ewr-compliance-pipeline/1 (+https://github.com/jaredhoward-dev/ewr-compliance)';
 export const REQUEST_INTERVAL_MS = 1000;
 /** A two-year daily page is ~20 kB and twenty years ~200 kB: anything near this is not the table. */
 export const MAX_BYTES = 4 * 1024 * 1024;

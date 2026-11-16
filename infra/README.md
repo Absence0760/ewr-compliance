@@ -47,7 +47,7 @@ mkdir -p ~/github/infra-secrets/ewr-compliance && cp ~/github/templates/infra/bo
 ```
 
 ```
-gh api repos/Absence0760/ewr-compliance/actions/oidc/customization/sub --jq .sub_claim_prefix
+gh api repos/jaredhoward-dev/ewr-compliance/actions/oidc/customization/sub --jq .sub_claim_prefix
 ```
 
 **Before H2: the workstation's SSO profiles** (once per workstation; Runbook D in `project-mgmt`'s `docs/runbooks.md`). The bootstrap needs two profiles in `~/.aws/config`: `mgmt`, the organisation's management account, and `dns-parent`, the account that owns the parent zone (`parent_domain`). Add whichever `aws configure list-profiles` doesn't list. Each asks for the SSO start URL and the SSO region: they are the organisation's IAM Identity Center access portal, the address you sign in to AWS through (the management account's Identity Center console shows it under Settings, "AWS access portal URL"), and the region it lives in (`project-mgmt`'s `docs/architecture.md` § IAM Identity Center). Use the same session name for both, so one sign-in covers them. Pick the management account and `AdministratorAccess` for the first:
@@ -89,33 +89,33 @@ The account's details are in the summary it prints at the end: keep the account 
 Stage 4's GitHub settings were applied ahead of it on 2026-11-07 (the plan's Q5, issue 1): `main`'s protection (a PR for every change, enforced on admins, `CI gate` required, linear history) and the `production` environment, with you as its required reviewer and deployment rules for `main` and tags `api@*` and `pipeline@*`. Stage 4 sets the same protection and reviewer again, which changes nothing. Check both afterwards:
 
 ```
-gh api repos/Absence0760/ewr-compliance/branches/main/protection --jq '.required_status_checks.contexts, .enforce_admins.enabled'
+gh api repos/jaredhoward-dev/ewr-compliance/branches/main/protection --jq '.required_status_checks.contexts, .enforce_admins.enabled'
 ```
 
 It should list `CI gate`, then `true`.
 
 ```
-gh api repos/Absence0760/ewr-compliance/environments/production/deployment-branch-policies --jq '.branch_policies[] | "\(.type) \(.name)"'
+gh api repos/jaredhoward-dev/ewr-compliance/environments/production/deployment-branch-policies --jq '.branch_policies[] | "\(.type) \(.name)"'
 ```
 
-It should list `branch main`, `tag api@*` and `tag pipeline@*`. If stage 4's environment update cleared them, add each back: `gh api -X POST repos/Absence0760/ewr-compliance/environments/production/deployment-branch-policies -f name='api@*' -f type=tag` (and the same for `main` with `type=branch`, and `pipeline@*`).
+It should list `branch main`, `tag api@*` and `tag pipeline@*`. If stage 4's environment update cleared them, add each back: `gh api -X POST repos/jaredhoward-dev/ewr-compliance/environments/production/deployment-branch-policies -f name='api@*' -f type=tag` (and the same for `main` with `type=branch`, and `pipeline@*`).
 
 Three more settings, set 2026-11-07 after the pre-deploy review, which keep one stolen GitHub login from deploying its own API code. Stage 4 may write the environment again, so check them too:
 
 ```
-gh api repos/Absence0760/ewr-compliance/environments/production --jq .can_admins_bypass
+gh api repos/jaredhoward-dev/ewr-compliance/environments/production --jq .can_admins_bypass
 ```
 
 It should print `false`: an admin can't skip the deploy approval.
 
 ```
-gh api repos/Absence0760/ewr-compliance/rulesets --jq '.[] | select(.target == "tag") | .name'
+gh api repos/jaredhoward-dev/ewr-compliance/rulesets --jq '.[] | select(.target == "tag") | .name'
 ```
 
 It should print `release-tags`: only an admin creates, moves or deletes an `api@*` or `pipeline@*` tag.
 
 ```
-gh api repos/Absence0760/ewr-compliance/actions/permissions --jq .sha_pinning_required
+gh api repos/jaredhoward-dev/ewr-compliance/actions/permissions --jq .sha_pinning_required
 ```
 
 It should print `true`: a workflow can't use an action by tag or branch.
@@ -252,29 +252,29 @@ It should print `text/javascript` and the immutable cache line.
 2. Store it as this repo's Actions secret (paste at the hidden prompt):
 
 ```
-gh secret set AUTH_KIT_READ_TOKEN --app actions -R Absence0760/ewr-compliance
+gh secret set AUTH_KIT_READ_TOKEN --app actions -R jaredhoward-dev/ewr-compliance
 ```
 
 3. And as its Dependabot secret, the same way:
 
 ```
-gh secret set AUTH_KIT_READ_TOKEN --app dependabot -R Absence0760/ewr-compliance
+gh secret set AUTH_KIT_READ_TOKEN --app dependabot -R jaredhoward-dev/ewr-compliance
 ```
 
 4. Check both exist (names only, never the value): each list shows `AUTH_KIT_READ_TOKEN`.
 
 ```
-gh secret list --app actions -R Absence0760/ewr-compliance
+gh secret list --app actions -R jaredhoward-dev/ewr-compliance
 ```
 
 ```
-gh secret list --app dependabot -R Absence0760/ewr-compliance
+gh secret list --app dependabot -R jaredhoward-dev/ewr-compliance
 ```
 
 5. Check CI can use it: run CI on `main` and look at the `Server (typecheck, tests, bundle)` job. It should install, test and bundle, not warn that the secret is unavailable.
 
 ```
-gh workflow run ci.yml --ref main -R Absence0760/ewr-compliance
+gh workflow run ci.yml --ref main -R jaredhoward-dev/ewr-compliance
 ```
 
 Tick each box on auth-kit#2 as you go. Until the secret is set, CI's `server` job warns and passes, `deploy-lambdas.yml` fails at its preflight, and Dependabot's `server/` job fails with "Secret Not Found".
@@ -298,7 +298,7 @@ AWS can refuse a new account. `--query 'Details.ReviewDetails'` then shows `"Sta
 **H10. Deploy the API.** In GitHub, check the `production` environment still has you as its required reviewer and its deployment rules (`main`, and tags `api@*` and `pipeline@*`: the checks after H3). Then set the Actions secret `AWS_DEPLOY_ROLE_ARN` to the bootstrap's `ewr-compliance-deploy` role (the ARN in H3's summary; the command prompts for it), and the variables `AWS_REGION` = `af-south-1` and `API_FUNCTION_NAME` = the second command's output. Then publish a release and approve its deploy:
 
 ```
-gh secret set AWS_DEPLOY_ROLE_ARN --repo Absence0760/ewr-compliance --app actions
+gh secret set AWS_DEPLOY_ROLE_ARN --repo jaredhoward-dev/ewr-compliance --app actions
 ```
 
 ```
@@ -306,11 +306,11 @@ cd ~/github/ewr-compliance && AWS_PROFILE=ewr-compliance terraform -chdir=infra 
 ```
 
 ```
-gh variable set AWS_REGION --body af-south-1 --repo Absence0760/ewr-compliance && gh variable set API_FUNCTION_NAME --body ewr-compliance-api --repo Absence0760/ewr-compliance
+gh variable set AWS_REGION --body af-south-1 --repo jaredhoward-dev/ewr-compliance && gh variable set API_FUNCTION_NAME --body ewr-compliance-api --repo jaredhoward-dev/ewr-compliance
 ```
 
 ```
-gh release create api@0.1.0 --target main --generate-notes --repo Absence0760/ewr-compliance
+gh release create api@0.1.0 --target main --generate-notes --repo jaredhoward-dev/ewr-compliance
 ```
 
 Then `curl -s https://<domain>/api/me` should print the 401 JSON (`"signin":"/signin/"`), not the stub's 503.
@@ -364,11 +364,11 @@ Not before DWS grants API access: an application was sent on 2026-11-07 (`docs/h
 2. Deploy the pipeline as in H10 (the `production` environment already allows tags `pipeline@*`): set the variable, and publish a release and approve it.
 
 ```
-gh variable set DWS_FUNCTION_NAME --body ewr-compliance-dws --repo Absence0760/ewr-compliance
+gh variable set DWS_FUNCTION_NAME --body ewr-compliance-dws --repo jaredhoward-dev/ewr-compliance
 ```
 
 ```
-gh release create pipeline@0.1.0 --target main --generate-notes --repo Absence0760/ewr-compliance
+gh release create pipeline@0.1.0 --target main --generate-notes --repo jaredhoward-dev/ewr-compliance
 ```
 
 3. Upload the station list. `tools/deploy.sh real` does it last, after the site; on its own it is below. It says so and does nothing while `dws_enabled` is off, and stops with an error, uploading nothing, if it can't read `terraform output` (sign in again and rerun it):
