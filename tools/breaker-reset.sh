@@ -16,9 +16,11 @@
 #   4. Only then reopens each function the breaker set to 0, to Terraform's value. The API's is, in
 #      order: BREAKER_RESET_API_CONCURRENCY (a number, or "none"); `terraform -chdir=infra output
 #      -raw api_reserved_concurrency`; api_reserved_concurrency in the tfvars (EWR_TFVARS, default
-#      ~/github/infra-secrets/ewr-compliance/prod.tfvars; a readable file without the line is
-#      "none", unreserved). With none of the three it refuses (exit 2) before changing anything,
-#      rather than guess "unreserved" and leave the API uncapped. The DWS pipeline goes back to
+#      ~/github/infra-secrets/ewr-compliance/prod.tfvars.sops; a path ending in .sops is decrypted
+#      with `sops` as the profile, only into a pipe, never to a file; a plaintext path is read as it
+#      is; a readable file without the line is "none", unreserved, and one that won't decrypt is
+#      unreadable). With none of the three it refuses (exit 2) before changing anything, rather
+#      than guess "unreserved" and leave the API uncapped. The DWS pipeline goes back to
 #      unreserved (Terraform reserves it none). A function not at 0 is left as it is.
 #   5. Redrives nothing, on purpose. The API has no queue. The pipeline's DLQ holds only daily runs'
 #      {"mode":"daily"} events, which the next day's run makes redundant (infra/dws.tf), so it reports
@@ -26,14 +28,15 @@
 #      plan again (infra/README.md H11, step 5).
 #
 # Region: BREAKER_RESET_REGION, else `terraform -chdir=infra output -raw aws_region`, else af-south-1.
-# Needs the AWS CLI and the profile's credentials; it reads no secret.
-# Tests: tools/breaker-reset.test.ts, with a fake `aws` on PATH.
+# Needs the AWS CLI and the profile's credentials, and `sops` for the default tfvars. It prints no
+# secret: of the decrypted tfvars it keeps only the one number.
+# Tests: tools/breaker-reset.test.ts, with a fake `aws`, `terraform` and `sops` on PATH.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 profile=${AWS_PROFILE:-ewr-compliance}
 project=ewr-compliance
-tfvars=${EWR_TFVARS:-$HOME/github/infra-secrets/ewr-compliance/prod.tfvars}
+tfvars=${EWR_TFVARS:-$HOME/github/infra-secrets/ewr-compliance/prod.tfvars.sops}
 
 region=${BREAKER_RESET_REGION:-}
 if [ -z "$region" ]; then
@@ -59,10 +62,27 @@ if [ -z "$api_concurrency" ]; then
 	api_concurrency=$(AWS_PROFILE="$profile" terraform -chdir="$root/infra" output -raw api_reserved_concurrency 2>/dev/null || true)
 	api_source="terraform output"
 fi
+tfvars_line='s/^[[:space:]]*api_reserved_concurrency[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p'
+tfvars_note=""
 if [ -z "$api_concurrency" ] && [ -r "$tfvars" ]; then
-	api_concurrency=$(sed -nE 's/^[[:space:]]*api_reserved_concurrency[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$tfvars" | head -n 1)
-	api_concurrency=${api_concurrency:-none}
-	api_source="$tfvars"
+	found=""
+	readable=1
+	case $tfvars in
+		*.sops)
+			# The plaintext goes only through this pipe; sed and sops both read to the end, so a
+			# failure here is the decrypt's (pipefail), never a SIGPIPE.
+			if ! found=$(AWS_PROFILE="$profile" sops --decrypt --input-type binary --output-type binary "$tfvars" 2>/dev/null | sed -nE "$tfvars_line"); then
+				readable=0
+				tfvars_note=" ($tfvars would not decrypt as profile $profile: run 'aws sso login --profile $profile' and check sops is installed)"
+			fi
+			;;
+		*) found=$(sed -nE "$tfvars_line" "$tfvars") ;;
+	esac
+	if [ "$readable" = 1 ]; then
+		api_concurrency=${found%%$'\n'*}
+		api_concurrency=${api_concurrency:-none}
+		api_source="$tfvars"
+	fi
 fi
 case $api_concurrency in
 	'' | none | [1-9] | [1-9][0-9]) ;;
@@ -94,8 +114,8 @@ fi
 case " $prefixes " in
 	*" api "*)
 		if [ -z "$api_concurrency" ]; then
-			echo "Can't tell the API's reserved concurrency: no BREAKER_RESET_API_CONCURRENCY, no 'terraform output api_reserved_concurrency' (run where infra/ is initialised), and no readable $tfvars." >&2
-			echo "Set BREAKER_RESET_API_CONCURRENCY to the number in prod.tfvars (or none if it sets none) and run again. Nothing was changed." >&2
+			echo "Can't tell the API's reserved concurrency: no BREAKER_RESET_API_CONCURRENCY, no 'terraform output api_reserved_concurrency' (run where infra/ is initialised), and no readable $tfvars$tfvars_note." >&2
+			echo "Set BREAKER_RESET_API_CONCURRENCY to the number in prod.tfvars.sops (or none if it sets none) and run again. Nothing was changed." >&2
 			exit 2
 		fi
 		;;

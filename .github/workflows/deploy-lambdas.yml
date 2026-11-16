@@ -13,7 +13,7 @@ name: Deploy Lambdas
 #   preflight  no environment, no AWS. Refuses unless the tag is api@semver or pipeline@semver, its
 #              commit is on main with a green `CI gate`, and the configuration is set:
 #              AWS_DEPLOY_ROLE_ARN and the AWS_REGION variable, and for the API the
-#              AUTH_KIT_READ_TOKEN secret (read access to the private auth-kit, Absence0760/auth-kit#2)
+#              AUTH_KIT_READ_TOKEN secret (read access to the private auth-kit, jaredhoward-dev/auth-kit#2)
 #              and the API_FUNCTION_NAME variable, for the pipeline the DWS_FUNCTION_NAME variable. A
 #              missing one fails here, saying which, never later and never silently.
 #   deploy     `environment: production`: GitHub pauses for the required reviewer, and only then can
@@ -97,7 +97,7 @@ jobs:
           git merge-base --is-ancestor "$sha" origin/main || fail "$RELEASE_TAG ($sha) is not on main."
           gate=$(gh api "repos/$REPO/commits/$sha/check-runs?check_name=CI%20gate" --jq '[.check_runs[] | select(.conclusion == "success")] | length')
           [ "$gate" -gt 0 ] || fail "CI gate has not passed on $sha. Wait for CI, or fix it first."
-          [ "$component" != api ] || [ "$HAS_AUTH_KIT_TOKEN" = true ] || fail "The AUTH_KIT_READ_TOKEN secret is not set, so the build can't install the private auth-kit. Set it up as Absence0760/auth-kit#2 says (a fine-grained token, Contents: read on auth-kit only), as an Actions secret."
+          [ "$component" != api ] || [ "$HAS_AUTH_KIT_TOKEN" = true ] || fail "The AUTH_KIT_READ_TOKEN secret is not set, so the build can't install the private auth-kit. Set it up as jaredhoward-dev/auth-kit#2 says (a fine-grained token, Contents: read on auth-kit only), as an Actions secret."
           [ "$HAS_DEPLOY_ROLE" = true ] || fail "The AWS_DEPLOY_ROLE_ARN secret is not set (infra/README.md, H10)."
           [ "$AWS_REGION" = af-south-1 ] || fail "The AWS_REGION variable must be af-south-1, not '$AWS_REGION' (infra/README.md, H10)."
           [ "$component" != api ] || [ "$API_FUNCTION_NAME" = ewr-compliance-api ] || fail "The API_FUNCTION_NAME variable must be ewr-compliance-api (terraform output api_function_name), not '$API_FUNCTION_NAME'."
@@ -129,16 +129,16 @@ jobs:
           ref: ${{ needs.preflight.outputs.sha }}
           persist-credentials: false
 
-      # pnpm fetches auth-kit from git@github.com:Absence0760/auth-kit (the lockfile's form); this
+      # pnpm fetches auth-kit from git@github.com:jaredhoward-dev/auth-kit (the lockfile's form); this
       # rewrites that one repo, and only it, to HTTPS with the read-only token.
       - name: Read access to auth-kit
         if: needs.preflight.outputs.component == 'api'
         env:
           TOKEN: ${{ secrets.AUTH_KIT_READ_TOKEN }}
         run: |
-          if [ -z "$TOKEN" ]; then echo "::error::AUTH_KIT_READ_TOKEN is not set (Absence0760/auth-kit#2)."; exit 1; fi
-          for from in "git@github.com:Absence0760/auth-kit" "ssh://git@github.com/Absence0760/auth-kit" "https://github.com/Absence0760/auth-kit"; do
-            git config --global --add url."https://x-access-token:${TOKEN}@github.com/Absence0760/auth-kit".insteadOf "$from"
+          if [ -z "$TOKEN" ]; then echo "::error::AUTH_KIT_READ_TOKEN is not set (jaredhoward-dev/auth-kit#2)."; exit 1; fi
+          for from in "git@github.com:jaredhoward-dev/auth-kit" "ssh://git@github.com/jaredhoward-dev/auth-kit" "https://github.com/jaredhoward-dev/auth-kit"; do
+            git config --global --add url."https://x-access-token:${TOKEN}@github.com/jaredhoward-dev/auth-kit".insteadOf "$from"
           done
 
       - name: Set up pnpm
@@ -163,7 +163,7 @@ jobs:
         env:
           TOKEN: ${{ secrets.AUTH_KIT_READ_TOKEN }}
         run: |
-          trap 'git config --global --remove-section "url.https://x-access-token:${TOKEN}@github.com/Absence0760/auth-kit" 2>/dev/null || true' EXIT
+          trap 'git config --global --remove-section "url.https://x-access-token:${TOKEN}@github.com/jaredhoward-dev/auth-kit" 2>/dev/null || true' EXIT
           pnpm install --frozen-lockfile
 
       - name: Bundle

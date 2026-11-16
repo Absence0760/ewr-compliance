@@ -17,7 +17,7 @@ Branch protection on `main` (`CONTRIBUTING.md`) requires `CI gate` green, every 
 
 ## Docs-only and draft PRs
 
-The `changes` job decides whether anything besides `docs/`, `.claude/` and `*.md` changed, and a draft counts as no. If not, the `test` and `e2e` jobs are skipped (skipped counts as passing). Jobs that still run: `claude-tooling`, `gitleaks`, and the `pull_request_target` workflows (`pr-title-lint`, `labeler`, `pr-mergeable`).
+The `changes` job decides whether anything besides `docs/`, `.claude/` and `*.md` changed, and a draft counts as no. If not, the `test` and `e2e` jobs are skipped (skipped counts as passing). Jobs that still run: `claude-tooling`, `secret-scan`, and the `pull_request_target` workflows (`pr-title-lint`, `labeler`, `pr-mergeable`).
 
 ## Reproduce a failed job locally
 
@@ -32,7 +32,7 @@ Run the same command the job runs.
 | Server (`server`) | `cd server && pnpm install --frozen-lockfile && pnpm check && pnpm test && pnpm build` (needs access to auth-kit; CI skips with a warning until `AUTH_KIT_READ_TOKEN` exists) |
 | Pipeline (`pipeline`) | `cd pipeline && pnpm install --frozen-lockfile && pnpm check && pnpm test && pnpm build` |
 | Terraform (`terraform`) | `bin/check-infra.sh` |
-| gitleaks | the finding names the file and rule; remove the secret and treat it as leaked (rotate), never allowlist a real one |
+| Secret scan (`secret-scan`, TruffleHog) | the annotation names the status, detector, file, line and commit; a verified or unknown finding fails it: treat it as leaked and rotate first, never mark a real one `trufflehog:ignore` |
 | `pr-title-lint` | the title is `type(scope): lowercase subject` with no trailing period |
 
 Read the failure first: `gh run view <run> --log-failed`. An e2e failure uploads `playwright-results` as an artifact: `e2e/test-results/` (traces) and `e2e/playwright-report/`, for `gh run download <run> -n playwright-results`.

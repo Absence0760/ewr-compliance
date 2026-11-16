@@ -4,7 +4,7 @@ Terraform for hosting EWR Compliance on AWS: the account skeleton (P1), the gate
 
 Nothing here is applied by CI. The operator plans and applies from the workstation, with their own SSO profile. CI runs `bin/check-infra.sh` only: `terraform fmt`, `validate`, and the plan-only tests in `tests/` against mocked providers, with no credentials.
 
-This repo is public. The account ID stays in `backend.config` (gitignored), and the values (domain, zone, alert mailbox, public keys) in `infra-secrets/ewr-compliance/prod.tfvars`. `terraform.tfvars.example` shows the shape with placeholders.
+This repo is public. The account ID stays in `backend.config` (gitignored), and the values (domain, zone, alert mailbox, public keys) in `infra-secrets/ewr-compliance/prod.tfvars.sops`, encrypted with sops under the account's `alias/ewr-compliance-sops` KMS key. `terraform.tfvars.example` shows the shape with placeholders.
 
 ## Files
 
@@ -150,7 +150,9 @@ aws configure sso --profile ewr-compliance
 aws sts get-caller-identity --profile ewr-compliance
 ```
 
-**H6. First apply (P1).** Write `backend.config`, create `infra-secrets/ewr-compliance/prod.tfvars` from `terraform.tfvars.example` (with `budget_monthly_usd = 20` once H5's billing access is on, and `site_enabled = false`), then init, plan and apply. Look the zone ID up for the tfvars with the third command.
+**H6. First apply (P1).** Write `backend.config`, create `infra-secrets/ewr-compliance/prod.tfvars.sops` from `terraform.tfvars.example` (with `budget_monthly_usd = 20` once H5's billing access is on, and `site_enabled = false`), then init, plan and apply. Look the zone ID up for the tfvars with the third command.
+
+The tfvars are sops-encrypted (binary format, the `ewr-compliance` profile's KMS key). Create or edit them with `cd ~/github/infra-secrets && AWS_PROFILE=ewr-compliance sops ewr-compliance/prod.tfvars.sops` (from `infra-secrets`, so its `.sops.yaml` picks the key for a new file), and commit and push the encrypted file. The plan reads them through `sops exec-file`, which writes the plaintext to a temporary file readable only by you, outside the repo, and deletes it when the plan ends. The saved plan itself holds the variable values in plaintext: `*.tfplan` is gitignored, and the apply command deletes it once applied.
 
 From here on every `terraform` and `aws` command runs as the `ewr-compliance` profile: each command below names it (`AWS_PROFILE=ewr-compliance` before `terraform`, `--profile ewr-compliance` on `aws`), so each works on its own in a new terminal. `tools/deploy.sh`, `tools/dws-stations.sh` and the operator tools use it by default. A command that fails with an expired token needs `aws sso login --profile ewr-compliance` first.
 
@@ -167,11 +169,11 @@ aws route53 list-hosted-zones-by-name --dns-name <domain> --profile ewr-complian
 ```
 
 ```
-cd ~/github/ewr-compliance/infra && AWS_PROFILE=ewr-compliance terraform plan -var-file=$HOME/github/infra-secrets/ewr-compliance/prod.tfvars -out=prod.tfplan
+cd ~/github/ewr-compliance/infra && AWS_PROFILE=ewr-compliance sops exec-file --no-fifo --filename prod.tfvars $HOME/github/infra-secrets/ewr-compliance/prod.tfvars.sops 'terraform plan -var-file={} -out=prod.tfplan'
 ```
 
 ```
-cd ~/github/ewr-compliance/infra && AWS_PROFILE=ewr-compliance terraform apply prod.tfplan
+cd ~/github/ewr-compliance/infra && AWS_PROFILE=ewr-compliance terraform apply prod.tfplan && rm -f prod.tfplan
 ```
 
 Then confirm the two SNS subscription emails (one a topic). Exit: the apply is clean and both budgets are listed.
@@ -186,7 +188,7 @@ aws budgets describe-budgets --account-id "$(aws sts get-caller-identity --profi
 umask 077 && openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "${XDG_RUNTIME_DIR:-/dev/shm}/ewr-cf-signing.key" && openssl pkey -in "${XDG_RUNTIME_DIR:-/dev/shm}/ewr-cf-signing.key" -pubout
 ```
 
-Put the public key in `prod.tfvars` under `cloudfront_public_keys` with a name such as the month (`"2026-11"`), set `site_enabled = true`, then plan and apply as in H6. The certificate validates in the delegated zone, and the distribution takes several minutes. Then put the private key into its secret, from the file:
+Put the public key in `prod.tfvars.sops` (`AWS_PROFILE=ewr-compliance sops ~/github/infra-secrets/ewr-compliance/prod.tfvars.sops`) under `cloudfront_public_keys` with a name such as the month (`"2026-11"`), set `site_enabled = true`, then plan and apply as in H6. The certificate validates in the delegated zone, and the distribution takes several minutes. Then put the private key into its secret, from the file:
 
 ```
 aws secretsmanager put-secret-value --secret-id ewr-compliance/cloudfront-signing-key --secret-string "file://${XDG_RUNTIME_DIR:-/dev/shm}/ewr-cf-signing.key" --region af-south-1 --profile ewr-compliance
@@ -244,9 +246,9 @@ It should print `text/javascript` and the immutable cache line.
 
 **What the first deploy showed (2026-11-08):** CloudFront checks the signature on a trusted-key-group behaviour *before* it runs the viewer-request function, which AWS's documentation doesn't say. So a signed-out request gets 403 with the sign-in page (the custom error response), never the function's 302 or 401 JSON: still closed, and still leading to sign-in. The sign-in page, served for a 403, takes the address it was served at as where to go next; the app's own fetches read a 403 as signed out, as a 401 (`src/lib/users/siteFetch.ts`); and the 403 carries none of the security headers, so the sign-in page's own frame guard is what keeps it from being framed (`docs/hosting.md` § Headers, Where a function doesn't reach). If a later deploy shows a 302 instead, CloudFront has changed the order: say so, as the app copes with both.
 
-**H0. Read access to `auth-kit`.** CI's `server` job, `deploy-lambdas.yml` and Dependabot's `server/` updates all install the private auth-kit, through the secret `AUTH_KIT_READ_TOKEN`. **One token serves every repo that installs auth-kit** (this one and pitman): Absence0760/auth-kit#2 is the one procedure, and its boxes are where each step is ticked. Claude never handles the token; each `gh secret set` prompts you for it.
+**H0. Read access to `auth-kit`.** CI's `server` job, `deploy-lambdas.yml` and Dependabot's `server/` updates all install the private auth-kit, through the secret `AUTH_KIT_READ_TOKEN`. **One token serves every repo that installs auth-kit** (this one and pitman): jaredhoward-dev/auth-kit#2 is the one procedure, and its boxes are where each step is ticked. Claude never handles the token; each `gh secret set` prompts you for it.
 
-1. **The token, once for every consumer.** If pitman already made it, take it from Bitwarden (the entry "GitHub token: auth-kit read") and go to step 2. Otherwise, at https://github.com/settings/personal-access-tokens/new: token name `auth-kit read (CI + Dependabot)`; resource owner `Absence0760`; expiration custom, about a year out; repository access **Only select repositories**, `Absence0760/auth-kit`; repository permissions **Contents: Read-only** (GitHub adds Metadata: Read-only), nothing else. Generate it, and save it in Bitwarden as "GitHub token: auth-kit read" with the expiry date in the note. Add a calendar reminder to rotate it two weeks before.
+1. **The token, once for every consumer.** If pitman already made it, take it from Bitwarden (the entry "GitHub token: auth-kit read") and go to step 2. Otherwise, at https://github.com/settings/personal-access-tokens/new: token name `auth-kit read (CI + Dependabot)`; resource owner `jaredhoward-dev`; expiration custom, about a year out; repository access **Only select repositories**, `jaredhoward-dev/auth-kit`; repository permissions **Contents: Read-only** (GitHub adds Metadata: Read-only), nothing else. Generate it, and save it in Bitwarden as "GitHub token: auth-kit read" with the expiry date in the note. Add a calendar reminder to rotate it two weeks before.
 2. Store it as this repo's Actions secret (paste at the hidden prompt):
 
 ```
@@ -279,7 +281,7 @@ Tick each box on auth-kit#2 as you go. Until the secret is set, CI's `server` jo
 
 **Rotating it** (before the expiry, or at once if it may have leaked): make a new token as in step 1, set it in every consumer's two secrets (steps 2 and 3 here, and pitman's), check (steps 4 and 5), then delete the old token on GitHub and update Bitwarden. Revoke first if it leaked: the jobs fail until the new one is set, which is the safe way round.
 
-**H8. Sign-in (P3): apply, then SES production access.** Set `auth_enabled = true` in `prod.tfvars`, then plan and apply as in H6. That makes the table, the API (answering 503 until its code is deployed, H10), its runtime secret and SES. Then check that the domain identity's DKIM is verified (it takes up to a day after the records exist):
+**H8. Sign-in (P3): apply, then SES production access.** Set `auth_enabled = true` in `prod.tfvars.sops` (`AWS_PROFILE=ewr-compliance sops ~/github/infra-secrets/ewr-compliance/prod.tfvars.sops`), then plan and apply as in H6. That makes the table, the API (answering 503 until its code is deployed, H10), its runtime secret and SES. Then check that the domain identity's DKIM is verified (it takes up to a day after the records exist):
 
 ```
 cd ~/github/ewr-compliance && aws sesv2 get-email-identity --email-identity "$(AWS_PROFILE=ewr-compliance terraform -chdir=infra output -raw ses_identity)" --region af-south-1 --profile ewr-compliance --query 'DkimAttributes.Status'
@@ -358,7 +360,7 @@ Then `curl -s https://<domain>/api/me` should print the 401 JSON (`"signin":"/si
 
 Not before DWS grants API access: an application was sent on 2026-11-07 (`docs/hosting.md` § The DWS store). The site goes live without this step, and comes back to it when access arrives. Record the grant in the private plan, and keep the letter with the client's records, never in this repo. If the grant is for an API rather than the HyData page `pipeline/src/hydata.ts` reads, the pipeline changes first.
 
-1. Set `dws_enabled = true` in `prod.tfvars` (and `dws_contact`, a mailbox DWS can write to before blocking us, if you want one in the user agent), then plan and apply as in H6. That makes the bucket, the pipeline (which fails until its code is deployed), the backfill and the empty DWS API key secret. The daily rule is made disabled.
+1. Set `dws_enabled = true` in `prod.tfvars.sops` (`AWS_PROFILE=ewr-compliance sops ~/github/infra-secrets/ewr-compliance/prod.tfvars.sops`; and `dws_contact`, a mailbox DWS can write to before blocking us, if you want one in the user agent), then plan and apply as in H6. That makes the bucket, the pipeline (which fails until its code is deployed), the backfill and the empty DWS API key secret. The daily rule is made disabled.
 2. Deploy the pipeline as in H10 (the `production` environment already allows tags `pipeline@*`): set the variable, and publish a release and approve it.
 
 ```
@@ -393,7 +395,7 @@ cd ~/github/ewr-compliance && aws stepfunctions start-execution --state-machine-
 
 If it fails (the `dws-backfill-failed` alarm), the failed window's error is the execution's. Nothing in it is retried that would ask DWS again: start the same command again to resume once the reason is understood (not straight after `DwsRefused`). It skips what is stored.
 
-6. Turn the daily pull on: `dws_schedule_enabled = true` in `prod.tfvars`, then plan and apply. That also makes the lag alarm.
+6. Turn the daily pull on: `dws_schedule_enabled = true` in `prod.tfvars.sops` (`AWS_PROFILE=ewr-compliance sops ~/github/infra-secrets/ewr-compliance/prod.tfvars.sops`), then plan and apply as in H6. That also makes the lag alarm.
 
 7. When DWS issues an API key: write it alone to a file in memory-backed storage, as for H7's key (`${XDG_RUNTIME_DIR:-/dev/shm}/dws-api-key.txt`), put it into its secret from the file, and delete the file. Nothing reads it yet (the HyData page needs none); the pipeline's API source is a later change.
 
