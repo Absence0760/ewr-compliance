@@ -10,7 +10,7 @@ Find any secret or credential in this repo. The app has no secrets of its own an
    - secret-shaped literals in tracked files and in history (`git log -p -S`), any tracked `.env`;
    - an API key or token in `src/`, or `import.meta.env` / `process.env` reads;
    - workflow `env:` blocks with literals, secrets echoed in logs, and any secret other than `GITHUB_TOKEN`;
-   - what gitleaks has reported (`gh issue list --label secret-scan`).
+   - what the weekly TruffleHog sweep has reported (`gh issue list --label secret-scan`).
 2. Relay its report as is: findings most severe first, then Clean.
 
 Never paste a found value into the report: name the variable and where it is. A secret that ever reached git history needs rotating, whatever happened after.
