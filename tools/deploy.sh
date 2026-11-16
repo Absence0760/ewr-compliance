@@ -127,10 +127,16 @@ if [ "$mode" = real ]; then
 		"$fetched" "$dirty" "$head" "$([ -n "$upstream" ] && printf '"%s"' "$upstream" || echo null)" \
 		"$([ -n "$upstream_sha" ] && printf '"%s"' "$upstream_sha" || echo null)" "$ahead" "$behind")
 fi
+# This script, deploy-check.mjs and dws-stations.sh run from here, not from the build's worktree, so
+# tools/ here (committed or not, untracked files included) must be exactly origin/main's.
+tools_match=true
+if ! git -C "$root" diff --quiet "$sha" -- tools/ || [ -n "$(git -C "$root" ls-files --others --exclude-standard -- tools/)" ]; then
+	tools_match=false
+fi
 bool() { [ "$1" = 1 ] && echo true || echo false; }
 echo "Sources:"
-node "$check" sources "$(printf '{"mode":"%s","dryRun":%s,"allowDirty":%s,"skipCiCheck":%s,"sha":"%s","ci":"%s","private":%s}' \
-	"$mode" "$(bool "$dry_run")" "$(bool "$allow_dirty")" "$(bool "$skip_ci_check")" "$sha" "$ci" "$private_json")"
+node "$check" sources "$(printf '{"mode":"%s","dryRun":%s,"allowDirty":%s,"skipCiCheck":%s,"sha":"%s","ci":"%s","toolsMatch":%s,"private":%s}' \
+	"$mode" "$(bool "$dry_run")" "$(bool "$allow_dirty")" "$(bool "$skip_ci_check")" "$sha" "$ci" "$tools_match" "$private_json")"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ewr-deploy.XXXXXX")
 tree="$work/tree"

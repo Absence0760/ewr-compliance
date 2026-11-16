@@ -74,7 +74,8 @@ export function checkBuild({ files, indexJson, mode }) {
 /**
  * What tools/deploy.sh finds out about its sources before it builds, judged. A real deploy publishes the
  * private repo's HEAD, so that must be exactly what its upstream holds: nothing uncommitted, unpushed or
- * behind. Either deploy publishes origin/main, so CI's `CI gate` must have passed on that commit. A dry
+ * behind. Either deploy publishes origin/main, so CI's `CI gate` must have passed on that commit. The
+ * deploy's own scripts run from this checkout, not the build's worktree, so its tools/ must be origin/main's. A dry
  * run reports what a real run would refuse, as warnings, and refuses nothing.
  *
  * @param {object} s
@@ -83,6 +84,7 @@ export function checkBuild({ files, indexJson, mode }) {
  * @param {boolean} s.allowDirty `--allow-dirty`: publish the private repo as it stands
  * @param {boolean} s.skipCiCheck `--skip-ci-check`: publish origin/main whatever CI said
  * @param {string} s.sha origin/main's commit
+ * @param {boolean} [s.toolsMatch] whether this checkout's tools/ is exactly origin/main's (false refuses)
  * @param {'success' | 'failure' | 'pending' | 'none' | 'unknown'} s.ci `CI gate` on that commit;
  *   unknown when it could not be asked (no gh, no network)
  * @param {{ fetched: boolean, dirty: boolean, head: string, upstream: string | null, upstreamSha: string | null, ahead: number, behind: number } | null} s.private
@@ -105,6 +107,10 @@ export function checkSources(s) {
 		if (why) refuse.push(`CI gate on origin/main (${short(s.sha)}) ${why}. Wait for it or fix it, or pass --skip-ci-check.`);
 	} else if (s.ci !== 'success') warnings.push(`CI gate on origin/main (${short(s.sha)}) is ${s.ci}, published anyway (--skip-ci-check).`);
 	lines.push(`CI gate: ${s.skipCiCheck ? `${s.ci}, not required (--skip-ci-check)` : s.ci}`);
+
+	// deploy.sh, this file and dws-stations.sh run from the checkout deploy.sh was started in, while the
+	// build is origin/main's: a stale checkout ran an outdated station-list step on 2026-11-12.
+	if (s.toolsMatch === false) refuse.push(`This checkout's tools/ is not origin/main's (${short(s.sha)}), so the deploy's own scripts would be stale or changed. Run git merge --ff-only origin/main here (or commit and land your change), then run it again.`);
 
 	if (s.mode === 'real') {
 		const p = s.private;

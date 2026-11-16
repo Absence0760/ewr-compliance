@@ -146,6 +146,17 @@ describe('checkSources', () => {
 		expect(r.lines[1]).toBe('Private: bbbbbbbbbbbb, upstream origin/main at bbbbbbbbbbbb (1 ahead, 0 behind), with uncommitted changes');
 	});
 
+	it("refuses when this checkout's tools/ is not origin/main's, for the sample too, and not past --allow-dirty", () => {
+		for (const over of [{}, { mode: 'sample' as const, private: null }, { allowDirty: true }]) {
+			const r = checkSources(sources({ ...over, toolsMatch: false }));
+			expect(r.errors).toEqual([expect.stringContaining("This checkout's tools/ is not origin/main's (aaaaaaaaaaaa)")]);
+		}
+		expect(checkSources(sources({ toolsMatch: true })).errors).toEqual([]);
+		const dry = checkSources(sources({ dryRun: true, toolsMatch: false }));
+		expect(dry.errors).toEqual([]);
+		expect(dry.warnings).toEqual([expect.stringMatching(/^a real run would refuse: This checkout's tools\//)]);
+	});
+
 	it('ignores the private repo for the sample', () => {
 		expect(checkSources(sources({ mode: 'sample', private: null }))).toEqual({ errors: [], warnings: [], lines: ['CI gate: success'] });
 	});
